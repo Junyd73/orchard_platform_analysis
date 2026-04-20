@@ -1,0 +1,6 @@
+__pycache__/
+*.db
+venv/
+.vscode/
+# 로컬 API 키 등 (ORCHARD_PSIS_API_KEY 등)
+.orchard.env
