@@ -1,0 +1,34 @@
+# -*- coding: utf-8 -*-
+"""관찰 마스터 공통 상수 — PC DBManager 코드값과 동일 (신규 코드 금지)."""
+
+# 관찰 대상 (OB01)
+OBS_TARGET_TREE_CD = "OB010100"
+OBS_TARGET_FRUIT_CD = "OB010200"
+OBS_TARGET_PEST_CD = "OB010400"
+
+# 관찰 유형 (OY01) — 대상별 기본 매핑
+OBS_TYPE_FRUIT_CD = "OY010300"  # 과실
+OBS_TYPE_DISEASE_CD = "OY010400"  # 병해 (병해충 기본)
+
+# 심각도 / 처리상태 / AI — 임시(기본정보) 저장 기본값
+OBS_SEVERITY_NORMAL_CD = "OS010100"  # 정상
+OBS_PROGRESS_WATCHING_CD = "OP010100"  # 관찰 중
+OBS_AI_STATUS_NONE = "NONE"
+
+# 모바일 기본정보에서 선택 가능한 대상
+MOBILE_BASIC_TARGET_CDS = frozenset({OBS_TARGET_PEST_CD, OBS_TARGET_FRUIT_CD})
+
+TARGET_DEFAULT_OBS_TYPE = {
+    OBS_TARGET_PEST_CD: OBS_TYPE_DISEASE_CD,
+    OBS_TARGET_FRUIT_CD: OBS_TYPE_FRUIT_CD,
+}
+
+# 작성·관리 상태 (observation_lifecycle 재export)
+from app.core.observation_lifecycle import (  # noqa: E402
+    OBS_RECORD_ACTIVE,
+    OBS_RECORD_DELETED,
+    OBS_STATUS_CANCELLED,
+    OBS_STATUS_COMPLETED,
+    OBS_STATUS_DRAFT,
+    PUBLISHED_FILTER_SQL,
+)
