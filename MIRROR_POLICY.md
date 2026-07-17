@@ -94,39 +94,44 @@ Analysis (orchard_platform_analysis)
 
 ## 5. 동기화 절차
 
-### 5.1 일반 흐름
+### 5.1 기본 흐름 (권장) — GitHub Actions
+
+로컬 개발 폴더는 **`orchard_platform` 하나만** 둔다.  
+로컬에 `orchard_platform_analysis` 클론을 상시 둘 필요 없다.
 
 ```text
-1. Private에서 기능 완료 + 테스트
-2. 공개 가능 범위 식별 (본 문서 §3)
-3. scripts/mirror/preflight.py 실행 → 통과 필수
-4. scripts/mirror/sync_to_analysis.py --target <analysis_repo_path>
-5. Analysis 저장소에서 diff 검토
-6. Analysis에 별도 커밋·푸시 (Private와 커밋 해시 일치 불필요)
+1. orchard_platform 에서 기능 완료 + 테스트
+2. Private main 에 commit / push
+3. GitHub Actions「Sync whitelist to analysis」자동 실행
+   - preflight.py 통과 필수
+   - manifest whitelist 만 Analysis 로 복사
+   - Analysis main 에 별도 커밋·푸시 (force-push 금지)
 ```
 
-### 5.2 명령 예시
+필수 Secret (Private 저장소):
+
+| Secret | 용도 |
+|--------|------|
+| `TARGET_REPO_TOKEN` | `orchard_platform_analysis` 에 push 가능한 PAT |
+
+수동 재실행: Actions → Sync whitelist to analysis → Run workflow
+
+### 5.2 로컬 수동 동기화 (비상용)
+
+CI 장애 시에만 임시 클론으로 실행한다. 상시 로컬 Analysis 폴더는 권장하지 않는다.
 
 ```powershell
-# 사전 점검 (실패 시 exit 1 → Push 중단)
 python scripts/mirror/preflight.py
-
-# 동기화 (Analysis 클론 경로 지정)
-python scripts/mirror/sync_to_analysis.py --target ..\orchard_platform_analysis
-
-# Analysis 쪽에서
-cd ..\orchard_platform_analysis
-git status
-git add -A
-git commit -m "feat(mobile): 생육관찰 목록 카드 ODS 동기화"
-git push
+git clone --depth 1 https://github.com/Junyd73/orchard_platform_analysis.git $env:TEMP\orchard_platform_analysis
+python scripts/mirror/sync_to_analysis.py --target $env:TEMP\orchard_platform_analysis
+# Analysis 임시 폴더에서 commit / push 후 삭제
 ```
 
 ### 5.3 환경 변수
 
 | 변수 | 설명 |
 |------|------|
-| `MIRROR_TARGET` | Analysis 저장소 루트 (기본: 형제 디렉터리 `orchard_platform_analysis`) |
+| `MIRROR_TARGET` | (수동 동기화 시) Analysis 체크아웃 경로 |
 
 ## 6. Push 전 자동 점검
 
@@ -168,7 +173,10 @@ Private 커밋과 **분리**한다. Analysis 커밋 메시지 접두사:
 ## 9. 보안 정책
 
 - Analysis는 **공개** 저장소로 간주한다. 민감 정보는 Private에만 둔다.
-- 동기화는 자동 CI가 아닌 **개발자 승인 후** 수동 실행을 기본으로 한다 (필요 시 CI에 preflight만 연동 가능).
+- 동기화 기본 경로는 **GitHub Actions** 이다. Private `main` push 후 whitelist만 Analysis에 반영한다.
+- Actions는 **force-push 하지 않는다.** (이전 UI-only force sync 워크플로는 폐기)
+- `TARGET_REPO_TOKEN` 은 Private 저장소 Secret으로만 보관한다. 코드·문서에 토큰을 넣지 않는다.
+- 로컬에 Analysis 클론을 두면 작업 폴더 혼동 위험이 있으므로 **상시 유지하지 않는 것**을 권장한다.
 - manifest 변경은 대표님 승인 후 반영한다.
 
 ## 10. 관련 파일
@@ -180,6 +188,7 @@ Private 커밋과 **분리**한다. Analysis 커밋 메시지 접두사:
 | `scripts/mirror/preflight.py` | Push 전 보안 점검 |
 | `scripts/mirror/sync_to_analysis.py` | 선별 복사 |
 | `scripts/mirror/README.md` | 실행 안내 |
+| `.github/workflows/sync_to_analysis.yml` | Private main → Analysis 자동 미러 |
 
 ## 11. 향후 모바일 기능 동기화
 

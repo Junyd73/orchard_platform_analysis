@@ -7,6 +7,8 @@ Usage (repo root):
   python scripts/mirror/sync_to_analysis.py --dry-run
 
 환경 변수 MIRROR_TARGET 으로 기본 대상 경로 지정 가능.
+CI에서는 GitHub Actions가 임시 클론에 --target 을 지정한다.
+로컬에 orchard_platform_analysis 상시 폴더는 권장하지 않는다.
 """
 
 from __future__ import annotations
