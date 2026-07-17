@@ -1,0 +1,179 @@
+# orchard_platform → orchard_platform_analysis Whitelist
+# 전체 복사 금지. MIRROR_POLICY.md 참고.
+
+version: 1
+target_repo: orchard_platform_analysis
+
+# glob: repo root 기준. dest: analysis repo root 기준 (없으면 동일 상대경로)
+include:
+  # --- Mobile: UI & ODS ---
+  - src: mobile/src/components/**
+    dest: mobile/src/components/**
+
+  - src: mobile/src/features/**
+    dest: mobile/src/views/**
+
+  - src: mobile/src/shared/layouts/**
+    dest: mobile/src/layouts/**
+
+  - src: mobile/src/router/**
+    dest: mobile/src/router/**
+
+  - src: mobile/src/shared/stores/**
+    dest: mobile/src/composables/stores/**
+
+  - src: mobile/src/shared/constants/**
+    dest: mobile/src/composables/constants/**
+
+  - src: mobile/src/shared/obsDraft.ts
+    dest: mobile/src/composables/obsDraft.ts
+
+  - src: mobile/src/types/**
+    dest: mobile/src/types/**
+
+  - src: mobile/src/styles.css
+    dest: mobile/src/styles/global.css
+
+  - src: mobile/src/design-system/**
+    dest: mobile/src/design-system/**
+
+  - src: mobile/src/shared/mediaUrl.ts
+    dest: mobile/src/utils/mediaUrl.ts
+
+  - src: mobile/src/shared/photoCardLabel.ts
+    dest: mobile/src/utils/photoCardLabel.ts
+
+  - src: mobile/src/shared/fileInput.ts
+    dest: mobile/src/utils/fileInput.ts
+
+  - src: mobile/src/assets/icons/.gitkeep
+    dest: mobile/src/assets/icons/.gitkeep
+
+  - src: mobile/src/assets/images/.gitkeep
+    dest: mobile/src/assets/images/.gitkeep
+
+  - src: mobile/public/favicon.svg
+    dest: mobile/public/favicon.svg
+
+  - src: mobile/public/icons/**
+    dest: mobile/public/icons/**
+
+  - src: mobile/design-system/README.md
+    dest: mobile/design-system/README.md
+
+  # --- Mobile: Docs (ODS · SCR · Architecture · API) ---
+  - src: mobile/docs/ODS/**
+    dest: docs/ODS/**
+
+  - src: mobile/docs/screens/**
+    dest: docs/mobile/screens/**
+
+  - src: mobile/src/assets/ods/scr004/**
+    dest: mobile/src/assets/ods/scr004/**
+
+  - src: mobile/src/assets/ods/common/**
+    dest: mobile/src/assets/ods/common/**
+
+  # Analysis 단독 import 해소용 API 스텁 (런타임 HTTP 없음)
+  - src: mobile/src/api-mirror/README.md
+    dest: mobile/src/api/README.md
+
+  - src: mobile/src/api-mirror/client.ts
+    dest: mobile/src/api/client.ts
+
+  - src: mobile/src/api-mirror/observations.ts
+    dest: mobile/src/api/observations.ts
+
+  - src: mobile/src/api-mirror/observationPhotos.ts
+    dest: mobile/src/api/observationPhotos.ts
+
+  - src: mobile/src/api-mirror/farms.ts
+    dest: mobile/src/api/farms.ts
+
+  - src: mobile/src/api-mirror/health.ts
+    dest: mobile/src/api/health.ts
+
+  - src: mobile/docs/architecture/**
+    dest: docs/architecture/mobile/**
+
+  - src: mobile/docs/api/**
+    dest: docs/mobile/api/**
+
+  - src: mobile/docs/README.md
+    dest: docs/mobile/README.md
+
+  - src: mobile/docs/DEVELOPMENT_RULE.md
+    dest: docs/mobile/DEVELOPMENT_RULE.md
+
+  # --- Root design docs ---
+  - src: docs/mobile_observation_design.md
+    dest: docs/design/mobile_observation_design.md
+
+  - src: docs/ODS_LOCATION.md
+    dest: docs/design/ODS_LOCATION.md
+
+  # --- Server (공개 계약·로직) ---
+  - src: server/app/schemas/**
+    dest: server/schemas/**
+
+  - src: server/app/services/**
+    dest: server/services/**
+
+  - src: server/app/routers/**
+    dest: server/routers/**
+
+  - src: server/app/core/observation_lifecycle.py
+    dest: server/models/observation_lifecycle.py
+
+  - src: server/app/core/observation_constants.py
+    dest: server/models/observation_constants.py
+
+  - src: server/app/core/observation_delete_policy.py
+    dest: server/models/observation_delete_policy.py
+
+  - src: server/tests/**
+    dest: server/tests/**
+
+  - src: server/docs/api_master_data.md
+    dest: server/docs/api_master_data.md
+
+  - src: server/docs/master_data_usage.md
+    dest: server/docs/master_data_usage.md
+
+  - src: server/docs/sqlite_schema_baseline.md
+    dest: server/docs/sqlite_schema_baseline.md
+
+  # --- Mirror tooling (meta) ---
+  - src: scripts/mirror/**
+    dest: scripts/mirror/**
+
+  - src: MIRROR_POLICY.md
+    dest: MIRROR_POLICY.md
+
+# 명시적 제외 (include에 걸려도 스킵)
+exclude_globs:
+  - "**/.env"
+  - "**/.env.*"
+  - "**/*.db"
+  - "**/*.sqlite"
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - "**/.venv/**"
+  - "**/__pycache__/**"
+  - "**/*.log"
+  - "**/uploads/**"
+  - mobile/src/assets/hero.png
+  - mobile/src/api/**
+  - mobile/src/__tests__/**
+  - server/docs/local_mobile_access.md
+  - server/app/core/config.py
+  - server/app/db/**
+  - server/app/api/**
+  - start_project_dev.ps1
+  - scripts/detect_lan_ip.py
+  - scripts/generate_mobile_qr.py
+preflight_relaxed_globs:
+  - server/docs/**
+  - mobile/src/shared/mediaUrl.ts
+  - mobile/src/utils/mediaUrl.ts
+  - scripts/mirror/preflight.py
