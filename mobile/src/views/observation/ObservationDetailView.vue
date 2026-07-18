@@ -34,27 +34,34 @@ import ObservationDeleteDialog from '@/views/observation/components/ObservationD
 import AiAnalysisPanel from '@/views/observation/components/AiAnalysisPanel.vue'
 import PhotoPanel from '@/views/observation/components/PhotoPanel.vue'
 import {
+  GUIDE_DASH,
+  GUIDE_LOADING,
+  GUIDE_STOCK_EMPTY,
+  GUIDE_USAGE_ROWS,
   PSIS_AI_GUIDE_INTRO,
   PSIS_CARD_TITLE,
   PSIS_LOAD_FAILED,
-  PSIS_NOT_FOUND,
   PSIS_PREPARING,
   PSIS_RECOMMEND_SECTION,
   PSIS_RESULT_TITLE,
   PSIS_STOCK_SECTION,
-  PSIS_USAGE_FIELDS,
   PSIS_USAGE_SECTION,
   aiLabel,
   aiTone,
+  guideDisplayText,
+  guideIntroMessage,
+  guideMatchLabel,
   isAiCompleteStatus,
   severityTone,
+  type GuideUiPhase,
 } from '@/views/observation/scr004DetailUi'
 import { useAppStore } from '@/composables/stores/app'
 import type {
   ObservationAiAnalysisResponse,
   ObservationDetail,
   ObservationPhotoItem,
-  ObservationPsisResponse,
+  ObservationSmartSprayGuideResponse,
+  SmartSprayGuideItem,
 } from '@/types/observation'
 
 const route = useRoute()
@@ -73,7 +80,8 @@ const copyOk = ref(false)
 
 const canDelete = computed(() => Boolean(detail.value?.can_delete))
 const photoIds = ref<string[]>([])
-const psisResult = ref<ObservationPsisResponse | null>(null)
+const guidePhase = ref<GuideUiPhase>('idle')
+const guide = ref<ObservationSmartSprayGuideResponse | null>(null)
 
 const contextLine = computed(() => {
   const d = detail.value
@@ -151,25 +159,27 @@ function severityLabel(d: ObservationDetail): string {
 
 const aiComplete = computed(() => isAiCompleteStatus(detail.value?.ai_status || ''))
 
-const psisIntro = computed(() => {
-  const s = String(detail.value?.ai_status || '').toUpperCase()
-  if (s === 'ANALYZING') return PSIS_PREPARING
-  if (s === 'FAILED') return PSIS_LOAD_FAILED
-  if (aiComplete.value) return PSIS_AI_GUIDE_INTRO
-  return ''
+const guideIntro = computed(() => {
+  if (guidePhase.value === 'loading') return GUIDE_LOADING
+  if (guidePhase.value === 'idle') {
+    const s = String(detail.value?.ai_status || '').toUpperCase()
+    if (s === 'ANALYZING') return PSIS_PREPARING
+    if (s === 'FAILED') return PSIS_LOAD_FAILED
+    if (aiComplete.value) return PSIS_AI_GUIDE_INTRO
+    return ''
+  }
+  return guideIntroMessage(guidePhase.value)
 })
 
-const psisCases = computed(() => psisResult.value?.similar_cases || [])
-const psisEmptyMessage = computed(() => {
-  if (psisResult.value && psisResult.value.psis_status === 'EMPTY') {
-    return '확정 병해충에 대한 등록정보가 없습니다.'
-  }
-  if (psisResult.value && !psisResult.value.success) {
-    return PSIS_LOAD_FAILED
-  }
-  return PSIS_NOT_FOUND
-})
-const psisPrimary = computed(() => psisCases.value[0] || null)
+const guideItems = computed(() => guide.value?.items || [])
+const stockItems = computed(() => guideItems.value.filter((i) => i.has_stock))
+const recommendItems = computed(() => guideItems.value)
+const usagePrimary = computed(
+  (): SmartSprayGuideItem | null => stockItems.value[0] || recommendItems.value[0] || null,
+)
+const showGuideSections = computed(
+  () => guidePhase.value === 'ready' || guidePhase.value === 'loading',
+)
 
 function onPhotosChanged(photos: ObservationPhotoItem[]) {
   photoIds.value = photos.map((p) => p.photo_id)
@@ -190,8 +200,25 @@ function onAiConfirmed(payload: {
   }
 }
 
-function onPsisUpdated(res: ObservationPsisResponse | null) {
-  psisResult.value = res
+function onGuideUpdated(payload: {
+  phase: GuideUiPhase
+  guide: ObservationSmartSprayGuideResponse | null
+}) {
+  guidePhase.value = payload.phase
+  // 로딩 중에는 기존 데이터 유지(깜빡임 최소화)
+  if (payload.phase === 'loading') return
+  guide.value = payload.guide
+}
+
+function usageValue(item: SmartSprayGuideItem, key: string): string {
+  const map: Record<string, string | null | undefined> = {
+    dilution: item.dilution,
+    phi: item.phi,
+    max_use_count: item.max_use_count,
+    usage_method: item.usage_method,
+    toxicity: item.toxicity,
+  }
+  return guideDisplayText(map[key])
 }
 
 async function load() {
@@ -273,7 +300,8 @@ onMounted(async () => {
 })
 
 watch(obsId, () => {
-  psisResult.value = null
+  guidePhase.value = 'idle'
+  guide.value = null
   photoIds.value = []
   void load()
 })
@@ -362,7 +390,7 @@ watch(showDeleteDlg, async (open) => {
                 crop-name="배"
                 @updated="onAiUpdated"
                 @confirmed="onAiConfirmed"
-                @psis-updated="onPsisUpdated"
+                @guide-updated="onGuideUpdated"
               />
             </div>
             <img class="card__illus" :src="aiIllustration" alt="" aria-hidden="true">
@@ -376,60 +404,63 @@ watch(showDeleteDlg, async (open) => {
                 <img class="card-title__icon" :src="iconPsis" alt="" aria-hidden="true">
                 {{ PSIS_CARD_TITLE }}
               </h2>
-              <p v-if="psisIntro" class="ext-hint ext-hint--guide">{{ psisIntro }}</p>
+              <p v-if="guideIntro" class="ext-hint ext-hint--guide">{{ guideIntro }}</p>
               <div class="guide-block" aria-label="방제 가이드 결과">
                 <h3 class="guide-block__title">{{ PSIS_RESULT_TITLE }}</h3>
-                <section class="guide-sec">
-                  <h4 class="guide-sec__h">① {{ PSIS_STOCK_SECTION }}</h4>
-                  <p class="guide-sec__empty">보유 재고 연동은 후속 단계에서 제공합니다.</p>
-                </section>
-                <section class="guide-sec">
-                  <h4 class="guide-sec__h">② {{ PSIS_RECOMMEND_SECTION }}</h4>
-                  <ul v-if="psisCases.length" class="guide-list">
-                    <li v-for="c in psisCases" :key="c.snapshot_id || c.rank">
-                      {{ c.pesticide_name || c.brand_name || '—' }}
-                      <span v-if="c.dilution"> · {{ c.dilution }}</span>
-                    </li>
-                  </ul>
-                  <p v-else class="guide-sec__empty">{{ psisEmptyMessage }}</p>
-                </section>
-                <section class="guide-sec">
-                  <h4 class="guide-sec__h">③ {{ PSIS_USAGE_SECTION }}</h4>
-                  <template v-if="psisPrimary">
-                    <ul class="guide-usage">
-                      <li class="guide-usage__row">
-                        <span class="guide-usage__k">적용 병해충</span>
-                        <span class="guide-usage__v">{{ psisPrimary.disease_name || '—' }}</span>
-                      </li>
-                      <li class="guide-usage__row">
-                        <span class="guide-usage__k">적용 작물</span>
-                        <span class="guide-usage__v">{{ psisPrimary.crop_name || '—' }}</span>
-                      </li>
-                      <li class="guide-usage__row">
-                        <span class="guide-usage__k">희석배수</span>
-                        <span class="guide-usage__v">{{ psisPrimary.dilution || '—' }}</span>
-                      </li>
-                      <li class="guide-usage__row">
-                        <span class="guide-usage__k">사용 시기</span>
-                        <span class="guide-usage__v">{{ psisPrimary.preharvest_interval || '—' }}</span>
-                      </li>
-                      <li class="guide-usage__row">
-                        <span class="guide-usage__k">안전사용기준</span>
-                        <span class="guide-usage__v">{{ psisPrimary.max_use_count || '—' }}</span>
-                      </li>
-                      <li class="guide-usage__row">
-                        <span class="guide-usage__k">주의사항</span>
-                        <span class="guide-usage__v">{{ psisPrimary.usage_method || '—' }}</span>
+
+                <template v-if="showGuideSections">
+                  <section class="guide-sec">
+                    <h4 class="guide-sec__h">① {{ PSIS_STOCK_SECTION }}</h4>
+                    <p v-if="guidePhase === 'loading' && !stockItems.length" class="guide-sec__empty">
+                      {{ GUIDE_LOADING }}
+                    </p>
+                    <ul v-else-if="stockItems.length" class="guide-list">
+                      <li v-for="c in stockItems" :key="`stock-${c.item_id || c.rank}`">
+                        {{ guideDisplayText(c.pesticide_name || c.brand_name) }}
+                        · 재고 {{ c.stock_qty }}{{ c.stock_unit || '' }}
+                        <span v-if="c.last_used_date">
+                          · 최근 사용 {{ c.last_used_date }}
+                        </span>
                       </li>
                     </ul>
-                  </template>
-                  <ul v-else class="guide-usage">
-                    <li v-for="field in PSIS_USAGE_FIELDS" :key="field" class="guide-usage__row">
-                      <span class="guide-usage__k">{{ field }}</span>
-                      <span class="guide-usage__v">—</span>
-                    </li>
-                  </ul>
-                </section>
+                    <p v-else class="guide-sec__empty">{{ GUIDE_STOCK_EMPTY }}</p>
+                  </section>
+                  <section class="guide-sec">
+                    <h4 class="guide-sec__h">② {{ PSIS_RECOMMEND_SECTION }}</h4>
+                    <p v-if="guidePhase === 'loading' && !recommendItems.length" class="guide-sec__empty">
+                      {{ GUIDE_LOADING }}
+                    </p>
+                    <ul v-else-if="recommendItems.length" class="guide-list">
+                      <li v-for="c in recommendItems" :key="`rec-${c.snapshot_id || c.rank}`">
+                        {{ guideDisplayText(c.pesticide_name || c.brand_name) }}
+                        <span v-if="c.active_ingredient">
+                          · {{ c.active_ingredient }}
+                        </span>
+                        · {{ guideMatchLabel(c.match_level) }}
+                      </li>
+                    </ul>
+                    <p v-else class="guide-sec__empty">{{ GUIDE_DASH }}</p>
+                  </section>
+                  <section class="guide-sec">
+                    <h4 class="guide-sec__h">③ {{ PSIS_USAGE_SECTION }}</h4>
+                    <ul class="guide-usage">
+                      <li
+                        v-for="row in GUIDE_USAGE_ROWS"
+                        :key="row.key"
+                        class="guide-usage__row"
+                      >
+                        <span class="guide-usage__k">{{ row.label }}</span>
+                        <span class="guide-usage__v">
+                          {{
+                            usagePrimary
+                              ? usageValue(usagePrimary, row.key)
+                              : GUIDE_DASH
+                          }}
+                        </span>
+                      </li>
+                    </ul>
+                  </section>
+                </template>
               </div>
             </div>
             <img class="card__illus" :src="psisIllustration" alt="" aria-hidden="true">

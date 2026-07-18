@@ -93,5 +93,67 @@ export const PSIS_USAGE_FIELDS = [
   '주의사항',
 ] as const
 
+/** 스마트 방제 가이드(2단계) — Smart Spray Guide API 연동 문구 */
+export const GUIDE_LOADING = '방제 가이드를 불러오는 중…'
+export const GUIDE_EMPTY = '등록된 스마트 방제 정보가 없습니다.'
+export const GUIDE_NO_CANDIDATE = 'AI 후보를 먼저 확정하세요.'
+export const GUIDE_ERROR = '스마트 방제 정보를 불러오지 못했습니다.'
+export const GUIDE_STOCK_EMPTY = '보유 재고가 없습니다.'
+export const GUIDE_DASH = '—'
+
+export type GuideUiPhase =
+  | 'idle'
+  | 'loading'
+  | 'ready'
+  | 'empty'
+  | 'no_candidate'
+  | 'error'
+
+/** 서버 guide_status → UI phase (PARTIAL은 데이터 있음 → ready) */
+export function guideUiPhaseFromStatus(status: string): GuideUiPhase {
+  const s = String(status || '')
+    .trim()
+    .toUpperCase()
+  if (s === 'READY' || s === 'PARTIAL') return 'ready'
+  if (s === 'EMPTY') return 'empty'
+  if (s === 'NO_CANDIDATE') return 'no_candidate'
+  if (s === 'ERROR') return 'error'
+  return 'idle'
+}
+
+export function guideIntroMessage(phase: GuideUiPhase): string {
+  if (phase === 'loading') return GUIDE_LOADING
+  if (phase === 'empty') return GUIDE_EMPTY
+  if (phase === 'no_candidate') return GUIDE_NO_CANDIDATE
+  if (phase === 'error') return GUIDE_ERROR
+  if (phase === 'ready') return PSIS_AI_GUIDE_INTRO
+  return ''
+}
+
+/** match_level → 사용자 표시 (내부 코드 비노출) */
+export function guideMatchLabel(matchLevel?: string | null): string {
+  const s = String(matchLevel || '')
+    .trim()
+    .toUpperCase()
+  if (s === 'MATCH') return '등록됨'
+  if (s === 'PARTIAL') return '부분 일치'
+  if (s === 'NOT_FOUND') return '정보 부족'
+  return '정보 부족'
+}
+
+export function guideDisplayText(value?: string | number | null): string {
+  if (value == null) return GUIDE_DASH
+  const s = String(value).trim()
+  return s || GUIDE_DASH
+}
+
+export const GUIDE_USAGE_ROWS = [
+  { key: 'dilution', label: '희석배수' },
+  { key: 'phi', label: 'PHI(수확 전 안전사용기간)' },
+  { key: 'max_use_count', label: '최대 사용횟수' },
+  { key: 'usage_method', label: '사용방법' },
+  { key: 'toxicity', label: '주의사항' },
+] as const
+
 export const AI_PENDING_API_HINT =
   'AI 분석 결과가 없습니다. 아래에서 분석을 요청해 주세요.'

@@ -6,6 +6,7 @@ import {
   confirmObservationAiCandidate,
   fetchObservationAiAnalysis,
   fetchObservationPsis,
+  fetchObservationSmartSprayGuide,
   requestObservationAiAnalysis,
   requestObservationPsis,
 } from '@/api/observationAi'
@@ -19,11 +20,17 @@ import {
   urgencyLabel,
 } from '@/shared/aiErrorMessages'
 import { OBS_AI_PHOTO_MAX_COUNT } from '@/composables/constants/app'
-import { aiHint, aiLabel } from '@/views/observation/scr004DetailUi'
+import {
+  aiHint,
+  aiLabel,
+  guideUiPhaseFromStatus,
+  type GuideUiPhase,
+} from '@/views/observation/scr004DetailUi'
 import type {
   ObservationAiAnalysisResponse,
   ObservationAiCandidate,
   ObservationPsisResponse,
+  ObservationSmartSprayGuideResponse,
 } from '@/types/observation'
 
 export type AiPanelPhase =
@@ -58,6 +65,12 @@ const emit = defineEmits<{
     },
   ]
   psisUpdated: [result: ObservationPsisResponse | null]
+  guideUpdated: [
+    payload: {
+      phase: GuideUiPhase
+      guide: ObservationSmartSprayGuideResponse | null
+    },
+  ]
 }>()
 
 const phase = ref<AiPanelPhase>('idle')
@@ -84,10 +97,12 @@ function onSelectCandidate(raw: number | string) {
 let reqSeq = 0
 let confirmSeq = 0
 let psisSeq = 0
+let guideSeq = 0
 let loadAbort: AbortController | null = null
 let analyzeAbort: AbortController | null = null
 let confirmAbort: AbortController | null = null
 let psisAbort: AbortController | null = null
+let guideAbort: AbortController | null = null
 let alive = true
 
 const effectivePhotoIds = computed(() => {
@@ -208,9 +223,17 @@ async function loadCachedPsis(parentSeq: number) {
     if (cached.success && (cached.similar_cases?.length || cached.psis_status === 'EMPTY')) {
       applyPsisResult(cached)
     }
+    await loadSmartGuide()
   } catch {
     /* 캐시 조회 실패는 무시 — 확정 후 재조회 */
+    if (alive && parentSeq === reqSeq) await loadSmartGuide()
   }
+}
+
+function clearGuide() {
+  guideAbort?.abort()
+  guideSeq += 1
+  emit('guideUpdated', { phase: 'idle', guide: null })
 }
 
 function clearPsis() {
@@ -219,6 +242,7 @@ function clearPsis() {
   psisError.value = ''
   lastPsisKey.value = ''
   emit('psisUpdated', null)
+  clearGuide()
 }
 
 function applyPsisResult(res: ObservationPsisResponse) {
@@ -234,6 +258,36 @@ function applyPsisResult(res: ObservationPsisResponse) {
     psisError.value = ''
   }
   emit('psisUpdated', res)
+}
+
+/** PSIS 완료 후 Smart Spray Guide 조회 (기존 카드용) */
+async function loadSmartGuide() {
+  if (!props.farmCd || !props.obsId) return
+  const seq = ++guideSeq
+  const farm = props.farmCd
+  const oid = props.obsId
+  guideAbort?.abort()
+  guideAbort = new AbortController()
+  emit('guideUpdated', { phase: 'loading', guide: null })
+  try {
+    const res = await fetchObservationSmartSprayGuide(farm, oid, guideAbort.signal)
+    if (!alive || seq !== guideSeq) return
+    if (props.farmCd !== farm || props.obsId !== oid) return
+    if (!res.success) {
+      emit('guideUpdated', {
+        phase: 'error',
+        guide: res,
+      })
+      return
+    }
+    emit('guideUpdated', {
+      phase: guideUiPhaseFromStatus(res.guide_status),
+      guide: res,
+    })
+  } catch (err) {
+    if (!alive || seq !== guideSeq || isAbortError(err)) return
+    emit('guideUpdated', { phase: 'error', guide: null })
+  }
 }
 
 async function runAnalyze() {
@@ -397,6 +451,7 @@ async function runPsisSearch(forceRefresh: boolean) {
 
   const key = `${props.farmCd}|${props.obsId}|${crop}|${disease}|${forceRefresh ? '1' : '0'}`
   if (!forceRefresh && key === lastPsisKey.value && psisPhase.value === 'success') {
+    await loadSmartGuide()
     return
   }
 
@@ -426,6 +481,7 @@ async function runPsisSearch(forceRefresh: boolean) {
     if (props.farmCd !== farm || props.obsId !== oid) return
     lastPsisKey.value = `${farm}|${oid}|${crop}|${disease}|0`
     applyPsisResult(res)
+    await loadSmartGuide()
   } catch (err) {
     if (!alive || seq !== psisSeq || isAbortError(err)) return
     psisPhase.value = 'error'
@@ -435,6 +491,8 @@ async function runPsisSearch(forceRefresh: boolean) {
       psisError.value = '공식 농약정보 조회에 실패했습니다.'
     }
     emit('psisUpdated', null)
+    // PSIS 실패여도 가이드는 DB 기준으로 조회 시도
+    await loadSmartGuide()
   }
 }
 
@@ -442,10 +500,12 @@ function resetForObsChange() {
   reqSeq += 1
   confirmSeq += 1
   psisSeq += 1
+  guideSeq += 1
   loadAbort?.abort()
   analyzeAbort?.abort()
   confirmAbort?.abort()
   psisAbort?.abort()
+  guideAbort?.abort()
   analysis.value = null
   errorMessage.value = ''
   confirmError.value = ''
@@ -492,10 +552,12 @@ onBeforeUnmount(() => {
   reqSeq += 1
   confirmSeq += 1
   psisSeq += 1
+  guideSeq += 1
   loadAbort?.abort()
   analyzeAbort?.abort()
   confirmAbort?.abort()
   psisAbort?.abort()
+  guideAbort?.abort()
 })
 
 defineExpose({
@@ -503,6 +565,7 @@ defineExpose({
   analyze: runAnalyze,
   confirm: runConfirm,
   searchPsis: runPsisSearch,
+  loadGuide: loadSmartGuide,
   phase,
   confirmPhase,
   psisPhase,
