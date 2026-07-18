@@ -11,10 +11,16 @@ import sys
 import uuid
 from pathlib import Path, PurePosixPath
 
-OBS_PHOTO_MAX_BYTES = 20 * 1024 * 1024
-OBS_THUMB_MAX_PX = 400
-OBS_PHOTO_MAX_COUNT = 5
-OBS_ALLOWED_EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+from core.observation_photo_policy import (
+    OBS_ALLOWED_EXTS,
+    OBS_PHOTO_MAX_BYTES,
+    OBS_PHOTO_MAX_COUNT,
+    OBS_THUMB_MAX_PX,
+    build_obs_photo_rel_dir,
+    safe_path_segment,
+)
+
+# 하위 호환
 _SAFE_SEG = re.compile(r"^[A-Za-z0-9._\-]+$")
 
 
@@ -30,19 +36,7 @@ def observation_media_root() -> Path:
 
 
 def _safe_seg(value: str, fallback: str = "X") -> str:
-    s = str(value or "").strip()
-    if not s or not _SAFE_SEG.match(s) or ".." in s:
-        return fallback
-    return s
-
-
-def build_obs_photo_rel_dir(farm_cd: str, obs_id: str, year: str) -> str:
-    """DB 저장용 relative POSIX 경로(디렉터리)."""
-    return str(
-        PurePosixPath(_safe_seg(farm_cd, "FARM"))
-        / _safe_seg(year, "0000")
-        / _safe_seg(obs_id, "OBS")
-    )
+    return safe_path_segment(value, fallback)
 
 
 def resolve_media_path(rel_path: str) -> Path | None:

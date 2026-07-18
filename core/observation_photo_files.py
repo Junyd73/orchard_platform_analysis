@@ -12,7 +12,7 @@ import io
 import uuid
 from pathlib import Path, PurePosixPath
 
-from core.observation_media import (
+from core.observation_photo_policy import (
     OBS_ALLOWED_EXTS,
     OBS_PHOTO_MAX_BYTES,
     OBS_THUMB_MAX_PX,

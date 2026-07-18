@@ -8,7 +8,15 @@ import json
 import sqlite3
 from typing import Any
 
-from core.db_manager import DBManager
+from core.observation_ai_constants import (
+    OBS_AI_STATUS_ANALYZED,
+    OBS_AI_STATUS_ANALYZING,
+    OBS_AI_STATUS_CONFIRMED,
+    OBS_AI_STATUS_FAILED,
+    OBS_AI_STATUS_NONE,
+    OBS_AI_STATUS_PARENT_CD,
+    OBS_AI_STATUS_REVIEW_REQUIRED,
+)
 
 _YN_Y = "Y"
 _YN_N = "N"
@@ -52,7 +60,7 @@ def _json_loads(raw, default=None):
         return default
 
 
-def ensure_observation_stage3_schema(db: DBManager) -> None:
+def ensure_observation_stage3_schema(db: Any) -> None:
     """Stage3 테이블·인덱스·AI 상태 공통코드 멱등 보장."""
     _ensure_ai_analysis_table(db)
     _ensure_ai_candidate_table(db)
@@ -61,7 +69,7 @@ def ensure_observation_stage3_schema(db: DBManager) -> None:
     _ensure_stage3_ai_status_codes(db)
 
 
-def _ensure_ai_analysis_table(db: DBManager) -> None:
+def _ensure_ai_analysis_table(db: Any) -> None:
     try:
         db.execute_query(
             """
@@ -115,7 +123,7 @@ def _ensure_ai_analysis_table(db: DBManager) -> None:
         print(f"[DB] ensure t_observation_ai_analysis: {e}")
 
 
-def _ensure_ai_candidate_table(db: DBManager) -> None:
+def _ensure_ai_candidate_table(db: Any) -> None:
     try:
         db.execute_query(
             """
@@ -143,7 +151,7 @@ def _ensure_ai_candidate_table(db: DBManager) -> None:
         print(f"[DB] ensure t_observation_ai_candidate: {e}")
 
 
-def _ensure_ai_photo_table(db: DBManager) -> None:
+def _ensure_ai_photo_table(db: Any) -> None:
     try:
         db.execute_query(
             """
@@ -160,7 +168,7 @@ def _ensure_ai_photo_table(db: DBManager) -> None:
         print(f"[DB] ensure t_observation_ai_photo: {e}")
 
 
-def _ensure_pesticide_snapshot_table(db: DBManager) -> None:
+def _ensure_pesticide_snapshot_table(db: Any) -> None:
     try:
         db.execute_query(
             """
@@ -212,7 +220,7 @@ def _ensure_pesticide_snapshot_table(db: DBManager) -> None:
         print(f"[DB] ensure t_observation_pesticide_snapshot: {e}")
 
 
-def _ensure_stage3_ai_status_codes(db: DBManager) -> None:
+def _ensure_stage3_ai_status_codes(db: Any) -> None:
     """신규 AI 상태 공통코드 멱등 추가(기존 OA01 보존)."""
     try:
         cur = db.conn.cursor()
@@ -226,11 +234,11 @@ def _ensure_stage3_ai_status_codes(db: DBManager) -> None:
 
     farms = db.execute_query("SELECT farm_cd FROM m_farm_info") or []
     farm_cds = [str(r[0]).strip() for r in farms if r and r[0]] or ["OR001"]
-    parent = DBManager.OBS_AI_STATUS_PARENT_CD
+    parent = OBS_AI_STATUS_PARENT_CD
     children = (
-        ("OA010700", DBManager.OBS_AI_STATUS_ANALYZING),
-        ("OA010800", DBManager.OBS_AI_STATUS_ANALYZED),
-        ("OA010900", DBManager.OBS_AI_STATUS_REVIEW_REQUIRED),
+        ("OA010700", OBS_AI_STATUS_ANALYZING),
+        ("OA010800", OBS_AI_STATUS_ANALYZED),
+        ("OA010900", OBS_AI_STATUS_REVIEW_REQUIRED),
     )
     now_sql = "datetime('now','localtime')"
     for farm_cd in farm_cds:
@@ -251,7 +259,7 @@ def _ensure_stage3_ai_status_codes(db: DBManager) -> None:
             )
 
 
-def generate_analysis_id(db: DBManager, farm_cd: str) -> str:
+def generate_analysis_id(db: Any, farm_cd: str) -> str:
     farm = (farm_cd or "").strip()
     digits = datetime.date.today().strftime("%Y%m%d")
     prefix = f"AIA{digits}-"
@@ -272,7 +280,7 @@ def generate_analysis_id(db: DBManager, farm_cd: str) -> str:
     return f"{prefix}{seq:03d}"
 
 
-def generate_snapshot_id(db: DBManager, farm_cd: str) -> str:
+def generate_snapshot_id(db: Any, farm_cd: str) -> str:
     farm = (farm_cd or "").strip()
     digits = datetime.date.today().strftime("%Y%m%d")
     prefix = f"PSS{digits}-"
@@ -294,7 +302,7 @@ def generate_snapshot_id(db: DBManager, farm_cd: str) -> str:
 
 
 def update_observation_ai_status(
-    db: DBManager, farm_cd: str, obs_id: str, ai_status: str, user_id: str
+    db: Any, farm_cd: str, obs_id: str, ai_status: str, user_id: str
 ) -> tuple[bool, str]:
     farm = (farm_cd or "").strip()
     oid = (obs_id or "").strip()
@@ -324,7 +332,7 @@ def update_observation_ai_status(
 
 
 def try_begin_observation_ai_analyzing(
-    db: DBManager, farm_cd: str, obs_id: str, user_id: str
+    db: Any, farm_cd: str, obs_id: str, user_id: str
 ) -> tuple[bool, str, str | None]:
     """조건부 ANALYZING 전환. 성공 (True, msg, prev_status), 충돌 (False, AI_BUSY, None).
 
@@ -340,8 +348,8 @@ def try_begin_observation_ai_analyzing(
     obs = db.get_observation(farm, oid)
     if not obs or (obs.get("use_yn") or _YN_Y) != _YN_Y:
         return False, "대상 관찰을 찾을 수 없습니다.", None
-    prev = str(obs.get("ai_status") or DBManager.OBS_AI_STATUS_NONE)
-    analyzing = DBManager.OBS_AI_STATUS_ANALYZING
+    prev = str(obs.get("ai_status") or OBS_AI_STATUS_NONE)
+    analyzing = OBS_AI_STATUS_ANALYZING
     now = _now_str()
     try:
         cur = db.conn.cursor()
@@ -369,7 +377,7 @@ def try_begin_observation_ai_analyzing(
 
 
 def save_ai_analysis_result(
-    db: DBManager,
+    db: Any,
     farm_cd: str,
     obs_id: str,
     *,
@@ -503,7 +511,7 @@ def save_ai_analysis_result(
 
 
 def restore_ai_status_after_failure(
-    db: DBManager,
+    db: Any,
     farm_cd: str,
     obs_id: str,
     user_id: str,
@@ -512,14 +520,14 @@ def restore_ai_status_after_failure(
 ) -> tuple[bool, str]:
     """실패 후 상태 복구: CONFIRMED면 유지, 그 외 FAILED. ANALYZING 잔류 금지."""
     target = (
-        DBManager.OBS_AI_STATUS_CONFIRMED
-        if str(prev_status or "").strip().upper() == DBManager.OBS_AI_STATUS_CONFIRMED
-        else DBManager.OBS_AI_STATUS_FAILED
+        OBS_AI_STATUS_CONFIRMED
+        if str(prev_status or "").strip().upper() == OBS_AI_STATUS_CONFIRMED
+        else OBS_AI_STATUS_FAILED
     )
     return update_observation_ai_status(db, farm_cd, obs_id, target, user_id)
 
 
-def _hydrate_analysis(db: DBManager, farm: str, rec: dict) -> dict:
+def _hydrate_analysis(db: Any, farm: str, rec: dict) -> dict:
     rec = dict(rec or {})
     aid = rec.get("analysis_id") or ""
     rec["additional_photos"] = _json_loads(rec.get("additional_photos_json"), [])
@@ -531,7 +539,7 @@ def _hydrate_analysis(db: DBManager, farm: str, rec: dict) -> dict:
 
 
 def get_ai_analysis(
-    db: DBManager, farm_cd: str, analysis_id: str
+    db: Any, farm_cd: str, analysis_id: str
 ) -> dict | None:
     """단건 상세(candidates·photo 포함). farm_cd 격리."""
     farm = (farm_cd or "").strip()
@@ -552,7 +560,7 @@ def get_ai_analysis(
 
 
 def get_latest_ai_attempt(
-    db: DBManager, farm_cd: str, obs_id: str
+    db: Any, farm_cd: str, obs_id: str
 ) -> dict | None:
     """성공·실패 포함한 최신 실행(시도)."""
     farm = (farm_cd or "").strip()
@@ -574,7 +582,7 @@ def get_latest_ai_attempt(
 
 
 def get_latest_ai_analysis(
-    db: DBManager, farm_cd: str, obs_id: str
+    db: Any, farm_cd: str, obs_id: str
 ) -> dict | None:
     """현재 유효 분석: 확정 후보가 있는 최신 OK, 없으면 최신 OK. 실패만 있으면 None.
 
@@ -622,7 +630,7 @@ def get_latest_ai_analysis(
 
 
 def list_ai_analysis_history(
-    db: DBManager, farm_cd: str, obs_id: str, limit: int = 20
+    db: Any, farm_cd: str, obs_id: str, limit: int = 20
 ) -> list[dict]:
     farm = (farm_cd or "").strip()
     oid = (obs_id or "").strip()
@@ -645,7 +653,7 @@ def list_ai_analysis_history(
 
 
 def list_ai_candidates(
-    db: DBManager, farm_cd: str, analysis_id: str
+    db: Any, farm_cd: str, analysis_id: str
 ) -> list[dict]:
     farm = (farm_cd or "").strip()
     aid = (analysis_id or "").strip()
@@ -668,7 +676,7 @@ def list_ai_candidates(
 
 
 def list_ai_photo_ids(
-    db: DBManager, farm_cd: str, analysis_id: str
+    db: Any, farm_cd: str, analysis_id: str
 ) -> list[str]:
     farm = (farm_cd or "").strip()
     aid = (analysis_id or "").strip()
@@ -686,7 +694,7 @@ def list_ai_photo_ids(
 
 
 def confirm_ai_candidate(
-    db: DBManager,
+    db: Any,
     farm_cd: str,
     analysis_id: str,
     candidate_seq: int,
@@ -751,7 +759,7 @@ def confirm_ai_candidate(
                 SET ai_status = ?, mod_id = ?, mod_dt = ?
                 WHERE farm_cd = ? AND obs_id = ? AND COALESCE(use_yn,'Y')='Y'
                 """,
-                (DBManager.OBS_AI_STATUS_CONFIRMED, uid, now, farm, oid),
+                (OBS_AI_STATUS_CONFIRMED, uid, now, farm, oid),
             )
         db.conn.commit()
         return True, "병해충 후보가 확정되었습니다."
@@ -768,7 +776,7 @@ def confirm_ai_candidate(
 
 
 def get_confirmed_candidate(
-    db: DBManager, farm_cd: str, analysis_id: str
+    db: Any, farm_cd: str, analysis_id: str
 ) -> dict | None:
     farm = (farm_cd or "").strip()
     aid = (analysis_id or "").strip()
@@ -790,7 +798,7 @@ def get_confirmed_candidate(
 
 
 def replace_pesticide_snapshots(
-    db: DBManager,
+    db: Any,
     farm_cd: str,
     obs_id: str,
     analysis_id: str | None,
@@ -911,7 +919,7 @@ def replace_pesticide_snapshots(
 
 
 def list_pesticide_snapshots(
-    db: DBManager,
+    db: Any,
     farm_cd: str,
     obs_id: str,
     *,
@@ -942,7 +950,7 @@ def list_pesticide_snapshots(
 
 
 def latest_pesticide_snapshot_group(
-    db: DBManager, farm_cd: str, obs_id: str, crop_name: str, disease_name: str
+    db: Any, farm_cd: str, obs_id: str, crop_name: str, disease_name: str
 ) -> tuple[list[dict], str | None]:
     """동일 작물·병명 스냅샷과 최신 fetched_at."""
     rows = list_pesticide_snapshots(

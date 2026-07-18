@@ -10,7 +10,7 @@ from app.services._core_path import ensure_repo_root_on_path
 
 ensure_repo_root_on_path()
 
-from core.observation_media import (  # noqa: E402
+from core.observation_photo_policy import (
     OBS_ALLOWED_EXTS,
     OBS_PHOTO_MAX_BYTES,
     OBS_PHOTO_MAX_COUNT,

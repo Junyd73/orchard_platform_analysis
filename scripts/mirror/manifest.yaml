@@ -125,6 +125,15 @@ include:
   - src: core/observation_photo_files.py
     dest: core/observation_photo_files.py
 
+  - src: core/observation_photo_policy.py
+    dest: core/observation_photo_policy.py
+
+  - src: core/observation_photo_db.py
+    dest: core/observation_photo_db.py
+
+  - src: core/observation_ai_constants.py
+    dest: core/observation_ai_constants.py
+
   - src: core/observation_photo_upload_application_service.py
     dest: core/observation_photo_upload_application_service.py
 

@@ -12,7 +12,11 @@ from typing import Any
 
 from core.ai.observation_ai_schema import PROMPT_VERSION
 from core.ai.observation_ai_service import ObservationAiService
-from core.db_manager import DBManager
+from core.observation_ai_constants import (
+    OBS_AI_STATUS_ANALYZED,
+    OBS_AI_STATUS_NONE,
+    OBS_AI_STATUS_REVIEW_REQUIRED,
+)
 from core.observation_safe_errors import (
     classify_ai_exception,
     safe_log,
@@ -39,7 +43,7 @@ class ObservationAiApplicationService:
 
     def run_analysis(
         self,
-        db: DBManager,
+        db: Any,
         *,
         farm_cd: str,
         obs_id: str,
@@ -70,7 +74,7 @@ class ObservationAiApplicationService:
             "error_code": "INTERNAL",
             "error_message": safe_user_message("INTERNAL"),
         }
-        prev_status = DBManager.OBS_AI_STATUS_NONE
+        prev_status = OBS_AI_STATUS_NONE
         analyzing_set = False
 
         try:
@@ -99,7 +103,7 @@ class ObservationAiApplicationService:
                     "error_code": "INTERNAL",
                     "error_message": str(begin_msg or safe_user_message("INTERNAL")),
                 }
-            prev_status = str(prev or DBManager.OBS_AI_STATUS_NONE)
+            prev_status = str(prev or OBS_AI_STATUS_NONE)
             analyzing_set = True
 
             _progress("사진 안전 처리·AI 분석 중…")
@@ -176,9 +180,9 @@ class ObservationAiApplicationService:
                 else:
                     possible = bool((resp.result or {}).get("analysis_possible"))
                     new_status = (
-                        DBManager.OBS_AI_STATUS_ANALYZED
+                        OBS_AI_STATUS_ANALYZED
                         if possible
-                        else DBManager.OBS_AI_STATUS_REVIEW_REQUIRED
+                        else OBS_AI_STATUS_REVIEW_REQUIRED
                     )
                     update_observation_ai_status(
                         db,
