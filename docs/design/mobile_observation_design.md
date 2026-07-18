@@ -124,14 +124,27 @@
 ### 1.6 OpenAI 호출 흐름
 
 ```text
+[PC]
 AiAnalysisPanel._on_analyze
-  → ObservationAiWorker (QThread)
-    → ObservationAiService.analyze_photo_paths
-      → prepare_images_for_ai (image_sanitize)
-      → OpenAIObservationProvider.analyze
-           └─ client.responses.create (Vision + JSON Schema)
+  → ObservationAiWorker (QThread · Signal)
+    → ObservationAiApplicationService.run_analysis
+      → ObservationAiService.analyze_photo_paths
+        → prepare_images_for_ai (image_sanitize)
+        → OpenAIObservationProvider.analyze
+             └─ client.responses.create (Vision + JSON Schema)
       → save_ai_analysis_result / update_observation_ai_status
+
+[Mobile / REST — 동일 ApplicationService]
+POST /api/v1/farms/{farm_cd}/observations/{obs_id}/analysis
+  → ObservationAiApiService (사진 확인·DTO만)
+    → ObservationAiApplicationService.run_analysis
+      → (이하 PC와 동일)
+
+GET  .../analysis          → Stage3 get_latest_ai_analysis
+GET  .../analysis/history  → Stage3 list_ai_analysis_history
 ```
+
+PSIS(농약 스냅샷) REST는 별도 단계(2-2)에서 공통화한다.
 
 ### 1.7 AI 추천(농약) 연결
 
