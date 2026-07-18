@@ -270,6 +270,51 @@ def test_post_analyze_via_application_service(ai_env) -> None:
     assert any(i["analysis_id"] == body["analysis_id"] for i in hist["items"])
 
 
+def test_post_analyze_busy(ai_env) -> None:
+    """ANALYZING 중 두 번째 요청은 AI_BUSY, Provider 미호출."""
+    from unittest.mock import patch
+
+    from core.ai.observation_ai_service import ObservationAiService
+    from core.db_manager import DBManager
+
+    farm = ai_env["farm_cd"]
+    oid = ai_env["obs_id"]
+    pid = ai_env["photo_id"]
+    settings = get_settings()
+
+    with get_sqlite_write_connection(settings.sqlite_path) as conn:
+        conn.execute(
+            """
+            UPDATE t_observation_master
+            SET ai_status = ?
+            WHERE farm_cd = ? AND obs_id = ?
+            """,
+            (DBManager.OBS_AI_STATUS_ANALYZING, farm, oid),
+        )
+        conn.commit()
+
+    svc = ObservationAiApiService(
+        db_path=settings.sqlite_path,
+        media_root=settings.observation_media_root,
+        photo_repo=deps.get_observation_photo_repository(),
+        default_user_id="TEST",
+    )
+    app.dependency_overrides[deps.get_observation_ai_api_service] = lambda: svc
+
+    with patch.object(ObservationAiService, "analyze_photo_paths") as mocked:
+        r = client.post(
+            f"/api/v1/farms/{farm}/observations/{oid}/analysis",
+            json={"consent": True, "photo_ids": [pid]},
+            headers={"X-User-Id": "TEST"},
+        )
+        mocked.assert_not_called()
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False
+    assert body["error_code"] == "AI_BUSY"
+
+
 def test_analysis_obs_not_found() -> None:
     if not _has_farm("OR001"):
         pytest.skip("OR001 없음")

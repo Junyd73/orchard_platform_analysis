@@ -183,6 +183,7 @@ class ObservationAiApiService:
         ai_status: str,
         analysis: dict | None = None,
         error: str | None = None,
+        error_code: str | None = None,
     ) -> ObservationAiAnalysisResponse:
         analysis = dict(analysis or {}) if analysis else {}
         candidates = list(analysis.get("candidates") or [])
@@ -204,6 +205,7 @@ class ObservationAiApiService:
             confidence=self._top_confidence(candidates),
             analyzed_at=analysis.get("analyzed_at"),
             error=error,
+            error_code=error_code,
             analysis_status=analysis.get("status"),
             review_required=(status == _AI_STATUS_REVIEW_REQUIRED),
             image_quality=analysis.get("image_quality"),
@@ -246,6 +248,7 @@ class ObservationAiApiService:
             )
             after = db.get_observation(farm, oid) or {}
             ai_status = str(after.get("ai_status") or _AI_STATUS_NONE)
+            err_code = str(payload.get("error_code") or "").strip() or None
 
             if payload.get("ok"):
                 aid = str(payload.get("analysis_id") or "").strip()
@@ -260,11 +263,23 @@ class ObservationAiApiService:
                     analysis=analysis,
                 )
 
-            # 실패해도 Stage3 실패 이력이 있을 수 있음 → 최신 시도 조회
+            # BUSY: Provider·이력 없음 — 기존 최신 성공 분석만 참고용으로 두지 않고 빈 본문
+            if err_code == "AI_BUSY":
+                return self._to_analysis_response(
+                    success=False,
+                    ai_status=ai_status,
+                    analysis=None,
+                    error=str(
+                        payload.get("error_message")
+                        or "이미 AI 분석이 진행 중입니다."
+                    ),
+                    error_code="AI_BUSY",
+                )
+
             attempt = stage3.get_latest_ai_attempt(db, farm, oid)
             err = str(
                 payload.get("error_message")
-                or payload.get("error_code")
+                or err_code
                 or "분석에 실패했습니다."
             )
             return self._to_analysis_response(
@@ -272,6 +287,7 @@ class ObservationAiApiService:
                 ai_status=ai_status,
                 analysis=attempt,
                 error=err,
+                error_code=err_code,
             )
 
     def get_latest(

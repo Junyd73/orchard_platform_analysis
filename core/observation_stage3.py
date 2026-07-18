@@ -323,6 +323,51 @@ def update_observation_ai_status(
         return False, "데이터 저장 중 오류가 발생했습니다."
 
 
+def try_begin_observation_ai_analyzing(
+    db: DBManager, farm_cd: str, obs_id: str, user_id: str
+) -> tuple[bool, str, str | None]:
+    """조건부 ANALYZING 전환. 성공 (True, msg, prev_status), 충돌 (False, AI_BUSY, None).
+
+    COALESCE(ai_status,'NONE') <> ANALYZING 일 때만 UPDATE 하여 Provider 중복 진입을 막는다.
+    """
+    farm = (farm_cd or "").strip()
+    oid = (obs_id or "").strip()
+    uid = (user_id or "").strip()
+    if not farm or not oid:
+        return False, "관찰번호가 없습니다.", None
+    if not uid:
+        return False, "사용자 세션 정보가 없습니다.", None
+    obs = db.get_observation(farm, oid)
+    if not obs or (obs.get("use_yn") or _YN_Y) != _YN_Y:
+        return False, "대상 관찰을 찾을 수 없습니다.", None
+    prev = str(obs.get("ai_status") or DBManager.OBS_AI_STATUS_NONE)
+    analyzing = DBManager.OBS_AI_STATUS_ANALYZING
+    now = _now_str()
+    try:
+        cur = db.conn.cursor()
+        cur.execute(
+            """
+            UPDATE t_observation_master
+            SET ai_status = ?, mod_id = ?, mod_dt = ?
+            WHERE farm_cd = ? AND obs_id = ?
+              AND COALESCE(use_yn, 'Y') = 'Y'
+              AND COALESCE(ai_status, 'NONE') <> ?
+            """,
+            (analyzing, uid, now, farm, oid, analyzing),
+        )
+        if cur.rowcount <= 0:
+            return False, "AI_BUSY", None
+        db.conn.commit()
+        return True, "AI 분석이 시작되었습니다.", prev
+    except Exception:
+        try:
+            db.conn.rollback()
+        except sqlite3.Error:
+            pass
+        print("[DB] try_begin_observation_ai_analyzing: code=DB_ERROR")
+        return False, "DB_ERROR", None
+
+
 def save_ai_analysis_result(
     db: DBManager,
     farm_cd: str,

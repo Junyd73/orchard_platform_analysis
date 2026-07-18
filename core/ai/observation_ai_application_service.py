@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """관찰 AI 분석 Application Service — UI(PyQt)·REST 공통 유스케이스.
 
-ObservationAiWorker / 향후 FastAPI 가 동일하게 호출한다.
+ObservationAiWorker / FastAPI 가 동일하게 호출한다.
 OpenAI Provider·ObservationAiService·Stage3 저장 방식은 변경하지 않는다.
 """
 
@@ -24,6 +24,7 @@ from core.observation_stage3 import (
     ANALYSIS_STATUS_OK,
     restore_ai_status_after_failure,
     save_ai_analysis_result,
+    try_begin_observation_ai_analyzing,
     update_observation_ai_status,
 )
 
@@ -51,8 +52,8 @@ class ObservationAiApplicationService:
     ) -> dict[str, Any]:
         """분석 실행. 성공·실패 모두 동일 형식의 result dict 를 반환한다.
 
-        PSIS Snapshot 은 후보 확정 이후 UI/별도 워커 경로이며 본 유스케이스에 포함하지 않는다
-        (기존 Worker.run 과 동일).
+        동일 farm_cd+obs_id 가 이미 ANALYZING 이면 Provider 호출·이력 저장 없이 AI_BUSY.
+        PSIS Snapshot 은 후보 확정 이후 UI/별도 워커 경로이며 본 유스케이스에 포함하지 않는다.
         """
         farm = str(farm_cd or "").strip()
         oid = str(obs_id or "").strip()
@@ -74,15 +75,31 @@ class ObservationAiApplicationService:
 
         try:
             _progress("분석 준비 중…")
-            before = db.get_observation(farm, oid) or {}
-            prev_status = str(before.get("ai_status") or DBManager.OBS_AI_STATUS_NONE)
-            update_observation_ai_status(
-                db,
-                farm,
-                oid,
-                DBManager.OBS_AI_STATUS_ANALYZING,
-                uid,
+            begun, begin_msg, prev = try_begin_observation_ai_analyzing(
+                db, farm, oid, uid
             )
+            if not begun:
+                if begin_msg == "AI_BUSY":
+                    return {
+                        "request_id": req_id,
+                        "ok": False,
+                        "error_code": "AI_BUSY",
+                        "error_message": safe_user_message("AI_BUSY"),
+                    }
+                if begin_msg == "DB_ERROR":
+                    return {
+                        "request_id": req_id,
+                        "ok": False,
+                        "error_code": "DB_ERROR",
+                        "error_message": safe_user_message("DB_ERROR"),
+                    }
+                return {
+                    "request_id": req_id,
+                    "ok": False,
+                    "error_code": "INTERNAL",
+                    "error_message": str(begin_msg or safe_user_message("INTERNAL")),
+                }
+            prev_status = str(prev or DBManager.OBS_AI_STATUS_NONE)
             analyzing_set = True
 
             _progress("사진 안전 처리·AI 분석 중…")

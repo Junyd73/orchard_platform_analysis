@@ -16,6 +16,7 @@ SAFE_MESSAGES: dict[str, str] = {
     "AI_IMAGE": "사진 전처리에 실패했습니다.",
     "AI_DEPENDENCY": "openai 패키지가 설치되지 않았습니다.",
     "AI_EMPTY": "AI가 빈 응답을 반환했습니다.",
+    "AI_BUSY": "이미 AI 분석이 진행 중입니다. 완료 후 다시 확인해 주세요.",
     "PSIS_AUTH": "공식 농약정보 인증에 실패했습니다. API 키·도메인 승인을 확인해 주세요.",
     "PSIS_DOMAIN": "공식 농약정보 도메인 승인이 필요합니다.",
     "PSIS_TIMEOUT": "공식 농약정보 조회 시간이 초과되었습니다.",
@@ -77,10 +78,14 @@ def safe_user_message(code: str | None, *, domain: str = "AI") -> str:
 
 
 def classify_ai_exception(exc: BaseException) -> tuple[str, str]:
+    import sqlite3
+
     name = type(exc).__name__
     low = (str(exc) or "").lower()
     lname = name.lower()
-    if "timeout" in lname or "timeout" in low:
+    if isinstance(exc, sqlite3.Error):
+        code = "DB_ERROR"
+    elif "timeout" in lname or "timeout" in low:
         code = "AI_TIMEOUT"
     elif "auth" in lname or "401" in low or "invalid_api_key" in low or "unauthorized" in low:
         code = "AI_AUTH"

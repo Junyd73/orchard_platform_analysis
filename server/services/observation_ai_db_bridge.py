@@ -2,7 +2,7 @@
 """PC DBManager 덕 타이핑 브리지 — REST 가 ApplicationService 에 넘길 DB 핸들.
 
 PyQt DBManager 인스턴스를 생성하지 않고, Stage3/ApplicationService 가 기대하는
-메서드·상수만 제공한다. ApplicationService / Stage3 소스는 변경하지 않는다.
+메서드·상수만 제공한다.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ class ServerDbBridge:
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+        self._txn_depth = 0
         if self.conn.row_factory is None:
             self.conn.row_factory = sqlite3.Row
 
@@ -57,16 +58,23 @@ class ServerDbBridge:
             cur = self.conn.cursor()
             cur.execute(query, params)
             query_start = query.strip().upper()
-            if query_start.startswith(
+            # 명시적 트랜잭션 안에서는 개별 commit 금지
+            if self._txn_depth == 0 and query_start.startswith(
                 ("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "REPLACE")
             ):
                 self.conn.commit()
             return cur.fetchall()
         except sqlite3.Error as e:
-            print(f"[ServerDbBridge] Query error: {e}")
-            return []
+            try:
+                self.conn.rollback()
+            except sqlite3.Error:
+                pass
+            # SQL·경로·개인정보 미출력
+            print(f"[ServerDbBridge] Query error: code=DB_ERROR exc={type(e).__name__}")
+            raise
 
     def execute_transaction(self, queries_with_params):
+        self._txn_depth += 1
         try:
             self.conn.isolation_level = None
             cur = self.conn.cursor()
@@ -80,9 +88,10 @@ class ServerDbBridge:
                 self.conn.rollback()
             except sqlite3.Error:
                 pass
-            print(f"[ServerDbBridge] Transaction rollback: {e}")
-            raise e
+            print(f"[ServerDbBridge] Transaction error: code=DB_ERROR exc={type(e).__name__}")
+            raise
         finally:
+            self._txn_depth = max(0, self._txn_depth - 1)
             try:
                 self.conn.isolation_level = ""
             except Exception:

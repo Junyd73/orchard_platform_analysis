@@ -49,6 +49,7 @@ class ObservationAiAnalysisResponse(BaseModel):
     confidence: float | None = None
     analyzed_at: str | None = None
     error: str | None = None
+    error_code: str | None = None
     # 부가 메타(모바일 UX·디버그, 스키마 비침해)
     analysis_status: str | None = None
     review_required: bool = False

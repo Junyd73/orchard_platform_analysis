@@ -1,18 +1,13 @@
 # -*- coding: utf-8 -*-
-"""공식 농약정보(PSIS) 조회 워커 — completed 단일 terminal 신호."""
+"""공식 농약정보(PSIS) 조회 워커 — Thread·Signal·Application Service 호출만 담당."""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
+from core.ai.observation_psis_application_service import ObservationPsisApplicationService
 from core.db_manager import DBManager
-from core.observation_safe_errors import (
-    classify_psis_exception,
-    safe_log,
-    safe_user_message,
-    sanitize_stored_error,
-)
-from core.pesticide.pesticide_service import ObservationPesticideService
+from core.observation_safe_errors import safe_user_message
 
 
 class PsisSearchWorker(QObject):
@@ -54,45 +49,24 @@ class PsisSearchWorker(QObject):
             "ok": False,
             "items": [],
             "error_code": "INTERNAL",
-            "error_message": safe_user_message("INTERNAL"),
+            "error_message": safe_user_message("INTERNAL", domain="PSIS"),
         }
         try:
-            self.progress.emit("공식 등록정보 조회 중…")
             db_local = DBManager(self._db_path) if self._db_path else DBManager()
-            svc = ObservationPesticideService(provider=self._provider)
-            result = svc.search_with_cache_policy(
+            app_svc = ObservationPsisApplicationService(provider=self._provider)
+            payload = app_svc.run_search(
                 db_local,
-                self._farm_cd,
-                self._obs_id,
-                self._crop,
-                self._disease,
+                farm_cd=self._farm_cd,
+                obs_id=self._obs_id,
+                user_id=self._user_id,
+                crop_name=self._crop,
+                disease_name=self._disease,
+                analysis_id=self._analysis_id,
                 force_refresh=self._force,
                 allow_similar=self._similar,
-                user_id=self._user_id,
-                analysis_id=self._analysis_id,
+                request_id=self._request_id,
+                on_progress=lambda msg: self.progress.emit(msg),
             )
-            result = dict(result or {})
-            result["request_id"] = self._request_id
-            if result.get("error_code"):
-                ec, em = sanitize_stored_error(
-                    result.get("error_code"),
-                    result.get("error_message"),
-                    domain="PSIS",
-                )
-                result["error_code"] = ec
-                result["error_message"] = em
-            payload = result
-        except Exception as e:
-            code, msg = classify_psis_exception(e)
-            safe_log(code, type(e).__name__, where="psis_worker", request_id=self._request_id)
-            payload = {
-                "request_id": self._request_id,
-                "ok": False,
-                "items": [],
-                "error_code": code,
-                "error_message": msg,
-                "from_cache": False,
-            }
         finally:
             if db_local is not None:
                 try:

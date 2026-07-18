@@ -139,12 +139,24 @@ POST /api/v1/farms/{farm_cd}/observations/{obs_id}/analysis
   → ObservationAiApiService (사진 확인·DTO만)
     → ObservationAiApplicationService.run_analysis
       → (이하 PC와 동일)
+      → 동일 obs ANALYZING 중이면 AI_BUSY (Provider 미호출)
 
 GET  .../analysis          → Stage3 get_latest_ai_analysis
 GET  .../analysis/history  → Stage3 list_ai_analysis_history
+
+[PC PSIS]
+AiAnalysisPanel → PsisSearchWorker
+  → ObservationPsisApplicationService.run_search
+    → ObservationPesticideService.search_with_cache_policy
+    → replace_pesticide_snapshots
+
+[Mobile / REST PSIS — 동일 ApplicationService]
+POST /api/v1/farms/{farm_cd}/observations/{obs_id}/psis
+GET  .../psis
+GET  .../psis/history
 ```
 
-PSIS(농약 스냅샷) REST는 별도 단계(2-2)에서 공통화한다.
+PSIS REST는 ApplicationService만 호출하며, 검색 알고리즘·스냅샷 의미는 PC와 동일하다.
 
 ### 1.7 AI 추천(농약) 연결
 
