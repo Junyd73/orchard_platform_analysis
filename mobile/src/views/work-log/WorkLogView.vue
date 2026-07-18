@@ -3,20 +3,32 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { fetchWorkLogMonthly } from '@/api/workLogs'
+import { fetchWorkLogDaily, fetchWorkLogMonthly } from '@/api/workLogs'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
+import WorkLogFilterSheet from '@/views/work-log/components/WorkLogFilterSheet.vue'
 import WorkLogHero from '@/views/work-log/components/WorkLogHero.vue'
 import WorkLogMonthCalendar from '@/views/work-log/components/WorkLogMonthCalendar.vue'
+import WorkLogMonthChart from '@/views/work-log/components/WorkLogMonthChart.vue'
 import WorkLogMonthSummary from '@/views/work-log/components/WorkLogMonthSummary.vue'
+import WorkLogWeatherCard from '@/views/work-log/components/WorkLogWeatherCard.vue'
 import {
+  defaultWorkFilters,
   isFutureDate,
   monthLabel,
+  MSG_DETAIL_PENDING,
+  MSG_HOURLY_FORECAST_PENDING,
+  todayIso,
+  type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
 import { useAppStore } from '@/composables/stores/app'
-import type { WorkLogMonthSummary as SummaryDto, WorkLogDayCell } from '@/types/workLog'
+import type {
+  WorkLogDayCell,
+  WorkLogMasterDto,
+  WorkLogMonthSummary as SummaryDto,
+} from '@/types/workLog'
 
 const store = useAppStore()
 const router = useRouter()
@@ -27,12 +39,27 @@ const now = new Date()
 const year = ref(now.getFullYear())
 const month = ref(now.getMonth() + 1)
 const loading = ref(true)
+const weatherLoading = ref(false)
 const errorMessage = ref('')
 const toastMessage = ref('')
 const summary = ref<SummaryDto | null>(null)
 const days = ref<Record<string, WorkLogDayCell>>({})
+const todayMaster = ref<WorkLogMasterDto | null>(null)
+const filterOpen = ref(false)
+const filters = ref(defaultWorkFilters())
 
 const title = computed(() => monthLabel(year.value, month.value))
+const today = todayIso()
+
+const todayCell = computed(() => days.value[today] || null)
+
+const todayWorkCount = computed(() => Number(todayCell.value?.work_count || 0))
+const todayResourceCount = computed(() => Number(todayCell.value?.resource_count || 0))
+const todayExpenseSum = computed(() => {
+  const c = todayCell.value
+  if (!c) return 0
+  return Number(c.expense_sum || 0) + Number(c.labor_sum || 0)
+})
 
 const canGoNext = computed(() => {
   const t = new Date()
@@ -58,6 +85,25 @@ async function loadMonth() {
   }
 }
 
+async function loadTodayWeather() {
+  const t = new Date()
+  const viewingCurrent =
+    year.value === t.getFullYear() && month.value === t.getMonth() + 1
+  if (!viewingCurrent) {
+    todayMaster.value = null
+    return
+  }
+  weatherLoading.value = true
+  try {
+    const daily = await fetchWorkLogDaily(farmCd.value, today)
+    todayMaster.value = daily.master
+  } catch {
+    todayMaster.value = null
+  } finally {
+    weatherLoading.value = false
+  }
+}
+
 function goPrev() {
   if (month.value === 1) {
     year.value -= 1
@@ -77,7 +123,7 @@ function goNext() {
   }
 }
 
-function goToday() {
+function goTodayMonth() {
   const t = new Date()
   year.value = t.getFullYear()
   month.value = t.getMonth() + 1
@@ -95,6 +141,27 @@ function onBlocked(msg: string) {
   showToast(msg)
 }
 
+function onFabRegister() {
+  void router.push({ name: 'work-log-daily', params: { workDt: today } })
+}
+
+function onForecast() {
+  // 기존 날씨 상세 라우트 없음 → 토스트만
+  showToast(MSG_HOURLY_FORECAST_PENDING)
+}
+
+function onSummaryDetail() {
+  showToast(MSG_DETAIL_PENDING)
+}
+
+function onToggleFilter(key: WorkFilterKey) {
+  filters.value = { ...filters.value, [key]: !filters.value[key] }
+}
+
+function onResetFilters() {
+  filters.value = defaultWorkFilters()
+}
+
 function showToast(msg: string) {
   toastMessage.value = msg
   window.setTimeout(() => {
@@ -104,13 +171,14 @@ function showToast(msg: string) {
 
 watch([year, month], () => {
   void loadMonth()
+  void loadTodayWeather()
 })
 
 onMounted(async () => {
   if (!farm.value) {
     await store.refreshAll()
   }
-  await loadMonth()
+  await Promise.all([loadMonth(), loadTodayWeather()])
   const toast = String(route.query.toast || '').trim()
   if (toast) {
     showToast(toast)
@@ -127,44 +195,54 @@ onMounted(async () => {
       <WorkLogHero
         mode="monthly"
         :farm-name="farm?.farm_nm || undefined"
-        :context-label="title"
+        :today-work-count="todayWorkCount"
+        :today-resource-count="todayResourceCount"
+        :today-expense-sum="todayExpenseSum"
       />
 
-      <nav class="month-nav" aria-label="연월 이동">
-        <OdsButton
-          variant="secondary"
-          type="button"
-          :block="false"
-          class="month-nav__side"
-          @click="goPrev"
-        >
-          이전
-        </OdsButton>
-        <OdsButton
-          variant="secondary"
-          type="button"
-          :block="false"
-          class="month-nav__center"
-          @click="goToday"
-        >
-          오늘로
-        </OdsButton>
-        <OdsButton
-          variant="secondary"
-          type="button"
-          :block="false"
-          class="month-nav__side"
-          :disabled="!canGoNext"
-          @click="goNext"
-        >
-          다음
-        </OdsButton>
-      </nav>
+      <WorkLogWeatherCard
+        :master="todayMaster"
+        :loading="weatherLoading"
+        @forecast="onForecast"
+      />
 
-      <WorkLogMonthSummary :summary="summary" :loading="loading" />
-
-      <h2 class="section-title">월간 캘린더</h2>
-      <p class="section-hint">날짜를 누르면 일간 영농일지로 이동합니다.</p>
+      <div class="month-head">
+        <div class="month-head__row">
+          <button type="button" class="month-head__nav" aria-label="이전 달" @click="goPrev">
+            ‹
+          </button>
+          <h2 class="month-head__title">{{ title }}</h2>
+          <button
+            type="button"
+            class="month-head__nav"
+            aria-label="다음 달"
+            :disabled="!canGoNext"
+            @click="goNext"
+          >
+            ›
+          </button>
+        </div>
+        <div class="month-head__actions">
+          <OdsButton
+            variant="secondary"
+            type="button"
+            :block="false"
+            class="month-head__btn"
+            @click="filterOpen = true"
+          >
+            작업필터 ▼
+          </OdsButton>
+          <OdsButton
+            variant="primary"
+            type="button"
+            :block="false"
+            class="month-head__btn"
+            @click="goTodayMonth"
+          >
+            오늘
+          </OdsButton>
+        </div>
+      </div>
 
       <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
       <p v-else-if="loading" class="status status--loading" role="status">
@@ -176,10 +254,38 @@ onMounted(async () => {
         :year="year"
         :month="month"
         :days="days"
+        :filters="filters"
         @select="onSelectDay"
         @blocked="onBlocked"
       />
+
+      <WorkLogMonthSummary
+        :year="year"
+        :month="month"
+        :summary="summary"
+        :loading="loading"
+        @detail="onSummaryDetail"
+      />
+
+      <WorkLogMonthChart
+        v-if="!errorMessage"
+        :year="year"
+        :month="month"
+        :days="days"
+      />
     </main>
+
+    <button type="button" class="fab" aria-label="오늘 영농일지 등록" @click="onFabRegister">
+      + 등록
+    </button>
+
+    <WorkLogFilterSheet
+      :open="filterOpen"
+      :filters="filters"
+      @close="filterOpen = false"
+      @toggle="onToggleFilter"
+      @reset="onResetFilters"
+    />
 
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
     <OdsBottomNav />
@@ -190,34 +296,56 @@ onMounted(async () => {
 .page {
   min-height: 100dvh;
   background: var(--ods-color-bg-muted);
-  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  padding-bottom: calc(140px + env(safe-area-inset-bottom));
 }
 .content {
   max-width: 480px;
   margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-16);
+  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-24);
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-16);
 }
-.month-nav {
-  display: grid;
-  grid-template-columns: 1fr 1.2fr 1fr;
-  gap: var(--ods-space-8);
+.month-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
 }
-.month-nav__side,
-.month-nav__center {
-  width: 100%;
+.month-head__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ods-space-12);
 }
-.section-title {
-  margin: var(--ods-space-8) 0 0;
+.month-head__title {
+  margin: 0;
+  min-width: 8em;
+  text-align: center;
   font: var(--ods-font-headline);
   color: var(--ods-color-text);
 }
-.section-hint {
-  margin: calc(-1 * var(--ods-space-8)) 0 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text-secondary);
+.month-head__nav {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ods-color-text);
+}
+.month-head__nav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.month-head__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ods-space-8);
+}
+.month-head__btn {
+  width: 100%;
 }
 .status {
   margin: 0;
@@ -233,10 +361,26 @@ onMounted(async () => {
   font: var(--ods-font-body-2);
   color: var(--ods-color-danger);
 }
+.fab {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  z-index: 40;
+  min-height: 48px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
+  font: var(--ods-font-body-1);
+  font-weight: 700;
+  box-shadow: var(--ods-shadow-card);
+  cursor: pointer;
+}
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(120px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 70;
   max-width: min(420px, calc(100vw - 32px));
