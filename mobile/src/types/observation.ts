@@ -218,64 +218,64 @@ export type ObservationPsisResponse = {
 export type SmartSprayGuideObservation = {
   obs_id: string
   farm_cd: string
-  obs_title?: string | null
+  obs_title: string
   obs_dt?: string | null
-  ai_status?: string | null
-  site_id?: string | null
-  site_nm?: string | null
+  ai_status: string
+  site_id: string
+  site_nm: string
 }
 
 export type SmartSprayGuideCandidate = {
-  analysis_id?: string | null
-  candidate_seq?: number | null
-  name_ko?: string | null
-  confirmed_name?: string | null
-  category?: string | null
-  confidence?: number | null
+  analysis_id: string
+  candidate_seq: number
+  name_ko: string
+  confirmed_name: string
+  category: string
+  confidence: number
 }
 
 export type SmartSprayGuideItem = {
   rank: number
-  snapshot_id?: string | null
-  pesticide_name?: string | null
-  brand_name?: string | null
-  active_ingredient?: string | null
-  crop_name?: string | null
-  disease_name?: string | null
-  purpose?: string | null
-  pesti_code?: string | null
-  item_id?: number | null
-  info_id?: number | null
+  snapshot_id: string
+  pesticide_name: string
+  brand_name: string
+  active_ingredient: string
+  crop_name: string
+  disease_name: string
+  purpose: string
+  pesti_code: string
+  item_id: number
+  info_id: number
   stock_qty: number
-  stock_unit?: string | null
+  stock_unit: string
   has_stock: boolean
   last_used_date?: string | null
-  dilution?: string | null
-  phi?: string | null
-  max_use_count?: string | null
-  usage_method?: string | null
-  toxicity?: string | null
+  dilution: string
+  phi: string
+  max_use_count: string
+  usage_method: string
+  toxicity: string
   from_psis: boolean
   from_stock: boolean
   psis_registered: boolean
   information_available: boolean
-  match_level?: string | null
-  match_key?: string | null
+  match_level: string
+  match_key: string
 }
 
 export type ObservationSmartSprayGuideResponse = {
   success: boolean
   guide_status: string
-  farm_cd?: string | null
-  obs_id?: string | null
+  farm_cd: string
+  obs_id: string
   observation?: SmartSprayGuideObservation | null
   confirmed_candidate?: SmartSprayGuideCandidate | null
   psis_status: string
-  crop_name?: string | null
-  disease_name?: string | null
+  crop_name: string
+  disease_name: string
   items: SmartSprayGuideItem[]
-  error?: string | null
-  error_code?: string | null
+  error: string
+  error_code: string
 }
 
 export type ObservationBasicSavePayload = {
