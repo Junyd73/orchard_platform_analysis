@@ -44,3 +44,11 @@ export function fetchObservationPsis(
 ): Promise<never> {
   return Promise.reject(new ApiClientError('Analysis mirror stub'))
 }
+
+export function fetchObservationSmartSprayGuide(
+  _farmCd: string,
+  _obsId: string,
+  _signal?: AbortSignal,
+): Promise<never> {
+  return Promise.reject(new ApiClientError('Analysis mirror stub'))
+}

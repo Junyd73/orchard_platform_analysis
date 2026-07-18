@@ -214,6 +214,70 @@ export type ObservationPsisResponse = {
   error_code?: string | null
 }
 
+/** GET .../smart-spray-guide — 읽기 전용 통합 DTO (UI 연동은 후속) */
+export type SmartSprayGuideObservation = {
+  obs_id: string
+  farm_cd: string
+  obs_title?: string | null
+  obs_dt?: string | null
+  ai_status?: string | null
+  site_id?: string | null
+  site_nm?: string | null
+}
+
+export type SmartSprayGuideCandidate = {
+  analysis_id?: string | null
+  candidate_seq?: number | null
+  name_ko?: string | null
+  confirmed_name?: string | null
+  category?: string | null
+  confidence?: number | null
+}
+
+export type SmartSprayGuideItem = {
+  rank: number
+  snapshot_id?: string | null
+  pesticide_name?: string | null
+  brand_name?: string | null
+  active_ingredient?: string | null
+  crop_name?: string | null
+  disease_name?: string | null
+  purpose?: string | null
+  pesti_code?: string | null
+  item_id?: number | null
+  info_id?: number | null
+  stock_qty: number
+  stock_unit?: string | null
+  has_stock: boolean
+  last_used_date?: string | null
+  dilution?: string | null
+  phi?: string | null
+  max_use_count?: string | null
+  usage_method?: string | null
+  toxicity?: string | null
+  from_psis: boolean
+  from_stock: boolean
+  psis_registered: boolean
+  information_available: boolean
+  match_level?: string | null
+  match_key?: string | null
+}
+
+export type ObservationSmartSprayGuideResponse = {
+  success: boolean
+  guide_status: string
+  farm_cd?: string | null
+  obs_id?: string | null
+  observation?: SmartSprayGuideObservation | null
+  confirmed_candidate?: SmartSprayGuideCandidate | null
+  psis_status: string
+  crop_name?: string | null
+  disease_name?: string | null
+  items: SmartSprayGuideItem[]
+  error?: string | null
+  error_code?: string | null
+}
+
 export type ObservationBasicSavePayload = {
   obs_dt: string
   target_type_cd: string
