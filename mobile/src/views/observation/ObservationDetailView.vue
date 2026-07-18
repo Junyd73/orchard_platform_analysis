@@ -50,7 +50,12 @@ import {
   severityTone,
 } from '@/views/observation/scr004DetailUi'
 import { useAppStore } from '@/composables/stores/app'
-import type { ObservationAiAnalysisResponse, ObservationDetail, ObservationPhotoItem } from '@/types/observation'
+import type {
+  ObservationAiAnalysisResponse,
+  ObservationDetail,
+  ObservationPhotoItem,
+  ObservationPsisResponse,
+} from '@/types/observation'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +73,7 @@ const copyOk = ref(false)
 
 const canDelete = computed(() => Boolean(detail.value?.can_delete))
 const photoIds = ref<string[]>([])
+const psisResult = ref<ObservationPsisResponse | null>(null)
 
 const contextLine = computed(() => {
   const d = detail.value
@@ -153,7 +159,17 @@ const psisIntro = computed(() => {
   return ''
 })
 
-const psisEmptyMessage = computed(() => PSIS_NOT_FOUND)
+const psisCases = computed(() => psisResult.value?.similar_cases || [])
+const psisEmptyMessage = computed(() => {
+  if (psisResult.value && psisResult.value.psis_status === 'EMPTY') {
+    return '확정 병해충에 대한 등록정보가 없습니다.'
+  }
+  if (psisResult.value && !psisResult.value.success) {
+    return PSIS_LOAD_FAILED
+  }
+  return PSIS_NOT_FOUND
+})
+const psisPrimary = computed(() => psisCases.value[0] || null)
 
 function onPhotosChanged(photos: ObservationPhotoItem[]) {
   photoIds.value = photos.map((p) => p.photo_id)
@@ -163,6 +179,19 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
   if (detail.value && res.ai_status) {
     detail.value = { ...detail.value, ai_status: res.ai_status }
   }
+}
+
+function onAiConfirmed(payload: {
+  ai_status: string
+  confirmed_name: string
+}) {
+  if (detail.value) {
+    detail.value = { ...detail.value, ai_status: payload.ai_status || 'CONFIRMED' }
+  }
+}
+
+function onPsisUpdated(res: ObservationPsisResponse | null) {
+  psisResult.value = res
 }
 
 async function load() {
@@ -244,6 +273,8 @@ onMounted(async () => {
 })
 
 watch(obsId, () => {
+  psisResult.value = null
+  photoIds.value = []
   void load()
 })
 
@@ -328,7 +359,10 @@ watch(showDeleteDlg, async (open) => {
                 :farm-cd="farmCd"
                 :obs-id="obsId"
                 :photo-ids="photoIds"
+                crop-name="배"
                 @updated="onAiUpdated"
+                @confirmed="onAiConfirmed"
+                @psis-updated="onPsisUpdated"
               />
             </div>
             <img class="card__illus" :src="aiIllustration" alt="" aria-hidden="true">
@@ -347,15 +381,49 @@ watch(showDeleteDlg, async (open) => {
                 <h3 class="guide-block__title">{{ PSIS_RESULT_TITLE }}</h3>
                 <section class="guide-sec">
                   <h4 class="guide-sec__h">① {{ PSIS_STOCK_SECTION }}</h4>
-                  <p class="guide-sec__empty">{{ psisEmptyMessage }}</p>
+                  <p class="guide-sec__empty">보유 재고 연동은 후속 단계에서 제공합니다.</p>
                 </section>
                 <section class="guide-sec">
                   <h4 class="guide-sec__h">② {{ PSIS_RECOMMEND_SECTION }}</h4>
-                  <p class="guide-sec__empty">{{ psisEmptyMessage }}</p>
+                  <ul v-if="psisCases.length" class="guide-list">
+                    <li v-for="c in psisCases" :key="c.snapshot_id || c.rank">
+                      {{ c.pesticide_name || c.brand_name || '—' }}
+                      <span v-if="c.dilution"> · {{ c.dilution }}</span>
+                    </li>
+                  </ul>
+                  <p v-else class="guide-sec__empty">{{ psisEmptyMessage }}</p>
                 </section>
                 <section class="guide-sec">
                   <h4 class="guide-sec__h">③ {{ PSIS_USAGE_SECTION }}</h4>
-                  <ul class="guide-usage">
+                  <template v-if="psisPrimary">
+                    <ul class="guide-usage">
+                      <li class="guide-usage__row">
+                        <span class="guide-usage__k">적용 병해충</span>
+                        <span class="guide-usage__v">{{ psisPrimary.disease_name || '—' }}</span>
+                      </li>
+                      <li class="guide-usage__row">
+                        <span class="guide-usage__k">적용 작물</span>
+                        <span class="guide-usage__v">{{ psisPrimary.crop_name || '—' }}</span>
+                      </li>
+                      <li class="guide-usage__row">
+                        <span class="guide-usage__k">희석배수</span>
+                        <span class="guide-usage__v">{{ psisPrimary.dilution || '—' }}</span>
+                      </li>
+                      <li class="guide-usage__row">
+                        <span class="guide-usage__k">사용 시기</span>
+                        <span class="guide-usage__v">{{ psisPrimary.preharvest_interval || '—' }}</span>
+                      </li>
+                      <li class="guide-usage__row">
+                        <span class="guide-usage__k">안전사용기준</span>
+                        <span class="guide-usage__v">{{ psisPrimary.max_use_count || '—' }}</span>
+                      </li>
+                      <li class="guide-usage__row">
+                        <span class="guide-usage__k">주의사항</span>
+                        <span class="guide-usage__v">{{ psisPrimary.usage_method || '—' }}</span>
+                      </li>
+                    </ul>
+                  </template>
+                  <ul v-else class="guide-usage">
                     <li v-for="field in PSIS_USAGE_FIELDS" :key="field" class="guide-usage__row">
                       <span class="guide-usage__k">{{ field }}</span>
                       <span class="guide-usage__v">—</span>
@@ -724,6 +792,16 @@ watch(showDeleteDlg, async (open) => {
   line-height: 1.4;
   font-weight: 700;
   color: var(--ods-color-primary);
+}
+.guide-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ods-color-text);
+}
+.guide-list li + li {
+  margin-top: 4px;
 }
 .guide-sec__empty {
   margin: 0;

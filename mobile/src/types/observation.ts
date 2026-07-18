@@ -147,6 +147,73 @@ export type ObservationAiAnalysisResponse = {
   analysis_possible?: boolean | null
 }
 
+/** POST .../candidates/confirm */
+export type ObservationCandidateConfirmRequest = {
+  analysis_id: string
+  candidate_seq: number
+  confirmed_name?: string | null
+}
+
+export type ObservationCandidateConfirmResponse = {
+  success: boolean
+  analysis_id?: string | null
+  candidate_seq?: number | null
+  confirmed_name?: string | null
+  confirmed_by?: string | null
+  confirmed_at?: string | null
+  ai_status?: string | null
+  error?: string | null
+  error_code?: string | null
+}
+
+/** POST/GET .../psis */
+export type ObservationPsisSearchRequest = {
+  analysis_id?: string | null
+  candidate_seq?: number | null
+  crop_name?: string | null
+  disease_name?: string | null
+  force_refresh?: boolean
+  allow_similar?: boolean
+}
+
+export type ObservationPsisCase = {
+  rank: number
+  snapshot_id?: string | null
+  similarity?: string | null
+  pesticide_name?: string | null
+  brand_name?: string | null
+  company_name?: string | null
+  active_ingredient?: string | null
+  crop_name?: string | null
+  disease_name?: string | null
+  purpose_name?: string | null
+  usage_method?: string | null
+  dilution?: string | null
+  preharvest_interval?: string | null
+  max_use_count?: string | null
+  toxicity?: string | null
+  fish_toxicity?: string | null
+  source_nm?: string | null
+}
+
+export type ObservationPsisResponse = {
+  success: boolean
+  psis_status: string
+  snapshot_id?: string | null
+  snapshot_ids?: string[]
+  analysis_id?: string | null
+  candidate_seq?: number | null
+  query_candidate?: string | null
+  crop_name?: string | null
+  match_type?: string | null
+  from_cache?: boolean
+  similar_cases: ObservationPsisCase[]
+  searched_at?: string | null
+  label?: string | null
+  error?: string | null
+  error_code?: string | null
+}
+
 export type ObservationBasicSavePayload = {
   obs_dt: string
   target_type_cd: string

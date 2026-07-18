@@ -27,10 +27,13 @@ export function aiLabel(status: string): string {
   const s = status.toUpperCase()
   if (s === 'NONE' || s === 'PENDING') return 'AI 대기'
   if (s === 'ANALYZING') return '분석 중'
-  if (s === 'ANALYZED' || s === 'COMPLETED' || s === 'CONFIRMED') return 'AI 완료'
-  if (s === 'FAILED') return 'AI 실패'
+  if (s === 'ANALYZED') return '분석 완료'
+  if (s === 'COMPLETED') return '분석 완료'
+  if (s === 'CONFIRMED') return '후보 확정'
+  if (s === 'FAILED') return '분석 실패'
   if (s === 'REVIEW_REQUIRED') return '검토 필요'
-  return s || 'AI'
+  if (s === 'HOLD') return '보류'
+  return s ? `상태: ${s}` : 'AI'
 }
 
 export function aiHint(status: string): string {

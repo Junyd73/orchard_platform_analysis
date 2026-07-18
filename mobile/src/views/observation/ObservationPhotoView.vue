@@ -150,6 +150,7 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
             :farm-cd="farmCd"
             :obs-id="obsId"
             :photo-ids="photoIds"
+            crop-name="배"
             @updated="onAiUpdated"
           />
         </OdsCard>

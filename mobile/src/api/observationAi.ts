@@ -17,3 +17,30 @@ export function requestObservationAiAnalysis(
 ): Promise<never> {
   return Promise.reject(new ApiClientError('Analysis mirror stub'))
 }
+
+export function confirmObservationAiCandidate(
+  _farmCd: string,
+  _obsId: string,
+  _body: unknown,
+  _options?: { signal?: AbortSignal },
+): Promise<never> {
+  return Promise.reject(new ApiClientError('Analysis mirror stub'))
+}
+
+export function requestObservationPsis(
+  _farmCd: string,
+  _obsId: string,
+  _body: unknown,
+  _options?: { signal?: AbortSignal },
+): Promise<never> {
+  return Promise.reject(new ApiClientError('Analysis mirror stub'))
+}
+
+export function fetchObservationPsis(
+  _farmCd: string,
+  _obsId: string,
+  _params?: { crop_name?: string; disease_name?: string },
+  _signal?: AbortSignal,
+): Promise<never> {
+  return Promise.reject(new ApiClientError('Analysis mirror stub'))
+}

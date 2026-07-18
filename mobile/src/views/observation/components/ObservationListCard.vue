@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { observationListThumbSrc } from '@/api/observationPhotos'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
+import { aiLabel, aiTone } from '@/views/observation/scr004DetailUi'
 import type { ObservationListItem } from '@/types/observation'
 
 const props = defineProps<{
@@ -46,25 +47,6 @@ function severityTone(cd: string): 'ok' | 'caution' | 'danger' | 'neutral' {
   if (cd === 'OS010300') return 'caution'
   if (cd === 'OS010100') return 'ok'
   return 'neutral'
-}
-
-function aiTone(status: string): 'ai' | 'ok' | 'neutral' | 'caution' {
-  const s = status.toUpperCase()
-  if (s === 'CONFIRMED' || s === 'ANALYZED' || s === 'COMPLETED') return 'ok'
-  if (s === 'PENDING' || s === 'NONE' || s === 'REVIEW_REQUIRED') return 'ai'
-  if (s === 'FAILED') return 'caution'
-  return 'neutral'
-}
-
-function aiLabel(status: string): string {
-  const s = status.toUpperCase()
-  if (s === 'NONE' || s === 'PENDING') return 'AI 대기'
-  if (s === 'ANALYZING') return 'AI 분석중'
-  if (s === 'ANALYZED' || s === 'COMPLETED') return 'AI 완료'
-  if (s === 'CONFIRMED') return 'AI 확정'
-  if (s === 'FAILED') return 'AI 실패'
-  if (s === 'REVIEW_REQUIRED') return '검토 필요'
-  return s || 'AI'
 }
 </script>
 
