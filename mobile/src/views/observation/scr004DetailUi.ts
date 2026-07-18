@@ -44,8 +44,11 @@ export function aiHint(status: string): string {
   if (s === 'ANALYZING') return '분석이 진행 중입니다.'
   if (s === 'FAILED') return '분석에 실패했습니다. 재분석을 요청할 수 있습니다.'
   if (s === 'REVIEW_REQUIRED') return '분석 결과 검토가 필요합니다.'
-  if (s === 'ANALYZED' || s === 'COMPLETED' || s === 'CONFIRMED') {
-    return '분석 결과입니다. 후보 확정은 다음 단계에서 진행합니다.'
+  if (s === 'ANALYZED' || s === 'COMPLETED') {
+    return '분석 결과입니다. 후보를 선택한 뒤 확정해 주세요.'
+  }
+  if (s === 'CONFIRMED') {
+    return '후보가 확정되었습니다. 공식 농약정보를 확인할 수 있습니다.'
   }
   return '분석 상태를 확인해 주세요.'
 }
