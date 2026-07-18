@@ -196,6 +196,12 @@ function goList(toast?: string) {
   })
 }
 
+/** 항상 관찰 목록으로 이동 (수정 화면 등 history 중간 진입점 회피) */
+function goBack() {
+  if (busy.value) return
+  goList()
+}
+
 function goEdit() {
   void router.push({
     name: 'observation-new',
@@ -254,7 +260,7 @@ watch(showDeleteDlg, async (open) => {
 <template>
   <div class="page">
     <main class="content">
-      <OdsAppBar />
+      <OdsAppBar show-back @back="goBack" />
 
       <p v-if="loading" class="status">불러오는 중…</p>
       <p v-else-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>

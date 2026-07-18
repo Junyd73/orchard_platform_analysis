@@ -33,5 +33,14 @@ def test_excludes_api_client_and_env() -> None:
     assert not any(".env" in f for f in files)
 
 
+def test_manifest_includes_pc_observation_ai() -> None:
+    files = collect_mirror_files(_REPO)
+    assert any(f.startswith("core/ai/") for f in files)
+    assert "core/observation_stage3.py" in files
+    assert "ui/widgets/observation/ai_analysis_panel.py" in files
+    assert "ui/widgets/observation/ai_analysis_worker.py" in files
+    assert not any(".orchard.env" in f for f in files)
+
+
 def test_preflight_passes_on_whitelist() -> None:
     assert run_preflight(_REPO) == 0

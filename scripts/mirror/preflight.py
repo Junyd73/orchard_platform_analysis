@@ -30,9 +30,24 @@ _BLOCKED_NAME_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(keystore|credential|secret)", re.I),
 )
 
-# 내용 스캔 (민감 패턴)
+# 내용 스캔 (실제 비밀값 — 환경변수 *이름* 문자열은 허용)
+# ENV 이름 예: ENV_API_KEY = "OPENAI_API_KEY"  → 통과
+# 실제 키 리터럴(sk- / ghp_ 등)만 차단
 _CONTENT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?i)(api[_-]?key|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]?[A-Za-z0-9_\-]{8,}"), "api key / token"),
+    (
+        re.compile(
+            r"(?i)(api[_-]?key|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]"
+            r"(sk-|rk-|AIza|ghp_|github_pat_)[A-Za-z0-9_\-]{8,}"
+        ),
+        "api key / token",
+    ),
+    (
+        re.compile(
+            r"(?i)(api[_-]?key|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]"
+            r"[A-Za-z0-9_\-]{32,}"
+        ),
+        "api key / token",
+    ),
     (re.compile(r"(?i)password\s*[=:]\s*['\"]?[^\s'\"#]{4,}"), "password"),
     (re.compile(r"(?i)Bearer\s+[A-Za-z0-9_\-\.]{20,}"), "bearer token"),
     (re.compile(r"\b\d{6}-\d{7}\b"), "주민번호 형식"),
@@ -54,6 +69,9 @@ _INTERNAL_URL = re.compile(
 
 # 바이너리 확장자 (내용 스캔 스킵)
 _BINARY_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".ico", ".woff", ".woff2"})
+
+# 자기 자신·패턴 정의 파일은 내용 키 검사 제외 (정규식 예시 오탐 방지)
+_SKIP_CONTENT_RELS = frozenset({"scripts/mirror/preflight.py"})
 
 # 대용량 이미지 (관찰 실사진 의심, KB)
 _MAX_IMAGE_BYTES = 48 * 1024
@@ -103,6 +121,10 @@ def _scan_file(repo_root: Path, rel: str, *, relaxed: bool = False) -> list[str]
                 return [f"{rel}: 대용량 이미지 ({size} bytes) — 실사진 의심"]
 
     if ext in _BINARY_EXT:
+        return []
+
+    rel_posix = rel.replace("\\", "/")
+    if rel_posix in _SKIP_CONTENT_RELS:
         return []
 
     try:

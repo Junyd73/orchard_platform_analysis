@@ -5,6 +5,8 @@ withDefaults(
     type?: 'button' | 'submit' | 'reset'
     disabled?: boolean
     block?: boolean
+    /** 외부 form 연결 (floating submit 등) */
+    form?: string
   }>(),
   {
     variant: 'primary',
@@ -21,6 +23,7 @@ withDefaults(
     :class="[`ods-btn--${variant}`, { 'ods-btn--block': block }]"
     :type="type"
     :disabled="disabled"
+    :form="form"
   >
     <slot />
   </button>

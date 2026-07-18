@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 
 import { completeObservation, fetchObservationDetail } from '@/api/observations'
 import { ApiClientError } from '@/api/client'
+import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import PhotoPanel from '@/views/observation/components/PhotoPanel.vue'
@@ -114,14 +115,11 @@ async function onFinish() {
 <template>
   <div class="page">
     <main class="content">
+      <OdsAppBar show-back @back="goBack" />
+
       <header class="top">
-        <button type="button" class="back" @click="goBack">
-          {{ backToBasic ? '← 기본정보' : obsStatus === 'COMPLETED' ? '← 상세' : '← 목록' }}
-        </button>
         <h1 class="title">관찰 사진</h1>
-        <p class="sub">
-          {{ farm?.farm_nm || farmCd }} · {{ obsId || '—' }}
-        </p>
+        <p class="sub">{{ obsId || '—' }}</p>
       </header>
 
       <nav v-if="fromWizard" class="steps" aria-label="등록 단계">
@@ -135,22 +133,30 @@ async function onFinish() {
 
       <p v-if="statusMessage" class="status" role="status">{{ statusMessage }}</p>
       <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-
-      <div v-if="obsId" class="footer">
-        <button type="button" class="link" @click="goBack">
-          {{ backToBasic ? '기본정보 수정' : obsStatus === 'COMPLETED' ? '상세' : '목록' }}
-        </button>
-        <OdsButton
-          v-if="showFinish"
-          variant="primary"
-          :disabled="finishing"
-          :block="false"
-          @click="onFinish"
-        >
-          {{ finishing ? '처리 중…' : finishLabel }}
-        </OdsButton>
-      </div>
     </main>
+
+    <div v-if="obsId" class="footer-actions">
+      <OdsButton
+        variant="secondary"
+        type="button"
+        :block="false"
+        class="footer-btn"
+        @click="goBack"
+      >
+        {{ backToBasic ? '기본정보 수정' : obsStatus === 'COMPLETED' ? '상세' : '목록' }}
+      </OdsButton>
+      <OdsButton
+        v-if="showFinish"
+        variant="primary"
+        :disabled="finishing"
+        :block="false"
+        class="footer-btn"
+        @click="onFinish"
+      >
+        {{ finishing ? '처리 중…' : finishLabel }}
+      </OdsButton>
+    </div>
+
     <OdsBottomNav />
   </div>
 </template>
@@ -159,7 +165,7 @@ async function onFinish() {
 .page {
   min-height: 100dvh;
   background: var(--ods-color-bg-muted);
-  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
 }
 .content {
   max-width: 480px;
@@ -167,20 +173,10 @@ async function onFinish() {
   padding: var(--ods-space-16) var(--ods-page-padding-x) var(--ods-space-24);
 }
 .top {
-  margin-bottom: var(--ods-space-16);
-}
-.back {
-  border: none;
-  background: transparent;
-  padding: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-primary);
-  cursor: pointer;
-  min-height: 44px;
+  margin-top: var(--ods-space-8);
 }
 .title {
-  margin: var(--ods-space-8) 0 0;
+  margin: 0;
   font: var(--ods-font-title-1);
   color: var(--ods-color-text);
 }
@@ -206,9 +202,10 @@ async function onFinish() {
   border: 1px solid var(--ods-color-border);
 }
 .step--active {
-  color: var(--ods-color-white);
-  background: var(--ods-color-primary);
-  border-color: var(--ods-color-primary);
+  /* 진행 Step: 저채도 Amber (주 액션 Green과 분리) */
+  color: var(--ods-color-gray-900);
+  background: color-mix(in srgb, var(--ods-color-accent) 70%, white);
+  border-color: color-mix(in srgb, var(--ods-color-caution) 40%, var(--ods-color-accent));
 }
 .error {
   color: var(--ods-color-danger);
@@ -220,21 +217,25 @@ async function onFinish() {
   color: var(--ods-color-primary);
   font-weight: 600;
 }
-.footer {
+.footer-actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ods-space-12);
-  margin-top: var(--ods-space-16);
+  gap: var(--ods-space-8);
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--ods-space-8) var(--ods-page-padding-x)
+    calc(var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--ods-color-bg-muted) 92%, transparent);
+  backdrop-filter: blur(8px);
 }
-.link {
-  border: none;
-  background: transparent;
-  padding: 0;
-  min-height: 44px;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-text-secondary);
-  cursor: pointer;
+.footer-btn {
+  flex: 1;
+}
+.footer-actions :deep(.ods-btn) {
+  min-height: 48px;
 }
 </style>

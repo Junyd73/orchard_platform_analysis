@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 
+import iconBack from '@/assets/ods/common/icon-back.svg'
 import iconBell from '@/assets/ods/common/icon-bell.svg'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import iconFarm from '@/assets/ods/common/icon-farm.svg'
@@ -102,7 +103,7 @@ onUnmounted(() => {
           aria-label="뒤로"
           @click="emit('back')"
         >
-          <span class="ods-appbar__back" aria-hidden="true">←</span>
+          <img :src="iconBack" alt="" aria-hidden="true">
         </button>
         <button type="button" class="ods-appbar__farm" aria-label="농장 선택">
           <img class="ods-appbar__farm-mark" :src="iconFarm" alt="" aria-hidden="true">
@@ -252,13 +253,6 @@ onUnmounted(() => {
   width: 22px;
   height: 22px;
   display: block;
-}
-
-.ods-appbar__back {
-  font-size: 18px;
-  line-height: 1;
-  color: var(--ods-color-primary);
-  font-weight: 700;
 }
 
 .ods-appbar__toast {

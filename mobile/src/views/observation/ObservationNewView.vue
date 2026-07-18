@@ -10,15 +10,18 @@ import {
   updateObservationBasic,
 } from '@/api/observations'
 import { ApiClientError } from '@/api/client'
+import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsFormField from '@/components/ods/OdsFormField.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
+import OdsSegmented from '@/components/ods/OdsSegmented.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
   OBS_TARGET_FRUIT_CD,
   OBS_TARGET_PEST_CD,
 } from '@/composables/constants/app'
+import { formatDateKo } from '@/shared/formatDateKo'
 import { clearObsDraft, writeObsDraft } from '@/composables/obsDraft'
 import { useAppStore } from '@/composables/stores/app'
 import type { FarmSiteSummary } from '@/types/farm'
@@ -31,7 +34,8 @@ const { farmCd, farm } = storeToRefs(store)
 const sites = ref<FarmSiteSummary[]>([])
 const obsId = ref('')
 const obsDt = ref(new Date().toISOString().slice(0, 10))
-const targetTypeCd = ref(OBS_TARGET_PEST_CD)
+/** 신규 진입 시 미선택('') — 병해충/과실 필수 선택 */
+const targetTypeCd = ref('')
 const siteId = ref('')
 const obsTitle = ref('')
 const obsContent = ref('')
@@ -41,8 +45,10 @@ const saving = ref(false)
 const errorMessage = ref('')
 /** DRAFT | COMPLETED — 취소/안내 문구용 */
 const obsStatus = ref('')
+const datePicker = ref<HTMLInputElement | null>(null)
 
 const farmLabel = computed(() => farm.value?.farm_nm || farmCd.value)
+const obsDtLabel = computed(() => formatDateKo(obsDt.value))
 const fromDetail = computed(() => String(route.query.from || '') === 'detail')
 const isEditCompleted = computed(
   () => fromDetail.value || obsStatus.value === 'COMPLETED',
@@ -50,13 +56,18 @@ const isEditCompleted = computed(
 const canSubmit = computed(() => {
   if (saving.value) return false
   if (!obsDt.value || !siteId.value || !targetTypeCd.value) return false
-  return Boolean(obsTitle.value.trim() || obsContent.value.trim())
+  return Boolean(obsTitle.value.trim() && obsContent.value.trim())
 })
+
+const targetOptions = [
+  { value: OBS_TARGET_PEST_CD, label: '병해충' },
+  { value: OBS_TARGET_FRUIT_CD, label: '과실' },
+]
 
 function resetBlankForm() {
   obsId.value = ''
   obsDt.value = new Date().toISOString().slice(0, 10)
-  targetTypeCd.value = OBS_TARGET_PEST_CD
+  targetTypeCd.value = ''
   siteId.value = sites.value.length === 1 ? sites.value[0].site_id : ''
   obsTitle.value = ''
   obsContent.value = ''
@@ -91,7 +102,9 @@ async function restoreIfNeeded() {
     targetTypeCd.value =
       detail.target_type_cd === OBS_TARGET_FRUIT_CD
         ? OBS_TARGET_FRUIT_CD
-        : OBS_TARGET_PEST_CD
+        : detail.target_type_cd === OBS_TARGET_PEST_CD
+          ? OBS_TARGET_PEST_CD
+          : ''
     siteId.value = detail.site_id || ''
     obsTitle.value = detail.obs_title || ''
     obsContent.value = detail.obs_content || ''
@@ -126,10 +139,33 @@ async function onCancel() {
   goList()
 }
 
+function openDatePicker() {
+  const el = datePicker.value
+  if (!el || saving.value) return
+  if (typeof el.showPicker === 'function') {
+    try {
+      el.showPicker()
+      return
+    } catch {
+      /* fall through */
+    }
+  }
+  el.focus()
+  el.click()
+}
+
+function onObsDtInput(ev: Event) {
+  obsDt.value = (ev.target as HTMLInputElement).value
+}
+
 async function onNext() {
+  if (!targetTypeCd.value) {
+    errorMessage.value = '관찰 대상을 선택해 주세요.'
+    return
+  }
   if (!canSubmit.value) {
     errorMessage.value =
-      '필수 항목을 확인해 주세요. (관찰일·대상·필지, 제목 또는 관찰 내용 중 하나)'
+      '필수 항목을 확인해 주세요. (관찰일자·대상·필지·제목·관찰 내용)'
     return
   }
   saving.value = true
@@ -201,12 +237,10 @@ watch(
 <template>
   <div class="page">
     <main class="content">
+      <OdsAppBar show-back @back="onCancel" />
+
       <header class="top">
-        <button type="button" class="back" @click="onCancel">
-          {{ isEditCompleted && obsId ? '← 상세' : '← 목록' }}
-        </button>
-        <h1 class="title">{{ isEditCompleted && obsId ? '관찰 수정' : '병해충·과실 관찰' }}</h1>
-        <p class="sub">{{ farmLabel }}</p>
+        <h1 class="title">{{ isEditCompleted && obsId ? '관찰 수정' : '관찰기록' }}</h1>
       </header>
 
       <nav class="steps" aria-label="등록 단계">
@@ -217,7 +251,12 @@ watch(
 
       <p v-if="loading" class="status" role="status">불러오는 중…</p>
 
-      <form v-else class="form" @submit.prevent="onNext">
+      <form
+        v-else
+        id="obs-basic-form"
+        class="form"
+        @submit.prevent="onNext"
+      >
         <OdsInput
           label="농장"
           :model-value="farmLabel"
@@ -225,33 +264,43 @@ watch(
           disabled
         />
 
-        <OdsInput
-          v-model="obsDt"
-          label="관찰일"
-          type="date"
-          variant="form"
-          required
-        />
-
-        <OdsFormField label="관찰 대상" required as="fieldset">
-          <div class="seg" role="group" aria-label="관찰 대상">
+        <OdsFormField label="관찰일자" required>
+          <div class="date-field">
             <button
               type="button"
-              class="seg__btn"
-              :class="{ 'seg__btn--on': targetTypeCd === OBS_TARGET_PEST_CD }"
-              @click="targetTypeCd = OBS_TARGET_PEST_CD"
+              class="date-field__display"
+              :disabled="saving"
+              :aria-label="`관찰일자 ${obsDtLabel}`"
+              @click="openDatePicker"
             >
-              병해충
+              {{ obsDtLabel }}
             </button>
-            <button
-              type="button"
-              class="seg__btn"
-              :class="{ 'seg__btn--on': targetTypeCd === OBS_TARGET_FRUIT_CD }"
-              @click="targetTypeCd = OBS_TARGET_FRUIT_CD"
+            <input
+              ref="datePicker"
+              class="date-field__native"
+              type="date"
+              :value="obsDt"
+              :disabled="saving"
+              required
+              tabindex="-1"
+              aria-hidden="true"
+              @input="onObsDtInput"
             >
-              과실
-            </button>
           </div>
+        </OdsFormField>
+
+        <OdsFormField
+          class="field-target"
+          label="관찰 대상"
+          required
+          as="fieldset"
+        >
+          <OdsSegmented
+            v-model="targetTypeCd"
+            :options="targetOptions"
+            :disabled="saving"
+            aria-label="관찰 대상"
+          />
         </OdsFormField>
 
         <OdsFormField label="필지" required>
@@ -267,20 +316,21 @@ watch(
           v-model="obsTitle"
           label="제목"
           variant="form"
-          optional
+          required
           placeholder="예: 잎 반점 관찰"
         />
 
         <OdsFormField
           label="관찰 내용"
-          optional
-          hint="제목 또는 관찰 내용 중 하나 이상 입력해 주세요."
+          required
+          hint="현장에서 본 증상·상황을 적어 주세요. AI 분석을 위한 데이터 수집 단계이며, 장기적으로 AI 추천 정확도 향상에도 도움이 됩니다."
         >
           <textarea
             v-model="obsContent"
             class="textarea"
             rows="4"
             placeholder="현장에서 본 증상을 적어 주세요"
+            required
           />
         </OdsFormField>
 
@@ -293,17 +343,32 @@ watch(
           </template>
         </p>
         <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-
-        <div class="actions">
-          <OdsButton variant="secondary" type="button" :disabled="saving" @click="onCancel">
-            취소
-          </OdsButton>
-          <OdsButton variant="primary" type="submit" :disabled="!canSubmit">
-            {{ saving ? '저장 중…' : '다음 · 사진' }}
-          </OdsButton>
-        </div>
       </form>
     </main>
+
+    <div v-if="!loading" class="footer-actions">
+      <OdsButton
+        variant="secondary"
+        type="button"
+        :disabled="saving"
+        :block="false"
+        class="footer-btn"
+        @click="onCancel"
+      >
+        취소
+      </OdsButton>
+      <OdsButton
+        variant="primary"
+        type="submit"
+        form="obs-basic-form"
+        :disabled="!canSubmit"
+        :block="false"
+        class="footer-btn"
+      >
+        {{ saving ? '저장 중…' : '다음 · 사진' }}
+      </OdsButton>
+    </div>
+
     <OdsBottomNav />
   </div>
 </template>
@@ -312,32 +377,20 @@ watch(
 .page {
   min-height: 100dvh;
   background: var(--ods-color-bg-muted);
-  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
 }
 .content {
   max-width: 480px;
   margin: 0 auto;
   padding: var(--ods-space-16) var(--ods-page-padding-x) var(--ods-space-24);
 }
-.back {
-  border: none;
-  background: transparent;
-  padding: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-primary);
-  cursor: pointer;
-  min-height: 44px;
+.top {
+  margin-top: var(--ods-space-8);
 }
 .title {
-  margin: var(--ods-space-8) 0 0;
+  margin: 0;
   font: var(--ods-font-title-1);
   color: var(--ods-color-text);
-}
-.sub {
-  margin: var(--ods-space-4) 0 0;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
 }
 .steps {
   display: flex;
@@ -355,9 +408,10 @@ watch(
   border: 1px solid var(--ods-color-border);
 }
 .step--active {
-  color: var(--ods-color-white);
-  background: var(--ods-color-primary);
-  border-color: var(--ods-color-primary);
+  /* 진행 Step: 저채도 Amber (주 액션 Green과 분리) */
+  color: var(--ods-color-gray-900);
+  background: color-mix(in srgb, var(--ods-color-accent) 70%, white);
+  border-color: color-mix(in srgb, var(--ods-color-caution) 40%, var(--ods-color-accent));
 }
 .step--muted {
   opacity: 0.55;
@@ -372,25 +426,42 @@ watch(
   border-radius: var(--ods-radius-card);
   box-shadow: var(--ods-shadow-card);
 }
-.seg {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--ods-space-8);
+/* 관찰 대상: 라벨·칩을 한 묶음으로 (필드 간 section gap은 form gap 유지) */
+:deep(.field-target) {
+  gap: var(--ods-space-4);
 }
-.seg__btn {
+.date-field {
+  position: relative;
+  min-width: 0;
+}
+.date-field__display {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
   min-height: var(--ods-control-height);
+  padding: 0 var(--ods-space-16);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
-  background: var(--ods-color-gray-100);
+  background: var(--ods-color-white);
   font: var(--ods-font-form-value);
-  font-weight: 600;
   color: var(--ods-color-text);
+  text-align: left;
   cursor: pointer;
 }
-.seg__btn--on {
-  background: var(--ods-color-primary);
-  color: var(--ods-color-white);
-  border-color: var(--ods-color-primary);
+.date-field__display:disabled {
+  background: var(--ods-color-gray-100);
+  color: var(--ods-color-gray-500);
+  cursor: not-allowed;
+}
+.date-field__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
 }
 .textarea {
   width: 100%;
@@ -423,12 +494,25 @@ watch(
   font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
-.actions {
+.footer-actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
   display: flex;
   gap: var(--ods-space-8);
-  padding-top: var(--ods-space-4);
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--ods-space-8) var(--ods-page-padding-x)
+    calc(var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--ods-color-bg-muted) 92%, transparent);
+  backdrop-filter: blur(8px);
 }
-.actions :deep(.ods-btn) {
+.footer-btn {
   flex: 1;
+}
+.footer-actions :deep(.ods-btn) {
+  min-height: 48px;
 }
 </style>

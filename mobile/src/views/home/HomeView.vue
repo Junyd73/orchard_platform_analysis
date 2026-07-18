@@ -4,7 +4,6 @@ import { storeToRefs } from 'pinia'
 
 import MenuCard from '@/components/MenuCard.vue'
 import StatusCard from '@/components/StatusCard.vue'
-import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import MobileLayout from '@/layouts/MobileLayout.vue'
 import { useAppStore } from '@/composables/stores/app'
 
@@ -25,8 +24,6 @@ onMounted(() => {
 
 <template>
   <MobileLayout>
-    <OdsAppBar />
-
     <div class="stack">
       <StatusCard
         title="서버 연결 상태"

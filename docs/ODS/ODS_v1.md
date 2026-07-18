@@ -8,6 +8,7 @@
 - 화면 Addendum: `ODS_v1.0.1_SCR-004_Addendum.md`
 - 적용 시작 화면: SCR-004 생육관찰 상세
 - v1.1 추가: Sticky AppBar Glass → Surface 스크롤 전환
+- v1.1 보완(2026-07-18): **모든 화면 공통 AppBar 필수** · Bottom Action Floating 표준화
 
 ## 1. 목적
 
@@ -30,6 +31,19 @@ Samsung One UI, Toss, 증권사 MTS 패턴을 참고하되, **ODS Token·Compone
 상세 화면의 제목 역할은 Hero가 담당한다.
 
 ## 3. AppBar (공통) — ODS v1.1
+
+### 적용 범위 (필수)
+
+모든 모바일 화면 상단에 공통 `OdsAppBar`를 둔다.
+
+| 구분 | 적용 |
+|------|------|
+| Home / 관찰 목록 / 상세 / 등록·수정 / 사진 / 영농일지 / 주문 | `OdsAppBar` 필수 |
+| `MobileLayout` 사용 화면 | 레이아웃에서 AppBar를 포함한다 |
+| 관찰 플로우(목록·상세·등록·사진) | 화면별로 `OdsAppBar`를 직접 둔다 |
+
+AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한다.  
+화면명(`관찰 수정` 등)을 AppBar 중앙 타이틀로 두지 않는다.
 
 ### 구조
 
@@ -64,8 +78,12 @@ Samsung One UI, Toss, 증권사 MTS 패턴을 참고하되, **ODS Token·Compone
 
 | 구분 | 정책 |
 |------|------|
-| 기본 화면 | Android 시스템 Back / 제스처만 사용. AppBar에 Back 없음 |
-| 예외 | Camera, Viewer, Modal, Wizard 만 AppBar/헤더 Back 허용 |
+| 기본 화면 (Home·목록·영농일지·주문 등) | AppBar에 Back 없음. Android 시스템 Back / 제스처 |
+| 상세·등록(Wizard)·사진 단계 | AppBar Back 허용. **대상 화면을 명시적으로 `router.push({ name })`로 이동** (단순 `router.back()` 지양) |
+| Camera / Viewer / Modal | 각 오버레이 헤더 Back 유지 |
+
+상세 AppBar Back → 관찰 목록(`observation`).  
+등록·수정 AppBar Back → 취소와 동일(수정 중이면 상세, 아니면 목록).
 
 ## 4. Bottom Navigation (공통)
 
@@ -107,12 +125,15 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 - PSIS: Spray + Shield + Leaf + Recommendation
 - 자산 위치: `mobile/src/assets/ods/scr004/`
 
-## 9. Bottom Action
+## 9. Bottom Action (Floating)
 
+- 본문 스크롤과 무관하게 **항상 보이도록** Bottom Nav 위에 fixed(floating) 배치한다.
+- 기준 화면: SCR-004 상세(수정·삭제), SCR-002 등록/수정(취소·다음·사진), 사진 단계(완료)
+- Safe Area + Bottom Nav 높이(`64px + safe-area`) 위에 올린다.
+- 페이지 `padding-bottom`으로 본문이 버튼에 가리지 않게 한다.
 - 수정: Document + Pencil 계열 아이콘
 - 삭제: Outline Trash 계열 아이콘
 - ODS Button variant 유지
-- Safe Area 확보
 
 ## 10. 금지사항
 
@@ -126,10 +147,10 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 
 | 단계 | 화면 |
 |------|------|
-| ODS v1.1 적용 | SCR-004 상세, Home, 관찰 목록 (공통 `OdsAppBar`) |
-| 후속 적용 | SCR-002 등록, SCR-003 사진, 영농일지, 주문 |
+| ODS v1.1 적용 | Home, 관찰 목록·상세·등록/수정·사진, 영농일지·주문 (`OdsAppBar` 공통) |
+| 후속 고도화 | SCR-002/003 승인 시안 세부 필드·AI 플로우 |
 
-Wizard/Camera/Viewer/Modal은 AppBar Back 예외를 유지한 채 동일 Token·Nav 정책을 따른다.
+등록·사진 Wizard도 공통 AppBar + Floating Bottom Action을 따른다.
 
 ## 12. 관련 자산
 

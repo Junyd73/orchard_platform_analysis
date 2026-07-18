@@ -112,6 +112,28 @@ include:
   - src: docs/ODS_LOCATION.md
     dest: docs/design/ODS_LOCATION.md
 
+  # --- PC: 관찰 AI 분석 (키·.env 제외, 환경변수명만 참조) ---
+  - src: core/ai/**
+    dest: core/ai/**
+
+  - src: core/observation_stage3.py
+    dest: core/observation_stage3.py
+
+  - src: core/observation_safe_errors.py
+    dest: core/observation_safe_errors.py
+
+  - src: core/pesticide/**
+    dest: core/pesticide/**
+
+  - src: ui/widgets/observation/ai_analysis_panel.py
+    dest: ui/widgets/observation/ai_analysis_panel.py
+
+  - src: ui/widgets/observation/ai_analysis_worker.py
+    dest: ui/widgets/observation/ai_analysis_worker.py
+
+  - src: ui/widgets/observation/psis_search_worker.py
+    dest: ui/widgets/observation/psis_search_worker.py
+
   # --- Server (공개 계약·로직) ---
   - src: server/app/schemas/**
     dest: server/schemas/**
@@ -169,6 +191,8 @@ exclude_globs:
   - server/app/core/config.py
   - server/app/db/**
   - server/app/api/**
+  - "**/.orchard.env"
+  - "**/.orchard.env.*"
   - start_project_dev.ps1
   - scripts/detect_lan_ip.py
   - scripts/generate_mobile_qr.py

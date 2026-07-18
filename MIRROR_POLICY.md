@@ -61,7 +61,20 @@ Analysis (orchard_platform_analysis)
 
 **제외:** `app/core/config.py`, `app/db/`, `app/api/dependencies.py`, `.env`, 실제 SQLite 경로, 미디어 루트.
 
-### 3.3 Docs (`docs/`)
+### 3.3 PC 관찰 AI 분석 (`core/ai`, `ui/widgets/observation`)
+
+| Analysis 경로 | Private 원본 | 비고 |
+|---------------|--------------|------|
+| `core/ai/` | `core/ai/` | Provider·스키마·서비스·sanitize (키는 환경변수명만) |
+| `core/observation_stage3.py` | 동일 | AI·후보·PSIS 스냅샷 CRUD |
+| `core/observation_safe_errors.py` | 동일 | AI 워커 안전 오류 메시지 |
+| `core/pesticide/` | 동일 | AI 확정 후 PSIS 조회 (키는 `ORCHARD_PSIS_API_KEY` env) |
+| `ui/widgets/observation/ai_analysis_*.py` | 동일 | PC AI 분석 UI·QThread |
+| `ui/widgets/observation/psis_search_worker.py` | 동일 | AI 패널 연동 PSIS 검색 |
+
+**제외:** `.orchard.env`, `.env*`, 실제 `OPENAI_API_KEY` / `ORCHARD_PSIS_API_KEY` 값, DB·실사진.
+
+### 3.4 Docs (`docs/`)
 
 | Analysis 경로 | Private 원본 |
 |---------------|--------------|
@@ -70,7 +83,7 @@ Analysis (orchard_platform_analysis)
 | `docs/design/` | `docs/mobile_observation_design.md`, `docs/ODS_LOCATION.md` |
 | `docs/architecture/` | `mobile/docs/architecture/`, `server/docs/` (화이트리스트) |
 
-### 3.4 Scripts (`scripts/`)
+### 3.5 Scripts (`scripts/`)
 
 | 포함 | 제외 |
 |------|------|
@@ -198,7 +211,7 @@ Private 커밋과 **분리**한다. Analysis 커밋 메시지 접두사:
 |------|---------|----------|
 | 생육관찰 UI | `features/observation/` | `views/observation/` |
 | 사진 UI | `PhotoPanel`, `PhotoViewer` | 동일 구조 |
-| AI·PSIS | UI·설계 문서 | `docs/mobile/`, SCR |
+| AI·PSIS | UI·설계 문서 + PC `core/ai`·`ai_analysis_*` | whitelist 동기화 (키·env 제외) |
 | Timeline·GPS | 구현·SCR 확정 후 | manifest에 경로 추가 후 동기화 |
 
 **미구현·비공개 기능**은 manifest에 추가하지 않는다.
