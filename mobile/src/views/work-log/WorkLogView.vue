@@ -7,7 +7,8 @@ import { fetchWorkLogDaily, fetchWorkLogMonthly } from '@/api/workLogs'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
-import OdsButton from '@/components/ods/OdsButton.vue'
+import OdsFab from '@/components/ods/OdsFab.vue'
+import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
 import WorkLogFilterSheet from '@/views/work-log/components/WorkLogFilterSheet.vue'
 import WorkLogHero from '@/views/work-log/components/WorkLogHero.vue'
 import WorkLogMonthCalendar from '@/views/work-log/components/WorkLogMonthCalendar.vue'
@@ -17,9 +18,10 @@ import WorkLogWeatherCard from '@/views/work-log/components/WorkLogWeatherCard.v
 import {
   defaultWorkFilters,
   isFutureDate,
-  monthLabel,
   MSG_DETAIL_PENDING,
   MSG_HOURLY_FORECAST_PENDING,
+  MSG_LOAD_MONTH_FAILED,
+  shiftMonth,
   todayIso,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
@@ -29,6 +31,8 @@ import type {
   WorkLogMasterDto,
   WorkLogMonthSummary as SummaryDto,
 } from '@/types/workLog'
+
+import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 
 const store = useAppStore()
 const router = useRouter()
@@ -40,19 +44,18 @@ const year = ref(now.getFullYear())
 const month = ref(now.getMonth() + 1)
 const loading = ref(true)
 const weatherLoading = ref(false)
-const errorMessage = ref('')
+const bootstrapping = ref(true)
 const toastMessage = ref('')
+const loadFailed = ref(false)
 const summary = ref<SummaryDto | null>(null)
 const days = ref<Record<string, WorkLogDayCell>>({})
 const todayMaster = ref<WorkLogMasterDto | null>(null)
 const filterOpen = ref(false)
 const filters = ref(defaultWorkFilters())
 
-const title = computed(() => monthLabel(year.value, month.value))
 const today = todayIso()
 
 const todayCell = computed(() => days.value[today] || null)
-
 const todayWorkCount = computed(() => Number(todayCell.value?.work_count || 0))
 const todayResourceCount = computed(() => Number(todayCell.value?.resource_count || 0))
 const todayExpenseSum = computed(() => {
@@ -60,6 +63,8 @@ const todayExpenseSum = computed(() => {
   if (!c) return 0
   return Number(c.expense_sum || 0) + Number(c.labor_sum || 0)
 })
+const todayInProgressCount = computed((): number | null => null)
+const todayPlannedCount = computed((): number | null => null)
 
 const canGoNext = computed(() => {
   const t = new Date()
@@ -68,9 +73,14 @@ const canGoNext = computed(() => {
   return year.value < cy || (year.value === cy && month.value < cm)
 })
 
+const showMonthSkeleton = computed(() => bootstrapping.value)
+const showWeatherSkeleton = computed(
+  () => bootstrapping.value || (weatherLoading.value && !todayMaster.value),
+)
+
 async function loadMonth() {
   loading.value = true
-  errorMessage.value = ''
+  loadFailed.value = false
   try {
     const res = await fetchWorkLogMonthly(farmCd.value, year.value, month.value)
     summary.value = res.summary
@@ -78,21 +88,16 @@ async function loadMonth() {
   } catch (err) {
     summary.value = null
     days.value = {}
-    errorMessage.value =
-      err instanceof ApiClientError ? err.message : '월간 영농일지를 불러오지 못했습니다.'
+    loadFailed.value = true
+    const msg =
+      err instanceof ApiClientError ? err.message : MSG_LOAD_MONTH_FAILED
+    showToast(sanitizeError(msg))
   } finally {
     loading.value = false
   }
 }
 
 async function loadTodayWeather() {
-  const t = new Date()
-  const viewingCurrent =
-    year.value === t.getFullYear() && month.value === t.getMonth() + 1
-  if (!viewingCurrent) {
-    todayMaster.value = null
-    return
-  }
   weatherLoading.value = true
   try {
     const daily = await fetchWorkLogDaily(farmCd.value, today)
@@ -104,23 +109,26 @@ async function loadTodayWeather() {
   }
 }
 
-function goPrev() {
-  if (month.value === 1) {
-    year.value -= 1
-    month.value = 12
-  } else {
-    month.value -= 1
+function sanitizeError(msg: string): string {
+  const m = String(msg || '').trim()
+  if (!m) return MSG_LOAD_MONTH_FAILED
+  if (/not\s*found/i.test(m) || m === 'Farm not found') {
+    return MSG_LOAD_MONTH_FAILED
   }
+  return m
+}
+
+function goPrev() {
+  const next = shiftMonth(year.value, month.value, -1)
+  year.value = next.year
+  month.value = next.month
 }
 
 function goNext() {
   if (!canGoNext.value) return
-  if (month.value === 12) {
-    year.value += 1
-    month.value = 1
-  } else {
-    month.value += 1
-  }
+  const next = shiftMonth(year.value, month.value, 1)
+  year.value = next.year
+  month.value = next.month
 }
 
 function goTodayMonth() {
@@ -146,7 +154,6 @@ function onFabRegister() {
 }
 
 function onForecast() {
-  // 기존 날씨 상세 라우트 없음 → 토스트만
   showToast(MSG_HOURLY_FORECAST_PENDING)
 }
 
@@ -171,7 +178,6 @@ function showToast(msg: string) {
 
 watch([year, month], () => {
   void loadMonth()
-  void loadTodayWeather()
 })
 
 onMounted(async () => {
@@ -179,6 +185,7 @@ onMounted(async () => {
     await store.refreshAll()
   }
   await Promise.all([loadMonth(), loadTodayWeather()])
+  bootstrapping.value = false
   const toast = String(route.query.toast || '').trim()
   if (toast) {
     showToast(toast)
@@ -192,92 +199,70 @@ onMounted(async () => {
     <main class="content">
       <OdsAppBar />
 
-      <WorkLogHero
-        mode="monthly"
-        :farm-name="farm?.farm_nm || undefined"
-        :today-work-count="todayWorkCount"
-        :today-resource-count="todayResourceCount"
-        :today-expense-sum="todayExpenseSum"
-      />
+      <div class="hero-stack">
+        <OdsSkeleton v-if="showMonthSkeleton" variant="hero" />
+        <WorkLogHero
+          v-else
+          mode="monthly"
+          :farm-name="farm?.farm_nm || undefined"
+          :today-work-count="todayWorkCount"
+          :today-in-progress-count="todayInProgressCount"
+          :today-planned-count="todayPlannedCount"
+          :today-resource-count="todayResourceCount"
+          :today-expense-sum="todayExpenseSum"
+        />
 
-      <WorkLogWeatherCard
-        :master="todayMaster"
-        :loading="weatherLoading"
-        @forecast="onForecast"
-      />
-
-      <div class="month-head">
-        <div class="month-head__row">
-          <button type="button" class="month-head__nav" aria-label="이전 달" @click="goPrev">
-            ‹
-          </button>
-          <h2 class="month-head__title">{{ title }}</h2>
-          <button
-            type="button"
-            class="month-head__nav"
-            aria-label="다음 달"
-            :disabled="!canGoNext"
-            @click="goNext"
-          >
-            ›
-          </button>
-        </div>
-        <div class="month-head__actions">
-          <OdsButton
-            variant="secondary"
-            type="button"
-            :block="false"
-            class="month-head__btn"
-            @click="filterOpen = true"
-          >
-            작업필터 ▼
-          </OdsButton>
-          <OdsButton
-            variant="primary"
-            type="button"
-            :block="false"
-            class="month-head__btn"
-            @click="goTodayMonth"
-          >
-            오늘
-          </OdsButton>
+        <div class="hero-stack__weather">
+          <OdsSkeleton v-if="showWeatherSkeleton" variant="card" height="112px" />
+          <WorkLogWeatherCard
+            v-else
+            :master="todayMaster"
+            :weather-nm-fallback="todayCell?.weather_nm"
+            :weather-cd-fallback="todayCell?.weather_cd"
+            :loading="weatherLoading"
+            @forecast="onForecast"
+          />
         </div>
       </div>
 
-      <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-      <p v-else-if="loading" class="status status--loading" role="status">
-        캘린더 불러오는 중…
-      </p>
+      <template v-if="showMonthSkeleton">
+        <OdsSkeleton variant="card" height="360px" />
+        <OdsSkeleton variant="kpi" />
+        <OdsSkeleton variant="card" height="140px" />
+      </template>
 
-      <WorkLogMonthCalendar
-        v-if="!errorMessage"
-        :year="year"
-        :month="month"
-        :days="days"
-        :filters="filters"
-        @select="onSelectDay"
-        @blocked="onBlocked"
-      />
+      <template v-else>
+        <WorkLogMonthCalendar
+          :year="year"
+          :month="month"
+          :days="days"
+          :filters="filters"
+          :can-go-next="canGoNext"
+          :loading="loading"
+          :show-empty="loadFailed || Object.keys(days).length === 0"
+          @select="onSelectDay"
+          @blocked="onBlocked"
+          @open-filter="filterOpen = true"
+          @go-today="goTodayMonth"
+          @prev-month="goPrev"
+          @next-month="goNext"
+        />
 
-      <WorkLogMonthSummary
-        :year="year"
-        :month="month"
-        :summary="summary"
-        :loading="loading"
-        @detail="onSummaryDetail"
-      />
+        <WorkLogMonthSummary
+          :year="year"
+          :month="month"
+          :summary="summary"
+          :loading="loading"
+          @detail="onSummaryDetail"
+        />
 
-      <WorkLogMonthChart
-        v-if="!errorMessage"
-        :year="year"
-        :month="month"
-        :days="days"
-      />
+        <WorkLogMonthChart :year="year" :month="month" :days="days" />
+      </template>
     </main>
 
-    <button type="button" class="fab" aria-label="오늘 영농일지 등록" @click="onFabRegister">
-      + 등록
-    </button>
+    <OdsFab label="등록" aria-label="오늘 영농일지 등록" @click="onFabRegister">
+      <img :src="iconPlus" alt="" />
+    </OdsFab>
 
     <WorkLogFilterSheet
       :open="filterOpen"
@@ -306,88 +291,26 @@ onMounted(async () => {
   flex-direction: column;
   gap: var(--ods-space-16);
 }
-.month-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-12);
+.hero-stack {
+  position: relative;
+  padding-bottom: var(--ods-space-40);
 }
-.month-head__row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--ods-space-12);
-}
-.month-head__title {
-  margin: 0;
-  min-width: 8em;
-  text-align: center;
-  font: var(--ods-font-headline);
-  color: var(--ods-color-text);
-}
-.month-head__nav {
-  width: 44px;
-  height: 44px;
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-white);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--ods-color-text);
-}
-.month-head__nav:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.month-head__actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--ods-space-8);
-}
-.month-head__btn {
-  width: 100%;
-}
-.status {
-  margin: 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text-secondary);
-}
-.status--loading {
-  color: var(--ods-color-ai);
-  font-weight: 600;
-}
-.error {
-  margin: 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-danger);
-}
-.fab {
-  position: fixed;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: calc(72px + env(safe-area-inset-bottom));
-  z-index: 40;
-  min-height: 48px;
-  padding: 0 18px;
-  border: none;
-  border-radius: 999px;
-  background: var(--ods-color-primary);
-  color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
-  font-weight: 700;
-  box-shadow: var(--ods-shadow-card);
-  cursor: pointer;
+.hero-stack__weather {
+  position: relative;
+  z-index: 2;
+  margin-top: calc(var(--ods-space-40) * -1);
 }
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(120px + env(safe-area-inset-bottom));
+  bottom: calc(150px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 70;
   max-width: min(420px, calc(100vw - 32px));
   margin: 0;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(33, 33, 33, 0.92);
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-gray-900) 92%, transparent);
   color: var(--ods-color-white);
   font: var(--ods-font-body-2);
   font-weight: 600;

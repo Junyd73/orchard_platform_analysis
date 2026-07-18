@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import iconExpense from '@/assets/ods/work-log/icon-expense.svg'
+import iconFertilizer from '@/assets/ods/work-log/icon-fertilizer.svg'
 import iconLabor from '@/assets/ods/work-log/icon-labor.svg'
+import iconPesticide from '@/assets/ods/work-log/icon-pesticide.svg'
 import iconWork from '@/assets/ods/work-log/icon-work.svg'
-import OdsCard from '@/components/ods/OdsCard.vue'
-import { formatWon, monthLabel } from '@/views/work-log/workLogConstants'
+import {
+  formatWonWithUnit,
+  monthRangeLabel,
+} from '@/views/work-log/workLogConstants'
 import type { WorkLogMonthSummary } from '@/types/workLog'
 
 const props = defineProps<{
@@ -17,123 +21,165 @@ const emit = defineEmits<{
   detail: []
 }>()
 
-const title = () => `${monthLabel(props.year, props.month)} 요약`
-
-/** 농약·비료·수확: 이번 단계 플레이스홀더 (임의 수치 금지) */
 const PLACEHOLDER = '—'
+const title = () => `${props.month}월 월간 요약`
+const range = () => monthRangeLabel(props.year, props.month)
 </script>
 
 <template>
-  <section class="summary" aria-label="월간 요약">
-    <div class="summary__head">
-      <h2 class="summary__title">{{ title() }}</h2>
-      <button type="button" class="summary__link" @click="emit('detail')">
+  <section class="sum anim-fade" aria-label="월간 요약">
+    <div class="sum__head">
+      <div class="sum__titles">
+        <h2 class="sum__title">{{ title() }}</h2>
+        <span class="sum__range">{{ range() }}</span>
+      </div>
+      <button type="button" class="sum__link" @click="emit('detail')">
         자세히 보기 &gt;
       </button>
     </div>
-    <p v-if="loading" class="summary__hint">요약 불러오는 중…</p>
-    <div class="summary__grid">
-      <OdsCard>
-        <div class="kpi">
-          <img class="kpi__ico" :src="iconWork" alt="" />
-          <p class="label">작업</p>
-          <p class="value">{{ summary?.work_count ?? '—' }}</p>
-        </div>
-      </OdsCard>
-      <OdsCard>
-        <div class="kpi">
-          <img class="kpi__ico" :src="iconLabor" alt="" />
-          <p class="label">투입인력</p>
-          <p class="value">{{ summary?.resource_count ?? '—' }}</p>
-        </div>
-      </OdsCard>
-      <OdsCard>
-        <div class="kpi">
-          <img class="kpi__ico" :src="iconExpense" alt="" />
-          <p class="label">경비</p>
-          <p class="value value--sm">
-            {{ summary ? formatWon(summary.expense_sum) : '—' }}
-          </p>
-        </div>
-      </OdsCard>
-      <OdsCard>
-        <div class="kpi">
-          <p class="label">농약</p>
-          <p class="value">{{ PLACEHOLDER }}</p>
-        </div>
-      </OdsCard>
-      <OdsCard>
-        <div class="kpi">
-          <p class="label">비료</p>
-          <p class="value">{{ PLACEHOLDER }}</p>
-        </div>
-      </OdsCard>
-      <OdsCard>
-        <div class="kpi">
-          <p class="label">수확진행률</p>
-          <p class="value">{{ PLACEHOLDER }}</p>
-        </div>
-      </OdsCard>
+
+    <p v-if="loading" class="sum__hint">요약 불러오는 중…</p>
+
+    <div class="sum__grid">
+      <article class="sum__card">
+        <img class="sum__ico" :src="iconWork" alt="" />
+        <p class="sum__label">작업</p>
+        <p class="sum__value">
+          {{ summary ? `${summary.work_count}건` : PLACEHOLDER }}
+        </p>
+      </article>
+      <article class="sum__card">
+        <img class="sum__ico" :src="iconLabor" alt="" />
+        <p class="sum__label">투입 인력</p>
+        <p class="sum__value">
+          {{ summary ? `${summary.resource_count}명` : PLACEHOLDER }}
+        </p>
+      </article>
+      <article class="sum__card">
+        <img class="sum__ico" :src="iconExpense" alt="" />
+        <p class="sum__label">경비 지출</p>
+        <p class="sum__value sum__value--sm">
+          {{
+            summary
+              ? formatWonWithUnit(summary.expense_sum + summary.labor_sum)
+              : PLACEHOLDER
+          }}
+        </p>
+      </article>
+      <article class="sum__card">
+        <img class="sum__ico" :src="iconPesticide" alt="" />
+        <p class="sum__label">농약 사용</p>
+        <p class="sum__value">{{ PLACEHOLDER }}</p>
+      </article>
+      <article class="sum__card">
+        <img class="sum__ico" :src="iconFertilizer" alt="" />
+        <p class="sum__label">비료 사용</p>
+        <p class="sum__value">{{ PLACEHOLDER }}</p>
+      </article>
+      <article class="sum__card">
+        <img class="sum__ico" :src="iconWork" alt="" />
+        <p class="sum__label">수확 진행</p>
+        <p class="sum__value">{{ PLACEHOLDER }}</p>
+      </article>
     </div>
   </section>
 </template>
 
 <style scoped>
-.summary__head {
+.sum__head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  margin-bottom: var(--ods-space-8);
+  margin-bottom: var(--ods-space-12);
 }
-.summary__title {
+.sum__titles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+.sum__title {
   margin: 0;
   font: var(--ods-font-headline);
+  font-weight: 800;
   color: var(--ods-color-text);
 }
-.summary__link {
+.sum__range {
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.sum__link {
+  flex-shrink: 0;
   border: none;
   background: transparent;
+  padding: 0;
   min-height: var(--ods-touch-min);
   font: var(--ods-font-body-2);
   font-weight: 700;
   color: var(--ods-color-primary);
   cursor: pointer;
 }
-.summary__hint {
+.sum__hint {
   margin: 0 0 var(--ods-space-8);
   font: var(--ods-font-caption);
-  color: var(--ods-color-gray-500);
+  color: var(--ods-color-text-secondary);
 }
-.summary__grid {
+.sum__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--ods-space-12);
 }
-.kpi {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--ods-space-4);
+.sum__card {
+  min-height: 104px;
+  padding: var(--ods-space-16) var(--ods-space-12);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+  text-align: center;
+  transition: box-shadow var(--ods-motion-fast) var(--ods-motion-ease);
 }
-.kpi__ico {
-  width: 22px;
-  height: 22px;
+.sum__card:hover {
+  box-shadow: var(--ods-shadow-elevated);
 }
-.label {
+.sum__ico {
+  width: 24px;
+  height: 24px;
+  margin: 0 auto var(--ods-space-8);
+  display: block;
+}
+.sum__label {
   margin: 0;
-  font: var(--ods-font-caption);
+  font-size: 10px;
+  line-height: 1.3;
   color: var(--ods-color-text-secondary);
-  text-align: center;
 }
-.value {
-  margin: 0;
-  font: var(--ods-font-title-2);
+.sum__value {
+  margin: var(--ods-space-8) 0 0;
+  font-size: 18px;
+  font-weight: 800;
   color: var(--ods-color-text);
-  text-align: center;
+  line-height: 1.2;
 }
-.value--sm {
-  font: var(--ods-font-headline);
-  font-weight: 700;
+.sum__value--sm {
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+.anim-fade {
+  animation: wl-fade var(--ods-motion-base) var(--ods-motion-ease) both;
+}
+@keyframes wl-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade {
+    animation: none;
+  }
 }
 </style>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
-import OdsCard from '@/components/ods/OdsCard.vue'
 import { daysInMonth, pad2 } from '@/views/work-log/workLogConstants'
 import type { WorkLogDayCell } from '@/types/workLog'
 
@@ -10,6 +9,9 @@ const props = defineProps<{
   month: number
   days: Record<string, WorkLogDayCell>
 }>()
+
+const AXIS = [1, 7, 14, 21, 28] as const
+const tip = ref('')
 
 const bars = computed(() => {
   const total = daysInMonth(props.year, props.month)
@@ -21,56 +23,142 @@ const bars = computed(() => {
     counts.push(c)
     if (c > max) max = c
   }
-  return counts.map((c) => ({
+  return counts.map((c, i) => ({
+    day: i + 1,
     count: c,
     pct: Math.round((c / max) * 100),
   }))
 })
+
+const axisLabels = computed(() => {
+  const last = daysInMonth(props.year, props.month)
+  const labels = [...AXIS]
+  if (!labels.includes(last as (typeof AXIS)[number])) labels.push(last)
+  return labels
+})
+
+function showTip(day: number, count: number) {
+  tip.value = `${day}일 · ${count}건`
+}
+function clearTip() {
+  tip.value = ''
+}
 </script>
 
 <template>
   <section class="chart" aria-label="작업 일자 분포">
     <h2 class="chart__title">작업 일자 분포</h2>
-    <OdsCard>
-      <div class="chart__bars" role="img" :aria-label="`${year}년 ${month}월 일별 작업 건수`">
+    <div class="chart__card">
+      <p v-if="tip" class="chart__tip" role="status">{{ tip }}</p>
+      <div class="chart__plot">
+        <div class="chart__grid" aria-hidden="true">
+          <span /><span /><span /><span />
+        </div>
         <div
-          v-for="(b, i) in bars"
-          :key="i"
-          class="chart__bar"
-          :class="{ 'chart__bar--empty': b.count === 0 }"
-          :style="{ height: `${Math.max(b.count === 0 ? 8 : 12, (b.pct / 100) * 64)}px` }"
-          :title="`${i + 1}일 · ${b.count}건`"
-        />
+          class="chart__bars"
+          role="img"
+          :aria-label="`${year}년 ${month}월 일별 작업 건수`"
+        >
+          <button
+            v-for="b in bars"
+            :key="b.day"
+            type="button"
+            class="chart__bar"
+            :class="{ 'chart__bar--empty': b.count === 0 }"
+            :style="{
+              height: `${Math.max(
+                b.count === 0 ? 6 : 10,
+                (b.pct / 100) * 72,
+              )}px`,
+            }"
+            :title="`${b.day}일 · ${b.count}건`"
+            @mouseenter="showTip(b.day, b.count)"
+            @mouseleave="clearTip"
+            @focus="showTip(b.day, b.count)"
+            @blur="clearTip"
+          />
+        </div>
       </div>
-      <p class="chart__hint">막대 높이 = 해당 일 작업 건수</p>
-    </OdsCard>
+      <div class="chart__axis">
+        <span v-for="d in axisLabels" :key="d">{{ d }}일</span>
+      </div>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .chart__title {
-  margin: 0 0 var(--ods-space-8);
+  margin: 0 0 var(--ods-space-12);
   font: var(--ods-font-headline);
+  font-weight: 800;
   color: var(--ods-color-text);
 }
+.chart__card {
+  position: relative;
+  padding: var(--ods-space-16);
+  border-radius: var(--ods-radius-card-lg);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+}
+.chart__tip {
+  position: absolute;
+  top: var(--ods-space-8);
+  right: var(--ods-space-16);
+  margin: 0;
+  padding: var(--ods-space-4) var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-gray-900);
+  color: var(--ods-color-white);
+  font: var(--ods-font-caption);
+  font-weight: 600;
+}
+.chart__plot {
+  position: relative;
+  height: 80px;
+}
+.chart__grid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.chart__grid span {
+  display: block;
+  height: 1px;
+  background: var(--ods-color-gray-100);
+}
 .chart__bars {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-end;
-  gap: var(--ods-space-4);
-  height: 72px;
+  gap: 3px;
+  height: 80px;
 }
 .chart__bar {
   flex: 1;
   min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
   border-radius: 3px 3px 0 0;
   background: var(--ods-color-primary);
+  cursor: pointer;
 }
 .chart__bar--empty {
   background: var(--ods-color-gray-100);
-  opacity: 0.7;
 }
-.chart__hint {
-  margin: var(--ods-space-8) 0 0;
+.chart__bar:hover,
+.chart__bar:focus-visible {
+  filter: brightness(1.08);
+  outline: none;
+}
+.chart__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--ods-space-8);
   font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }

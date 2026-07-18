@@ -70,7 +70,22 @@
 
   /* Radius & shadow */
   --ods-radius-card: 16px;
+  --ods-radius-card-lg: 20px;
   --ods-radius-button: 12px;
   --ods-radius-badge: 999px;
   --ods-shadow-card: 0 2px 8px rgba(33, 33, 33, 0.06);
+  --ods-shadow-elevated: 0 8px 24px rgba(33, 33, 33, 0.14);
+  --ods-shadow-fab: 0 10px 28px color-mix(in srgb, var(--ods-color-primary) 42%, transparent);
+
+  /* Surface helpers (selected / soft primary) */
+  --ods-color-primary-soft: color-mix(in srgb, var(--ods-color-primary) 8%, white);
+  --ods-color-secondary-soft: color-mix(in srgb, var(--ods-color-secondary) 28%, white);
+
+  /* Motion (ODS 200~250ms) */
+  --ods-motion-fast: 200ms;
+  --ods-motion-base: 240ms;
+  --ods-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* FAB */
+  --ods-fab-size: 64px;
 }

@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
@@ -81,6 +83,62 @@ def _classify_in_progress(status_cd: str, status_nm: str) -> bool:
     return cd in (STATUS_IN_PROGRESS_CD, "ST010300")
 
 
+def _weather_label_from_cache(payload: dict[str, Any]) -> str:
+    """t_weather_cache JSON → 표시용 기상명 (스키마 변경 없음)."""
+    for key in ("weather_nm", "weather_text", "weather_label"):
+        label = _s(payload.get(key))
+        if label and label != "-":
+            return label
+    cd = _s(payload.get("weather_cd"))
+    return cd
+
+
+def _master_from_weather_cache(
+    *, farm: str, work_dt: str, payload: dict[str, Any]
+) -> WorkLogMasterDto:
+    """영농일지 master 없을 때 캐시로 표시용 DTO 구성 (저장하지 않음)."""
+    return WorkLogMasterDto(
+        work_dt=work_dt,
+        farm_cd=farm,
+        weather_cd=_s(payload.get("weather_cd")) or None,
+        weather_nm=_weather_label_from_cache(payload) or None,
+        temp_min=_f(payload.get("temp_min")),
+        temp_max=_f(payload.get("temp_max")),
+        precip=_f(payload.get("precip")),
+        humidity=_f(payload.get("humidity")),
+        sun_rise=_s(payload.get("sun_rise")) or None,
+        sun_set=_s(payload.get("sun_set")) or None,
+        sunshine_hr=_f(payload.get("sunshine_hr")),
+        wind_max=_f(payload.get("wind_max")),
+        wind_min=_f(payload.get("wind_min")),
+        work_rmk=None,
+    )
+
+
+def _merge_master_weather_gaps(
+    master: WorkLogMasterDto, payload: dict[str, Any]
+) -> WorkLogMasterDto:
+    """master에 비어 있는 기상 필드만 캐시로 보강."""
+    label = _weather_label_from_cache(payload)
+    return master.model_copy(
+        update={
+            "weather_cd": master.weather_cd or (_s(payload.get("weather_cd")) or None),
+            "weather_nm": master.weather_nm or (label or None),
+            "temp_min": master.temp_min if master.temp_min is not None else _f(payload.get("temp_min")),
+            "temp_max": master.temp_max if master.temp_max is not None else _f(payload.get("temp_max")),
+            "precip": master.precip if master.precip is not None else _f(payload.get("precip")),
+            "humidity": master.humidity if master.humidity is not None else _f(payload.get("humidity")),
+            "sun_rise": master.sun_rise or (_s(payload.get("sun_rise")) or None),
+            "sun_set": master.sun_set or (_s(payload.get("sun_set")) or None),
+            "sunshine_hr": master.sunshine_hr
+            if master.sunshine_hr is not None
+            else _f(payload.get("sunshine_hr")),
+            "wind_max": master.wind_max if master.wind_max is not None else _f(payload.get("wind_max")),
+            "wind_min": master.wind_min if master.wind_min is not None else _f(payload.get("wind_min")),
+        }
+    )
+
+
 class WorkLogService:
     def __init__(self, *, db_path: Path | str) -> None:
         self._db_path = Path(db_path)
@@ -97,6 +155,32 @@ class WorkLogService:
         if not row:
             raise EntityNotFoundError("Farm not found")
         return farm
+
+    def _load_weather_cache_payload(
+        self, farm_cd: str, work_dt: str
+    ) -> dict[str, Any] | None:
+        """PC WeatherManager가 적재한 t_weather_cache를 읽는다 (테이블 없으면 무시)."""
+        try:
+            with get_sqlite_connection(self._db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT weather_json
+                    FROM t_weather_cache
+                    WHERE farm_cd = ? AND weather_dt = ?
+                    LIMIT 1
+                    """,
+                    (farm_cd, work_dt),
+                ).fetchone()
+        except sqlite3.Error:
+            return None
+        if not row:
+            return None
+        raw = row["weather_json"] if isinstance(row, sqlite3.Row) else row[0]
+        try:
+            data = json.loads(_s(raw) or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) and data else None
 
     def get_monthly(
         self, farm_cd: str, *, year: int, month: int
@@ -212,11 +296,9 @@ class WorkLogService:
         expense_sum = 0.0
         for cell in days.values():
             names = list(cell.work_names or [])
-            if len(names) > 2:
-                cell.extra_work_count = len(names) - 2
-                cell.work_names = names[:2]
-            else:
-                cell.extra_work_count = 0
+            # 모바일 캘린더 밀도: 전체 작업명 유지, extra는 호환용
+            cell.extra_work_count = max(0, len(names) - 2)
+            cell.work_names = names
             cell.total_cost = float(cell.labor_sum or 0) + float(cell.expense_sum or 0)
             if cell.has_work:
                 work_day_count += 1
@@ -294,6 +376,16 @@ class WorkLogService:
                 wind_min=_f(m["wind_min"]),
                 work_rmk=_s(m["work_rmk"]) or None,
             )
+
+        # 신규 API 없이 기존 t_weather_cache로 표시용 기상 보강
+        cache_payload = self._load_weather_cache_payload(farm, dt)
+        if cache_payload:
+            if master is None:
+                master = _master_from_weather_cache(
+                    farm=farm, work_dt=dt, payload=cache_payload
+                )
+            else:
+                master = _merge_master_weather_gaps(master, cache_payload)
 
         works = [
             WorkLogWorkItem(

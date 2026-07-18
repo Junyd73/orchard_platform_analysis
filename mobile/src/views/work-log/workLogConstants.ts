@@ -3,6 +3,12 @@ import wxSunny from '@/assets/ods/work-log/wx-sunny.svg'
 import wxCloud from '@/assets/ods/work-log/wx-cloud.svg'
 import wxRain from '@/assets/ods/work-log/wx-rain.svg'
 import wxSnow from '@/assets/ods/work-log/wx-snow.svg'
+import iconWork from '@/assets/ods/work-log/icon-work.svg'
+import iconLabor from '@/assets/ods/work-log/icon-labor.svg'
+import iconExpense from '@/assets/ods/work-log/icon-expense.svg'
+import iconPesticide from '@/assets/ods/work-log/icon-pesticide.svg'
+import iconFertilizer from '@/assets/ods/work-log/icon-fertilizer.svg'
+import iconOther from '@/assets/ods/work-log/icon-other.svg'
 import heroSpring from '@/assets/images/work-log/hero-spring.webp'
 import heroSummer from '@/assets/images/work-log/hero-summer.webp'
 import heroAutumn from '@/assets/images/work-log/hero-autumn.webp'
@@ -15,6 +21,7 @@ export const WEATHER_PARENT_CD = 'WT01'
 export const MSG_FUTURE_WORK_LOG = '영농일지는 오늘까지만 작성할 수 있습니다.'
 export const MSG_HOURLY_FORECAST_PENDING = '시간별 예보 화면은 준비 중입니다.'
 export const MSG_DETAIL_PENDING = '준비 중입니다.'
+export const MSG_LOAD_MONTH_FAILED = '월간 영농일지를 불러오지 못했습니다.'
 
 /** 작업필터 키 (클라이언트 전용) */
 export const WORK_FILTER_WORK = 'work'
@@ -34,6 +41,8 @@ export type WorkFilterKey =
   | typeof WORK_FILTER_WEATHER
   | typeof WORK_FILTER_OTHER
 
+export type CalendarLineKind = WorkFilterKey
+
 export const WORK_FILTER_OPTIONS: ReadonlyArray<{ key: WorkFilterKey; label: string }> = [
   { key: WORK_FILTER_WORK, label: '작업' },
   { key: WORK_FILTER_LABOR, label: '인력' },
@@ -43,6 +52,27 @@ export const WORK_FILTER_OPTIONS: ReadonlyArray<{ key: WorkFilterKey; label: str
   { key: WORK_FILTER_WEATHER, label: '기상' },
   { key: WORK_FILTER_OTHER, label: '기타' },
 ]
+
+export const CALENDAR_KIND_ICON: Record<CalendarLineKind, string> = {
+  work: iconWork,
+  labor: iconLabor,
+  expense: iconExpense,
+  pesticide: iconPesticide,
+  fertilizer: iconFertilizer,
+  weather: wxCloud,
+  other: iconOther,
+}
+
+/** 시안3 분류 색상 */
+export const CALENDAR_KIND_COLOR: Record<CalendarLineKind, string> = {
+  work: '#2E7D32',
+  labor: '#1E88E5',
+  expense: '#FB8C00',
+  pesticide: '#C62828',
+  fertilizer: '#7B1FA2',
+  weather: '#1E88E5',
+  other: '#9E9E9E',
+}
 
 export function defaultWorkFilters(): Record<WorkFilterKey, boolean> {
   return {
@@ -76,7 +106,6 @@ export function heroImageForMonth(month: number): string {
   return HERO_IMAGE_BY_SEASON[heroSeasonForMonth(month)]
 }
 
-/** ODS: 이모지 대신 SVG 기상 아이콘 */
 export const WEATHER_ICON_SRC_BY_CD: Record<string, string> = {
   WT010100: wxSunny,
   WT010200: wxCloud,
@@ -101,23 +130,14 @@ export function weatherIconSrc(
   return wxCloud
 }
 
-/** 현재기온: min/max 평균, 한쪽만 있으면 그 값 */
-export function currentTempLabel(
-  tempMin?: number | null,
-  tempMax?: number | null,
-): string {
-  if (tempMin != null && tempMax != null) {
-    return `${Math.round((tempMin + tempMax) / 2)}℃`
-  }
-  if (tempMax != null) return `${tempMax}℃`
-  if (tempMin != null) return `${tempMin}℃`
-  return '—'
-}
-
 export function formatWon(amount?: number | null): string {
   const n = Math.round(Number(amount || 0))
   if (!Number.isFinite(n) || n <= 0) return '0'
   return n.toLocaleString('ko-KR')
+}
+
+export function formatWonWithUnit(amount?: number | null): string {
+  return `${formatWon(amount)}원`
 }
 
 export function todayIso(): string {
@@ -136,6 +156,11 @@ export function monthLabel(year: number, month: number): string {
   return `${year}년 ${month}월`
 }
 
+export function monthRangeLabel(year: number, month: number): string {
+  const last = daysInMonth(year, month)
+  return `(${month}.${1} ~ ${month}.${last})`
+}
+
 export function isFutureDate(iso: string, today = todayIso()): boolean {
   return iso > today
 }
@@ -144,14 +169,17 @@ export function daysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate()
 }
 
-export function firstWeekdaySun0(year: number, month: number): number {
-  return new Date(year, month - 1, 1).getDay()
+/** 시안3: 월요일 시작 (0=월 … 6=일) */
+export function firstWeekdayMon0(year: number, month: number): number {
+  return (new Date(year, month - 1, 1).getDay() + 6) % 7
 }
 
+export const WEEKDAY_LABELS_MON = ['월', '화', '수', '목', '금', '토', '일'] as const
+
+/** @deprecated 일요일 시작 — 일간 등 레거시 */
 export const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'] as const
 
-/** 캘린더 셀에 표시할 라인 (최대 3, 초과분은 +N) */
-export type CalendarLine = { kind: 'work' | 'labor' | 'expense' | 'weather' | 'other'; text: string }
+export type CalendarLine = { kind: CalendarLineKind; text: string }
 
 export function buildCalendarLines(
   cell: {
@@ -171,24 +199,38 @@ export function buildCalendarLines(
   const all: CalendarLine[] = []
   if (filters[WORK_FILTER_WORK] && cell.has_work) {
     for (const nm of cell.work_names || []) {
-      all.push({ kind: 'work', text: nm })
+      all.push({ kind: WORK_FILTER_WORK, text: nm })
     }
   }
   if (filters[WORK_FILTER_LABOR] && Number(cell.resource_count || 0) > 0) {
-    all.push({ kind: 'labor', text: `인력 ${cell.resource_count}` })
+    all.push({ kind: WORK_FILTER_LABOR, text: `인력 ${cell.resource_count}` })
   }
   const cost = Number(cell.labor_sum || 0) + Number(cell.expense_sum || 0)
   if (filters[WORK_FILTER_EXPENSE] && cost > 0) {
-    all.push({ kind: 'expense', text: '경비' })
+    all.push({ kind: WORK_FILTER_EXPENSE, text: '경비' })
   }
-  // 농약·비료: 월간 셀에 데이터 없음 → 라인 추가 안 함
-  if (filters[WORK_FILTER_WEATHER] && (cell.weather_cd || cell.weather_nm)) {
-    all.push({ kind: 'weather', text: cell.weather_nm || '기상' })
+  const weatherLabel = String(cell.weather_nm || '').trim()
+  const hasWeather =
+    Boolean(cell.weather_cd) || (Boolean(weatherLabel) && weatherLabel !== '-')
+  if (filters[WORK_FILTER_WEATHER] && hasWeather) {
+    all.push({
+      kind: WORK_FILTER_WEATHER,
+      text: weatherLabel && weatherLabel !== '-' ? weatherLabel : '기상',
+    })
   }
   if (filters[WORK_FILTER_OTHER] && cell.has_issue) {
-    all.push({ kind: 'other', text: '이슈' })
+    all.push({ kind: WORK_FILTER_OTHER, text: '이슈' })
   }
   const max = 3
   if (all.length <= max) return { lines: all, extra: 0 }
   return { lines: all.slice(0, max), extra: all.length - max }
+}
+
+export function shiftMonth(
+  year: number,
+  month: number,
+  delta: number,
+): { year: number; month: number } {
+  const d = new Date(year, month - 1 + delta, 1)
+  return { year: d.getFullYear(), month: d.getMonth() + 1 }
 }

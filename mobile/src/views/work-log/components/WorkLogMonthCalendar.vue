@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
-import iconExpense from '@/assets/ods/work-log/icon-expense.svg'
-import iconLabor from '@/assets/ods/work-log/icon-labor.svg'
-import iconWork from '@/assets/ods/work-log/icon-work.svg'
-import OdsCard from '@/components/ods/OdsCard.vue'
+import iconCalendar from '@/assets/ods/work-log/icon-calendar.svg'
+import OdsButton from '@/components/ods/OdsButton.vue'
+import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import {
   buildCalendarLines,
+  CALENDAR_KIND_COLOR,
+  CALENDAR_KIND_ICON,
   daysInMonth,
-  firstWeekdaySun0,
+  firstWeekdayMon0,
   isFutureDate,
+  monthLabel,
   pad2,
+  shiftMonth,
   todayIso,
-  WEEKDAY_LABELS,
+  WEEKDAY_LABELS_MON,
+  WORK_FILTER_OPTIONS,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
 import type { WorkLogDayCell } from '@/types/workLog'
@@ -22,48 +26,73 @@ const props = defineProps<{
   month: number
   days: Record<string, WorkLogDayCell>
   filters: Record<WorkFilterKey, boolean>
+  canGoNext?: boolean
+  loading?: boolean
+  showEmpty?: boolean
 }>()
 
 const emit = defineEmits<{
   select: [workDt: string]
   blocked: [message: string]
+  'open-filter': []
+  'go-today': []
+  'prev-month': []
+  'next-month': []
 }>()
 
 const today = todayIso()
+const title = computed(() => monthLabel(props.year, props.month))
+const slideDir = ref<'left' | 'right' | 'none'>('none')
+const monthKey = computed(() => `${props.year}-${props.month}`)
 
-const iconByKind: Record<string, string> = {
-  work: iconWork,
-  labor: iconLabor,
-  expense: iconExpense,
-  weather: iconWork,
-  other: iconWork,
+watch(
+  () => monthKey.value,
+  (next, prev) => {
+    if (!prev) {
+      slideDir.value = 'none'
+      return
+    }
+    slideDir.value = next > prev ? 'left' : 'right'
+  },
+)
+
+type CalCell = {
+  key: string
+  day: number
+  iso: string
+  inMonth: boolean
+  future: boolean
+  isToday: boolean
+  isSunday: boolean
+  cell: WorkLogDayCell | null
+  lines: ReturnType<typeof buildCalendarLines>['lines']
+  extra: number
 }
 
-const cells = computed(() => {
+const cells = computed((): CalCell[] => {
   const total = daysInMonth(props.year, props.month)
-  const start = firstWeekdaySun0(props.year, props.month)
-  const out: Array<{
-    key: string
-    day: number | null
-    iso: string | null
-    cell: WorkLogDayCell | null
-    future: boolean
-    isToday: boolean
-    lines: ReturnType<typeof buildCalendarLines>['lines']
-    extra: number
-  }> = []
-  for (let i = 0; i < start; i += 1) {
+  const start = firstWeekdayMon0(props.year, props.month)
+  const out: CalCell[] = []
+
+  const prev = shiftMonth(props.year, props.month, -1)
+  const prevTotal = daysInMonth(prev.year, prev.month)
+  for (let i = start - 1; i >= 0; i -= 1) {
+    const d = prevTotal - i
+    const iso = `${prev.year}-${pad2(prev.month)}-${pad2(d)}`
     out.push({
-      key: `e-${i}`,
-      day: null,
-      iso: null,
-      cell: null,
-      future: false,
+      key: `p-${iso}`,
+      day: d,
+      iso,
+      inMonth: false,
+      future: isFutureDate(iso, today),
       isToday: false,
+      isSunday: new Date(`${iso}T12:00:00`).getDay() === 0,
+      cell: null,
       lines: [],
       extra: 0,
     })
   }
+
   for (let d = 1; d <= total; d += 1) {
     const iso = `${props.year}-${pad2(props.month)}-${pad2(d)}`
     const cell = props.days[iso] || null
@@ -72,32 +101,120 @@ const cells = computed(() => {
       key: iso,
       day: d,
       iso,
-      cell,
+      inMonth: true,
       future: isFutureDate(iso, today),
       isToday: iso === today,
+      isSunday: new Date(`${iso}T12:00:00`).getDay() === 0,
+      cell,
       lines: built.lines,
       extra: built.extra,
     })
   }
+
+  const next = shiftMonth(props.year, props.month, 1)
+  let n = 1
+  while (out.length % 7 !== 0) {
+    const iso = `${next.year}-${pad2(next.month)}-${pad2(n)}`
+    out.push({
+      key: `n-${iso}`,
+      day: n,
+      iso,
+      inMonth: false,
+      future: isFutureDate(iso, today),
+      isToday: false,
+      isSunday: new Date(`${iso}T12:00:00`).getDay() === 0,
+      cell: null,
+      lines: [],
+      extra: 0,
+    })
+    n += 1
+  }
   return out
 })
 
-function onTap(iso: string | null, future: boolean) {
-  if (!iso) return
-  if (future) {
+const hasAnyWork = computed(() =>
+  Object.values(props.days).some((d) => d.has_work || Number(d.work_count || 0) > 0),
+)
+
+function onTap(c: CalCell) {
+  if (!c.inMonth) {
+    if (c.iso < `${props.year}-${pad2(props.month)}-01`) emit('prev-month')
+    else emit('next-month')
+    return
+  }
+  if (c.future) {
     emit('blocked', '영농일지는 오늘까지만 작성할 수 있습니다.')
     return
   }
-  emit('select', iso)
+  emit('select', c.iso)
 }
 </script>
 
 <template>
-  <OdsCard>
-    <section class="cal" aria-label="월간 캘린더">
-      <div class="cal__head">
-        <span v-for="w in WEEKDAY_LABELS" :key="w" class="cal__wd">{{ w }}</span>
+  <section class="cal-card" aria-label="월간 캘린더">
+    <div class="cal-card__head">
+      <div class="cal-card__title-wrap">
+        <img class="cal-card__cal-ico" :src="iconCalendar" alt="" />
+        <button
+          type="button"
+          class="cal-card__title-btn"
+          :aria-label="`${title} · 이전 달`"
+          @click="emit('prev-month')"
+        >
+          ‹
+        </button>
+        <h2 class="cal-card__title">{{ title }}</h2>
+        <button
+          type="button"
+          class="cal-card__title-btn"
+          :aria-label="`${title} · 다음 달`"
+          :disabled="canGoNext === false"
+          @click="emit('next-month')"
+        >
+          ›
+        </button>
       </div>
+      <div class="cal-card__actions">
+        <OdsButton
+          variant="secondary"
+          type="button"
+          :block="false"
+          class="cal-card__chip"
+          @click="emit('open-filter')"
+        >
+          작업 필터⌄
+        </OdsButton>
+        <OdsButton
+          variant="primary"
+          type="button"
+          :block="false"
+          class="cal-card__chip"
+          @click="emit('go-today')"
+        >
+          오늘
+        </OdsButton>
+      </div>
+    </div>
+
+    <div
+      :key="monthKey"
+      class="cal-slide"
+      :class="{
+        'cal-slide--left': slideDir === 'left',
+        'cal-slide--right': slideDir === 'right',
+      }"
+    >
+      <div class="cal__head">
+        <span
+          v-for="(w, i) in WEEKDAY_LABELS_MON"
+          :key="w"
+          class="cal__wd"
+          :class="{ 'cal__wd--sun': i === 6 }"
+        >
+          {{ w }}
+        </span>
+      </div>
+
       <div class="cal__grid">
         <button
           v-for="c in cells"
@@ -105,61 +222,154 @@ function onTap(iso: string | null, future: boolean) {
           type="button"
           class="cal__cell"
           :class="{
-            'cal__cell--empty': !c.day,
-            'cal__cell--future': c.future,
+            'cal__cell--out': !c.inMonth,
+            'cal__cell--future': c.inMonth && c.future,
             'cal__cell--today': c.isToday,
-            'cal__cell--progress': c.cell?.has_in_progress,
-            'cal__cell--work': c.cell?.has_work && !c.cell?.has_in_progress,
+            'cal__cell--work': c.inMonth && c.cell?.has_work && !c.isToday,
           }"
-          :disabled="!c.day"
-          :aria-label="c.iso || undefined"
-          @click="onTap(c.iso, c.future)"
+          @click="onTap(c)"
         >
-          <template v-if="c.day">
-            <div class="cal__dayrow">
-              <span class="cal__day">{{ c.day }}</span>
-              <span v-if="c.cell?.has_issue" class="cal__dot" title="이슈" />
+          <span
+            class="cal__day"
+            :class="{ 'cal__day--sun': c.isSunday && c.inMonth }"
+          >
+            {{ c.day }}
+          </span>
+          <template v-if="c.inMonth">
+            <div class="cal__events">
+              <p
+                v-for="(line, idx) in c.lines"
+                :key="`${c.iso}-${idx}`"
+                class="cal__line"
+              >
+                <img
+                  class="cal__line-ico"
+                  :src="CALENDAR_KIND_ICON[line.kind]"
+                  alt=""
+                />
+                <span
+                  class="cal__line-text"
+                  :style="{ color: CALENDAR_KIND_COLOR[line.kind] }"
+                >
+                  {{ line.text }}
+                </span>
+              </p>
+              <p v-if="c.extra > 0" class="cal__more">+{{ c.extra }}</p>
             </div>
-            <p v-for="(line, idx) in c.lines" :key="`${c.iso}-${idx}`" class="cal__work">
-              <img
-                v-if="iconByKind[line.kind]"
-                class="cal__line-ico"
-                :src="iconByKind[line.kind]"
-                alt=""
-              />
-              {{ line.text }}
-            </p>
-            <p v-if="c.extra > 0" class="cal__more">+{{ c.extra }}</p>
           </template>
         </button>
       </div>
-      <div class="cal__legend" aria-label="범례">
-        <span class="cal__leg">
-          <img class="cal__leg-ico" :src="iconWork" alt="" />작업
+    </div>
+
+    <OdsEmptyState
+      v-if="showEmpty && !loading && !hasAnyWork"
+      class="cal-empty"
+      title="이 달의 작업 기록이 없습니다"
+      description="날짜를 눌러 영농일지를 등록해 보세요."
+    />
+
+    <div class="cal__legend" aria-label="범례">
+      <span v-for="opt in WORK_FILTER_OPTIONS" :key="opt.key" class="cal__leg">
+        <img class="cal__leg-ico" :src="CALENDAR_KIND_ICON[opt.key]" alt="" />
+        <span class="cal__leg-text" :style="{ color: CALENDAR_KIND_COLOR[opt.key] }">
+          {{ opt.label }}
         </span>
-        <span class="cal__leg">
-          <img class="cal__leg-ico" :src="iconLabor" alt="" />인력
-        </span>
-        <span class="cal__leg">
-          <img class="cal__leg-ico" :src="iconExpense" alt="" />경비
-        </span>
-        <span class="cal__leg"><i class="cal__leg-dot" />이슈</span>
-        <span class="cal__leg">
-          <i class="cal__leg-swatch cal__leg-swatch--progress" />진행중
-        </span>
-      </div>
-    </section>
-  </OdsCard>
+      </span>
+    </div>
+  </section>
 </template>
 
 <style scoped>
-.cal {
+.cal-card {
+  padding: var(--ods-space-16);
+  border-radius: var(--ods-radius-card-lg);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+}
+.cal-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  margin-bottom: var(--ods-space-12);
+  flex-wrap: wrap;
+}
+.cal-card__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.cal-card__cal-ico {
+  width: 18px;
+  height: 18px;
+  color: var(--ods-color-primary);
+}
+.cal-card__title {
   margin: 0;
+  font: var(--ods-font-headline);
+  font-weight: 800;
+  color: var(--ods-color-text);
+  white-space: nowrap;
+}
+.cal-card__title-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--ods-radius-button);
+}
+.cal-card__title-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.cal-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  flex-shrink: 0;
+}
+.cal-card__chip {
+  min-height: 36px !important;
+  padding: 0 var(--ods-space-12) !important;
+  border-radius: var(--ods-radius-badge) !important;
+  font: var(--ods-font-caption) !important;
+  font-weight: 700 !important;
+}
+.cal-slide--left {
+  animation: wl-slide-left var(--ods-motion-base) var(--ods-motion-ease) both;
+}
+.cal-slide--right {
+  animation: wl-slide-right var(--ods-motion-base) var(--ods-motion-ease) both;
+}
+@keyframes wl-slide-left {
+  from {
+    opacity: 0.4;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes wl-slide-right {
+  from {
+    opacity: 0.4;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 .cal__head,
 .cal__grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--ods-space-4);
 }
 .cal__wd {
@@ -167,111 +377,136 @@ function onTap(iso: string | null, future: boolean) {
   font: var(--ods-font-caption);
   font-weight: 700;
   color: var(--ods-color-text-secondary);
-  padding: 6px 0;
+  padding: var(--ods-space-4) 0 var(--ods-space-8);
+}
+.cal__wd--sun {
+  color: var(--ods-color-danger);
 }
 .cal__cell {
-  min-height: 84px;
+  min-height: 80px;
+  height: 80px;
   margin: 0;
-  padding: 5px;
-  border: 1px solid transparent;
+  padding: var(--ods-space-4);
+  border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
-  background: transparent;
+  background: var(--ods-color-white);
   text-align: left;
-  vertical-align: top;
   cursor: pointer;
   color: var(--ods-color-text);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition:
+    background var(--ods-motion-fast) var(--ods-motion-ease),
+    border-color var(--ods-motion-fast) var(--ods-motion-ease),
+    box-shadow var(--ods-motion-fast) var(--ods-motion-ease);
 }
-.cal__cell--empty {
-  cursor: default;
-  visibility: hidden;
+.cal__cell:hover:not(.cal__cell--out):not(:disabled) {
+  box-shadow: var(--ods-shadow-card);
+  border-color: color-mix(in srgb, var(--ods-color-primary) 35%, var(--ods-color-border));
+}
+.cal__cell--out {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.38;
 }
 .cal__cell--future {
-  opacity: 0.38;
-  cursor: not-allowed;
+  opacity: 0.45;
 }
 .cal__cell--today {
-  border-color: var(--ods-color-primary);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--ods-color-primary) 35%, transparent);
+  border: 1.5px solid var(--ods-color-primary);
+  background: var(--ods-color-primary-soft);
 }
 .cal__cell--work {
-  background: color-mix(in srgb, var(--ods-color-primary) 8%, white);
+  background: color-mix(in srgb, var(--ods-color-primary) 4%, white);
 }
-.cal__cell--progress {
-  background: color-mix(in srgb, var(--ods-color-accent) 55%, white);
+.cal__day {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 0 0 var(--ods-space-4);
 }
-.cal__dayrow {
+.cal__day--sun {
+  color: var(--ods-color-danger);
+}
+.cal__events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  flex: 1;
+}
+.cal__line {
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 3px;
-  min-height: 18px;
+  min-width: 0;
+  font-size: 9px;
+  line-height: 1.3;
 }
-.cal__day {
-  font: var(--ods-font-caption);
-  font-weight: 700;
+.cal__line-ico {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
 }
-.cal__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ods-color-danger);
-}
-.cal__work,
-.cal__more {
-  margin: 2px 0 0;
-  font-size: 10px;
-  line-height: 1.25;
-  color: var(--ods-color-text-secondary);
+.cal__line-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.cal__line-ico {
-  width: 10px;
-  height: 10px;
-  flex-shrink: 0;
-}
-.cal__more {
-  color: var(--ods-color-primary);
   font-weight: 600;
 }
+.cal__more {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ods-color-primary);
+}
+.cal-empty {
+  margin-top: var(--ods-space-12);
+  box-shadow: none;
+  border: 1px dashed var(--ods-color-border);
+}
 .cal__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ods-space-12);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ods-space-8) var(--ods-space-12);
   margin-top: var(--ods-space-16);
   padding-top: var(--ods-space-12);
   border-top: 1px solid var(--ods-color-border);
+  align-items: center;
 }
 .cal__leg {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
+  gap: var(--ods-space-4);
+  min-height: 18px;
 }
 .cal__leg-ico {
-  width: 14px;
-  height: 14px;
-}
-.cal__leg-swatch {
-  display: inline-block;
   width: 12px;
   height: 12px;
-  border-radius: 3px;
+  flex-shrink: 0;
 }
-.cal__leg-swatch--progress {
-  background: color-mix(in srgb, var(--ods-color-accent) 55%, white);
-  border: 1px solid var(--ods-color-caution, #c9a227);
+.cal__leg-text {
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  line-height: 1;
 }
-.cal__leg-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ods-color-danger);
+
+@media (min-width: 390px) {
+  .cal__cell {
+    min-height: 84px;
+    height: 84px;
+  }
+  .cal__legend {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-slide--left,
+  .cal-slide--right {
+    animation: none;
+  }
 }
 </style>

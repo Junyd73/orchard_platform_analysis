@@ -1,7 +1,7 @@
 <script setup lang="ts">
 withDefaults(
   defineProps<{
-    variant?: 'primary' | 'secondary' | 'ai' | 'danger'
+    variant?: 'primary' | 'secondary' | 'secondary-filled' | 'ai' | 'danger'
     type?: 'button' | 'submit' | 'reset'
     disabled?: boolean
     /** 처리 중: 클릭 차단하되 variant 색 유지 */
@@ -63,6 +63,11 @@ withDefaults(
   background: var(--ods-color-gray-100);
   color: var(--ods-color-gray-900);
   border: 1px solid var(--ods-color-border);
+}
+.ods-btn--secondary-filled {
+  background: var(--ods-color-secondary-soft);
+  color: var(--ods-color-primary);
+  border: none;
 }
 .ods-btn--ai {
   background: var(--ods-color-ai);
