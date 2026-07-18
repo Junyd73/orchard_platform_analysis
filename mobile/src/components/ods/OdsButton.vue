@@ -4,6 +4,8 @@ withDefaults(
     variant?: 'primary' | 'secondary' | 'ai' | 'danger'
     type?: 'button' | 'submit' | 'reset'
     disabled?: boolean
+    /** 처리 중: 클릭 차단하되 variant 색 유지 */
+    busy?: boolean
     block?: boolean
     /** 외부 form 연결 (floating submit 등) */
     form?: string
@@ -12,6 +14,7 @@ withDefaults(
     variant: 'primary',
     type: 'button',
     disabled: false,
+    busy: false,
     block: true,
   },
 )
@@ -20,9 +23,16 @@ withDefaults(
 <template>
   <button
     class="ods-btn"
-    :class="[`ods-btn--${variant}`, { 'ods-btn--block': block }]"
+    :class="[
+      `ods-btn--${variant}`,
+      {
+        'ods-btn--block': block,
+        'ods-btn--busy': busy,
+      },
+    ]"
     :type="type"
-    :disabled="disabled"
+    :disabled="disabled || busy"
+    :aria-busy="busy || undefined"
     :form="form"
   >
     <slot />
@@ -37,6 +47,10 @@ withDefaults(
   border-radius: var(--ods-radius-button);
   font: var(--ods-font-headline);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 .ods-btn--block {
   width: 100%;
@@ -58,9 +72,30 @@ withDefaults(
   background: var(--ods-color-danger);
   color: var(--ods-color-white);
 }
-.ods-btn:disabled {
+.ods-btn:disabled:not(.ods-btn--busy) {
   background: var(--ods-color-gray-300);
   color: var(--ods-color-gray-500);
   cursor: not-allowed;
+}
+.ods-btn--busy {
+  cursor: wait;
+  animation: ods-btn-pulse 1.6s ease-in-out infinite;
+}
+.ods-btn--ai.ods-btn--busy:disabled {
+  background: var(--ods-color-ai);
+  color: var(--ods-color-white);
+}
+.ods-btn--primary.ods-btn--busy:disabled {
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
+}
+@keyframes ods-btn-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.1);
+  }
 }
 </style>

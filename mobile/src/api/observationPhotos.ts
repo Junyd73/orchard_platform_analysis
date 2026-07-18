@@ -72,8 +72,19 @@ export function reorderObservationPhotos(
   )
 }
 
-export function photoThumbSrc(photo: Pick<ObservationPhotoItem, 'thumb_url'>): string {
-  return resolveMediaUrl(photo.thumb_url)
+export function photoThumbSrc(
+  photo: Pick<
+    ObservationPhotoItem,
+    'thumb_url' | 'original_url' | 'farm_cd' | 'obs_id' | 'photo_id'
+  >,
+): string {
+  if (photo.thumb_url) return resolveMediaUrl(photo.thumb_url)
+  if (photo.farm_cd && photo.obs_id && photo.photo_id) {
+    return resolveMediaUrl(
+      `/farms/${encodeURIComponent(photo.farm_cd)}/observations/${encodeURIComponent(photo.obs_id)}/photos/${encodeURIComponent(photo.photo_id)}/thumbnail`,
+    )
+  }
+  return resolveMediaUrl(photo.original_url)
 }
 
 function photoIdFromThumbPath(path?: string | null): string | null {

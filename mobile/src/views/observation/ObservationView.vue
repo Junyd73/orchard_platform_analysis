@@ -202,8 +202,9 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <OdsAppBar />
     <main class="content">
+      <OdsAppBar />
+
       <ObservationHero :farm-name="farm?.farm_nm || undefined" />
 
       <ObservationSummaryCards :summary="summary" :loading="summaryLoading" />
@@ -283,7 +284,10 @@ onMounted(async () => {
 .content {
   max-width: 480px;
   margin: 0 auto;
-  padding: var(--ods-space-16) var(--ods-page-padding-x) var(--ods-space-24);
+  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-16);
 }
 .section-title {
   margin: var(--ods-space-16) 0 var(--ods-space-8);

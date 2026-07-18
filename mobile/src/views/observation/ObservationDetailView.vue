@@ -7,6 +7,7 @@ import {
   fetchObservationDetail,
   softDeleteObservation,
 } from '@/api/observations'
+import { fetchObservationTrack } from '@/api/observationFruit'
 import { ApiClientError } from '@/api/client'
 import heroIllustration from '@/assets/ods/scr004/hero-illustration.svg'
 import aiIllustration from '@/assets/ods/scr004/ai-illustration.svg'
@@ -32,11 +33,14 @@ import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
 import ObservationDeleteDialog from '@/views/observation/components/ObservationDeleteDialog.vue'
 import AiAnalysisPanel from '@/views/observation/components/AiAnalysisPanel.vue'
+import FruitTrackPanel from '@/views/observation/components/FruitTrackPanel.vue'
 import PhotoPanel from '@/views/observation/components/PhotoPanel.vue'
 import {
-  GUIDE_DASH,
   GUIDE_LOADING,
+  GUIDE_RECOMMEND_PENDING,
   GUIDE_STOCK_EMPTY,
+  GUIDE_USAGE_FOR_PREFIX,
+  GUIDE_USAGE_PICK_HINT,
   GUIDE_USAGE_ROWS,
   PSIS_AI_GUIDE_INTRO,
   PSIS_CARD_TITLE,
@@ -48,14 +52,16 @@ import {
   PSIS_USAGE_SECTION,
   aiLabel,
   aiTone,
+  formatDilutionWithPerLiter,
   guideDisplayText,
   guideIntroMessage,
-  guideMatchLabel,
   isAiCompleteStatus,
+  resolveDilutionUnitFromSpec,
   severityTone,
   type GuideUiPhase,
 } from '@/views/observation/scr004DetailUi'
 import { useAppStore } from '@/composables/stores/app'
+import { OBS_TARGET_FRUIT_CD } from '@/composables/constants/app'
 import type {
   ObservationAiAnalysisResponse,
   ObservationDetail,
@@ -75,10 +81,18 @@ const loading = ref(true)
 const busy = ref(false)
 const errorMessage = ref('')
 const showDeleteDlg = ref(false)
+const relatedTrackCount = ref(0)
 const metaOpen = ref(false)
 const copyOk = ref(false)
 
 const canDelete = computed(() => Boolean(detail.value?.can_delete))
+const isFruitObs = computed(
+  () => String(detail.value?.target_type_cd || '').trim() === OBS_TARGET_FRUIT_CD,
+)
+/** 1차 관찰(추적 부모 없음) — 삭제 시 2차 이상 cascade 대상 */
+const isRootObs = computed(
+  () => !String(detail.value?.parent_obs_id || '').trim(),
+)
 const photoIds = ref<string[]>([])
 const guidePhase = ref<GuideUiPhase>('idle')
 const guide = ref<ObservationSmartSprayGuideResponse | null>(null)
@@ -103,7 +117,8 @@ const locationChips = computed(() => {
     { label: '필지', value: d.site_nm || d.site_id },
     { label: '구역', value: d.zone_nm },
     { label: '열', value: d.row_no },
-    { label: '나무번호', value: d.tree_no || d.sample_no },
+    { label: '나무', value: d.tree_no },
+    { label: '표본', value: d.sample_no },
   ]
   return items
     .map((item) => ({ ...item, text: String(item.value || '').trim() }))
@@ -173,10 +188,47 @@ const guideIntro = computed(() => {
 
 const guideItems = computed(() => guide.value?.items || [])
 const stockItems = computed(() => guideItems.value.filter((i) => i.has_stock))
-const recommendItems = computed(() => guideItems.value)
-const usagePrimary = computed(
-  (): SmartSprayGuideItem | null => stockItems.value[0] || recommendItems.value[0] || null,
+/** ② 추천은 보완 개발 중 — 선택·사용기준은 보유 재고만 사용 */
+const selectableGuideItems = computed(() => [...stockItems.value])
+
+const selectedGuideKey = ref('')
+
+function guideItemKey(c: SmartSprayGuideItem): string {
+  return [
+    c.info_id || 0,
+    c.item_id || 0,
+    c.rank || 0,
+    c.pesticide_name || c.brand_name || '',
+  ].join(':')
+}
+
+function selectGuideItem(c: SmartSprayGuideItem) {
+  selectedGuideKey.value = guideItemKey(c)
+}
+
+const usageSelected = computed((): SmartSprayGuideItem | null => {
+  const key = selectedGuideKey.value
+  if (key) {
+    const found = selectableGuideItems.value.find((c) => guideItemKey(c) === key)
+    if (found) return found
+  }
+  return selectableGuideItems.value[0] || null
+})
+
+watch(
+  selectableGuideItems,
+  (list) => {
+    if (!list.length) {
+      selectedGuideKey.value = ''
+      return
+    }
+    if (!list.some((c) => guideItemKey(c) === selectedGuideKey.value)) {
+      selectedGuideKey.value = guideItemKey(list[0])
+    }
+  },
+  { immediate: true },
 )
+
 const showGuideSections = computed(
   () => guidePhase.value === 'ready' || guidePhase.value === 'loading',
 )
@@ -218,7 +270,18 @@ function usageValue(item: SmartSprayGuideItem, key: string): string {
     usage_method: item.usage_method,
     toxicity: item.toxicity,
   }
-  return guideDisplayText(map[key])
+  const raw = map[key]
+  if (key === 'dilution') {
+    const unit =
+      item.dilution_unit ||
+      resolveDilutionUnitFromSpec(
+        item.spec_nm,
+        item.pesticide_name,
+        item.brand_name,
+      )
+    return formatDilutionWithPerLiter(raw, unit)
+  }
+  return guideDisplayText(raw)
 }
 
 async function load() {
@@ -260,8 +323,22 @@ function goEdit() {
   })
 }
 
-function openDelete() {
+async function openDelete() {
   if (!canDelete.value || busy.value) return
+  relatedTrackCount.value = 0
+  if (isRootObs.value && obsId.value && farmCd.value) {
+    busy.value = true
+    try {
+      const track = await fetchObservationTrack(farmCd.value, obsId.value)
+      const total = Math.max(0, Number(track.track_count || track.items?.length || 0))
+      relatedTrackCount.value = Math.max(0, total - 1)
+    } catch {
+      // 추적 조회 실패 시에도 삭제 확인은 진행 (서버에서 cascade 처리)
+      relatedTrackCount.value = 0
+    } finally {
+      busy.value = false
+    }
+  }
   showDeleteDlg.value = true
 }
 
@@ -270,8 +347,12 @@ async function confirmDelete() {
   showDeleteDlg.value = false
   busy.value = true
   try {
-    await softDeleteObservation(farmCd.value, obsId.value, '사용자 삭제')
-    goList('관찰 기록이 삭제되었습니다.')
+    const res = await softDeleteObservation(
+      farmCd.value,
+      obsId.value,
+      '사용자 삭제',
+    )
+    goList(res.message || '관찰 기록이 삭제되었습니다.')
   } catch (err) {
     errorMessage.value =
       err instanceof ApiClientError ? err.message : '삭제에 실패했습니다.'
@@ -332,7 +413,11 @@ watch(showDeleteDlg, async (open) => {
                 <img class="badge-icon" :src="badgeCheck" alt="" aria-hidden="true">
                 {{ severityLabel(detail) }}
               </OdsBadge>
-              <OdsBadge :tone="aiTone(detail.ai_status)" class="hero__badge">
+              <OdsBadge
+                v-if="!isFruitObs"
+                :tone="aiTone(detail.ai_status)"
+                class="hero__badge"
+              >
                 <img class="badge-icon" :src="badgeRobot" alt="" aria-hidden="true">
                 {{ aiLabel(detail.ai_status) }}
               </OdsBadge>
@@ -376,94 +461,119 @@ watch(showDeleteDlg, async (open) => {
           @changed="onPhotosChanged"
         />
 
-        <OdsCard class="detail-card detail-card--ai" aria-label="AI 분석">
-          <div class="card__row">
-            <div class="card__main">
-              <h2 class="card-title card-title--ai">
-                <img class="card-title__icon" :src="iconAi" alt="" aria-hidden="true">
-                AI 분석
-              </h2>
-              <AiAnalysisPanel
-                :farm-cd="farmCd"
-                :obs-id="obsId"
-                :photo-ids="photoIds"
-                crop-name="배"
-                @updated="onAiUpdated"
-                @confirmed="onAiConfirmed"
-                @guide-updated="onGuideUpdated"
-              />
-            </div>
-            <img class="card__illus" :src="aiIllustration" alt="" aria-hidden="true">
+        <OdsCard
+          v-if="isFruitObs"
+          class="detail-card detail-card--fruit"
+          aria-label="과실 추적"
+        >
+          <div class="card__head">
+            <h2 class="card-title card-title--fruit">
+              <img class="card-title__icon" :src="iconLeaf" alt="" aria-hidden="true">
+              과실 추적
+            </h2>
           </div>
+          <FruitTrackPanel
+            :farm-cd="farmCd"
+            :detail="detail"
+          />
         </OdsCard>
 
-        <OdsCard class="detail-card detail-card--psis" :aria-label="PSIS_CARD_TITLE">
-          <div class="card__row">
-            <div class="card__main">
-              <h2 class="card-title card-title--psis">
-                <img class="card-title__icon" :src="iconPsis" alt="" aria-hidden="true">
-                {{ PSIS_CARD_TITLE }}
-              </h2>
-              <p v-if="guideIntro" class="ext-hint ext-hint--guide">{{ guideIntro }}</p>
-              <div class="guide-block" aria-label="방제 가이드 결과">
-                <h3 class="guide-block__title">{{ PSIS_RESULT_TITLE }}</h3>
+        <OdsCard
+          v-if="!isFruitObs"
+          class="detail-card detail-card--ai"
+          aria-label="AI 분석"
+        >
+          <div class="card__head">
+            <h2 class="card-title card-title--ai">
+              <img class="card-title__icon" :src="iconAi" alt="" aria-hidden="true">
+              AI 분석
+            </h2>
+            <img class="card__illus" :src="aiIllustration" alt="" aria-hidden="true">
+          </div>
+          <AiAnalysisPanel
+            :farm-cd="farmCd"
+            :obs-id="obsId"
+            :photo-ids="photoIds"
+            crop-name="배"
+            @updated="onAiUpdated"
+            @confirmed="onAiConfirmed"
+            @guide-updated="onGuideUpdated"
+          />
+        </OdsCard>
 
-                <template v-if="showGuideSections">
-                  <section class="guide-sec">
-                    <h4 class="guide-sec__h">① {{ PSIS_STOCK_SECTION }}</h4>
-                    <p v-if="guidePhase === 'loading' && !stockItems.length" class="guide-sec__empty">
-                      {{ GUIDE_LOADING }}
-                    </p>
-                    <ul v-else-if="stockItems.length" class="guide-list">
-                      <li v-for="c in stockItems" :key="`stock-${c.item_id || c.rank}`">
-                        {{ guideDisplayText(c.pesticide_name || c.brand_name) }}
-                        · 재고 {{ c.stock_qty }}{{ c.stock_unit || '' }}
-                        <span v-if="c.last_used_date">
-                          · 최근 사용 {{ c.last_used_date }}
-                        </span>
-                      </li>
-                    </ul>
-                    <p v-else class="guide-sec__empty">{{ GUIDE_STOCK_EMPTY }}</p>
-                  </section>
-                  <section class="guide-sec">
-                    <h4 class="guide-sec__h">② {{ PSIS_RECOMMEND_SECTION }}</h4>
-                    <p v-if="guidePhase === 'loading' && !recommendItems.length" class="guide-sec__empty">
-                      {{ GUIDE_LOADING }}
-                    </p>
-                    <ul v-else-if="recommendItems.length" class="guide-list">
-                      <li v-for="c in recommendItems" :key="`rec-${c.snapshot_id || c.rank}`">
-                        {{ guideDisplayText(c.pesticide_name || c.brand_name) }}
-                        <span v-if="c.active_ingredient">
-                          · {{ c.active_ingredient }}
-                        </span>
-                        · {{ guideMatchLabel(c.match_level) }}
-                      </li>
-                    </ul>
-                    <p v-else class="guide-sec__empty">{{ GUIDE_DASH }}</p>
-                  </section>
-                  <section class="guide-sec">
-                    <h4 class="guide-sec__h">③ {{ PSIS_USAGE_SECTION }}</h4>
-                    <ul class="guide-usage">
-                      <li
-                        v-for="row in GUIDE_USAGE_ROWS"
-                        :key="row.key"
-                        class="guide-usage__row"
-                      >
-                        <span class="guide-usage__k">{{ row.label }}</span>
-                        <span class="guide-usage__v">
-                          {{
-                            usagePrimary
-                              ? usageValue(usagePrimary, row.key)
-                              : GUIDE_DASH
-                          }}
-                        </span>
-                      </li>
-                    </ul>
-                  </section>
-                </template>
-              </div>
-            </div>
+        <OdsCard
+          v-if="!isFruitObs"
+          class="detail-card detail-card--psis"
+          :aria-label="PSIS_CARD_TITLE"
+        >
+          <div class="card__head">
+            <h2 class="card-title card-title--psis">
+              <img class="card-title__icon" :src="iconPsis" alt="" aria-hidden="true">
+              {{ PSIS_CARD_TITLE }}
+            </h2>
             <img class="card__illus" :src="psisIllustration" alt="" aria-hidden="true">
+          </div>
+          <p v-if="guideIntro" class="ext-hint ext-hint--guide">{{ guideIntro }}</p>
+          <div class="guide-block" aria-label="방제 가이드 결과">
+            <h3 class="guide-block__title">{{ PSIS_RESULT_TITLE }}</h3>
+
+            <template v-if="showGuideSections">
+              <section class="guide-sec">
+                <h4 class="guide-sec__h">① {{ PSIS_STOCK_SECTION }}</h4>
+                <p v-if="guidePhase === 'loading' && !stockItems.length" class="guide-sec__empty">
+                  {{ GUIDE_LOADING }}
+                </p>
+                <ul v-else-if="stockItems.length" class="guide-list" role="listbox" aria-label="보유 재고">
+                  <li
+                    v-for="c in stockItems"
+                    :key="`stock-${guideItemKey(c)}`"
+                    class="guide-list__item"
+                    :class="{ 'guide-list__item--selected': guideItemKey(c) === selectedGuideKey }"
+                    role="option"
+                    :aria-selected="guideItemKey(c) === selectedGuideKey"
+                    tabindex="0"
+                    @click="selectGuideItem(c)"
+                    @keydown.enter.prevent="selectGuideItem(c)"
+                    @keydown.space.prevent="selectGuideItem(c)"
+                  >
+                    {{ guideDisplayText(c.pesticide_name || c.brand_name) }}
+                    · 재고 {{ c.stock_qty }}{{ c.stock_unit || '' }}
+                    <span v-if="c.last_used_date">
+                      · 최근 사용 {{ c.last_used_date }}
+                    </span>
+                  </li>
+                </ul>
+                <p v-else class="guide-sec__empty">{{ GUIDE_STOCK_EMPTY }}</p>
+              </section>
+              <section class="guide-sec">
+                <h4 class="guide-sec__h">② {{ PSIS_RECOMMEND_SECTION }}</h4>
+                <p class="guide-sec__empty guide-sec__empty--pending">
+                  {{ GUIDE_RECOMMEND_PENDING }}
+                </p>
+              </section>
+              <section class="guide-sec">
+                <h4 class="guide-sec__h">③ {{ PSIS_USAGE_SECTION }}</h4>
+                <p v-if="!usageSelected" class="guide-sec__empty">{{ GUIDE_USAGE_PICK_HINT }}</p>
+                <template v-else>
+                  <p class="guide-usage__pick">
+                    {{ GUIDE_USAGE_FOR_PREFIX }}
+                    {{ guideDisplayText(usageSelected.pesticide_name || usageSelected.brand_name) }}
+                  </p>
+                  <ul class="guide-usage">
+                    <li
+                      v-for="row in GUIDE_USAGE_ROWS"
+                      :key="row.key"
+                      class="guide-usage__row"
+                    >
+                      <span class="guide-usage__k">{{ row.label }}</span>
+                      <span class="guide-usage__v">
+                        {{ usageValue(usageSelected, row.key) }}
+                      </span>
+                    </li>
+                  </ul>
+                </template>
+              </section>
+            </template>
           </div>
         </OdsCard>
 
@@ -538,6 +648,7 @@ watch(showDeleteDlg, async (open) => {
 
     <ObservationDeleteDialog
       :open="showDeleteDlg"
+      :related-track-count="relatedTrackCount"
       @cancel="showDeleteDlg = false"
       @confirm="confirmDelete"
     />
@@ -581,6 +692,9 @@ watch(showDeleteDlg, async (open) => {
 }
 .card-title--ai {
   color: var(--ods-color-ai);
+}
+.card-title--fruit {
+  color: var(--ods-color-primary);
 }
 .card-title--psis {
   color: var(--ods-color-ai);
@@ -712,19 +826,23 @@ watch(showDeleteDlg, async (open) => {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.card__row {
+.card__head {
   display: flex;
-  gap: var(--ods-space-8);
   align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  margin-bottom: var(--ods-space-8);
 }
-.card__main {
+.card__head .card-title {
   flex: 1;
   min-width: 0;
+  margin: 0;
 }
 .card__illus {
-  width: 88px;
+  width: 72px;
   height: auto;
-  flex: 0 0 88px;
+  flex: 0 0 72px;
+  align-self: flex-start;
 }
 .ext-lead {
   margin: 0;
@@ -825,19 +943,47 @@ watch(showDeleteDlg, async (open) => {
   color: var(--ods-color-primary);
 }
 .guide-list {
+  list-style: none;
   margin: 0;
-  padding-left: 1.1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   font-size: 13px;
   line-height: 1.45;
   color: var(--ods-color-text);
 }
-.guide-list li + li {
-  margin-top: 4px;
+.guide-list__item {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ods-color-border) 80%, white);
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+.guide-list__item:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ods-color-primary) 55%, white);
+  outline-offset: 1px;
+}
+.guide-list__item--selected {
+  border-color: color-mix(in srgb, var(--ods-color-primary) 45%, var(--ods-color-border));
+  background: color-mix(in srgb, var(--ods-color-primary) 8%, white);
+  box-shadow: inset 3px 0 0 var(--ods-color-primary);
 }
 .guide-sec__empty {
   margin: 0;
   font: var(--ods-font-body-2);
   color: var(--ods-color-text-secondary);
+}
+.guide-sec__empty--pending {
+  font-style: italic;
+}
+.guide-usage__pick {
+  margin: 0 0 var(--ods-space-8);
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  color: var(--ods-color-primary);
 }
 .guide-usage {
   list-style: none;

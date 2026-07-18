@@ -139,6 +139,25 @@ def test_create_rejects_empty_text(site_id: str) -> None:
     assert res.status_code == 400
 
 
+def test_create_rejects_future_obs_dt(site_id: str) -> None:
+    from datetime import date, timedelta
+
+    future = (date.today() + timedelta(days=1)).isoformat()
+    res = client.post(
+        "/api/v1/farms/OR001/observations",
+        json={
+            "obs_dt": future,
+            "target_type_cd": OBS_TARGET_PEST_CD,
+            "site_id": site_id,
+            "obs_title": "미래일",
+            "obs_content": "불가",
+        },
+        headers={"X-User-Id": "TEST"},
+    )
+    assert res.status_code == 400
+    assert "오늘" in res.json().get("detail", "")
+
+
 def test_create_rejects_invalid_target(site_id: str) -> None:
     res = client.post(
         "/api/v1/farms/OR001/observations",

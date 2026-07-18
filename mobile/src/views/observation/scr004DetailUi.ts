@@ -1,4 +1,5 @@
 import type { ObservationDetail } from '@/types/observation'
+import { OBS_AI_DURATION_NOTICE } from '@/composables/constants/app'
 
 /** AI 결과 필드 — API 연동 전 optional */
 export type ObservationAiResult = {
@@ -41,14 +42,16 @@ export function aiHint(status: string): string {
   if (s === 'NONE' || s === 'PENDING') {
     return '사진 업로드 후 AI 분석을 요청할 수 있습니다.'
   }
-  if (s === 'ANALYZING') return '분석이 진행 중입니다.'
+  if (s === 'ANALYZING') {
+    return `분석이 진행 중입니다. ${OBS_AI_DURATION_NOTICE}`
+  }
   if (s === 'FAILED') return '분석에 실패했습니다. 재분석을 요청할 수 있습니다.'
   if (s === 'REVIEW_REQUIRED') return '분석 결과 검토가 필요합니다.'
   if (s === 'ANALYZED' || s === 'COMPLETED') {
     return '분석 결과입니다. 후보를 선택한 뒤 확정해 주세요.'
   }
   if (s === 'CONFIRMED') {
-    return '후보가 확정되었습니다. 공식 농약정보를 확인할 수 있습니다.'
+    return '후보가 확정되었습니다. 스마트 방제 가이드를 확인할 수 있습니다.'
   }
   return '분석 상태를 확인해 주세요.'
 }
@@ -147,6 +150,93 @@ export function guideDisplayText(value?: string | number | null): string {
   return s || GUIDE_DASH
 }
 
+/** 물 1L(1000㎖) 기준: N배 희석 → 1000/N (g 또는 ml)/L */
+const DILUTION_WATER_ML_PER_L = 1000
+
+export type DilutionMassUnit = 'g' | 'ml' | ''
+
+function _parseDilutionNumber(raw: string): number | null {
+  const n = Number(String(raw).replace(/,/g, '').trim())
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+function _formatPerLiterAmount(amount: number): string {
+  if (Number.isInteger(amount)) return String(amount)
+  const rounded = Math.round(amount * 1000) / 1000
+  return String(rounded)
+}
+
+function _perLiterFromFold(fold: number): number | null {
+  if (!Number.isFinite(fold) || fold <= 0) return null
+  return DILUTION_WATER_ML_PER_L / fold
+}
+
+function _unitLabel(unit?: string | null): string {
+  const u = String(unit || '')
+    .trim()
+    .toLowerCase()
+  if (u === 'ml') return 'ml'
+  if (u === 'g') return 'g'
+  // 규격 불명 시 g/ml 병기 (오표기 방지)
+  return 'g·ml'
+}
+
+/**
+ * 규격·품목명으로 희석 단위 판별.
+ * 예: 250ml/1L → ml, 250g/1kg → g
+ */
+export function resolveDilutionUnitFromSpec(
+  ...hints: Array<string | null | undefined>
+): DilutionMassUnit {
+  const blob = hints
+    .map((h) => String(h || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  if (!blob) return ''
+  if (/\d\s*(?:ml|㎖)\b/i.test(blob) || /\d\s*l\b/i.test(blob)) return 'ml'
+  if (/유제|액제|수현탁|액상수화|미탁제/.test(blob)) return 'ml'
+  if (/\d\s*(?:g|kg)\b/i.test(blob)) return 'g'
+  if (/수화제|입제|분제|수용제|입상수화/.test(blob)) return 'g'
+  return ''
+}
+
+/**
+ * 희석배수 표시: "2000배" + 단위 → "2000배 (0.5ml/L)" 또는 "(0.5g/L)"
+ * 물 1L 기준 약제량 = 1000 ÷ 배수
+ */
+export function formatDilutionWithPerLiter(
+  raw?: string | null,
+  unit?: string | null,
+): string {
+  const base = guideDisplayText(raw)
+  if (base === GUIDE_DASH) return base
+  if (/\d\s*(?:g|㎖|ml)\s*(?:·\s*ml)?\s*\/\s*L/i.test(base)) return base
+
+  const unitText = _unitLabel(unit)
+  const range = base.match(
+    /(\d+(?:[.,]\d+)?)\s*[~～\-–—]\s*(\d+(?:[.,]\d+)?)\s*배/,
+  )
+  if (range) {
+    const a = _perLiterFromFold(_parseDilutionNumber(range[1]) ?? 0)
+    const b = _perLiterFromFold(_parseDilutionNumber(range[2]) ?? 0)
+    if (a != null && b != null) {
+      return `${base} (${_formatPerLiterAmount(a)}~${_formatPerLiterAmount(b)}${unitText}/L)`
+    }
+    return base
+  }
+
+  const single = base.match(/(\d+(?:[.,]\d+)?)\s*배/)
+  if (single) {
+    const amount = _perLiterFromFold(_parseDilutionNumber(single[1]) ?? 0)
+    if (amount != null) {
+      return `${base} (${_formatPerLiterAmount(amount)}${unitText}/L)`
+    }
+  }
+  return base
+}
+
 export const GUIDE_USAGE_ROWS = [
   { key: 'dilution', label: '희석배수' },
   { key: 'phi', label: 'PHI(수확 전 안전사용기간)' },
@@ -154,6 +244,15 @@ export const GUIDE_USAGE_ROWS = [
   { key: 'usage_method', label: '사용방법' },
   { key: 'toxicity', label: '주의사항' },
 ] as const
+
+/** ② 추천 등록 농약 — 보유 재고 제외 표시 상한 (정렬·추천 로직 보완 후 사용) */
+export const GUIDE_RECOMMEND_LIMIT = 10
+
+/** ② 추천 영역 — 정렬/추천 기준 보완 전까지 안내 */
+export const GUIDE_RECOMMEND_PENDING = '보완 개발 중'
+
+export const GUIDE_USAGE_PICK_HINT = '농약을 선택하면 사용 기준이 표시됩니다.'
+export const GUIDE_USAGE_FOR_PREFIX = '선택:'
 
 export const AI_PENDING_API_HINT =
   'AI 분석 결과가 없습니다. 아래에서 분석을 요청해 주세요.'

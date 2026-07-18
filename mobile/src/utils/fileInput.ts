@@ -21,9 +21,18 @@ export function normalizeUploadFile(file: File, index = 0): File {
   let ext = 'jpg'
   if (mime.includes('png')) ext = 'png'
   else if (mime.includes('webp')) ext = 'webp'
+  else if (mime.includes('heic') || mime.includes('heif')) ext = 'heic'
   else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg'
 
-  const type = mime || (ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg')
+  const type =
+    mime ||
+    (ext === 'png'
+      ? 'image/png'
+      : ext === 'webp'
+        ? 'image/webp'
+        : ext === 'heic'
+          ? 'image/heic'
+          : 'image/jpeg')
   const base = rawName.replace(/\.[^.]*$/, '') || `photo_${Date.now()}_${index + 1}`
   return new File([file], `${base}.${ext}`, { type, lastModified: file.lastModified })
 }

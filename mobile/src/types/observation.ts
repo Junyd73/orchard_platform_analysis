@@ -250,6 +250,10 @@ export type SmartSprayGuideItem = {
   stock_unit: string
   has_stock: boolean
   last_used_date?: string | null
+  /** 재고/사전 규격 (예: 250ml, 250g) */
+  spec_nm?: string
+  /** 희석 환산 단위 g | ml | '' */
+  dilution_unit?: string
   dilution: string
   phi: string
   max_use_count: string
@@ -284,6 +288,13 @@ export type ObservationBasicSavePayload = {
   site_id: string
   obs_title?: string | null
   obs_content?: string | null
+  parent_obs_id?: string | null
+  followup_dt?: string | null
+  zone_nm?: string | null
+  row_no?: string | null
+  tree_no?: string | null
+  branch_no?: string | null
+  sample_no?: string | null
 }
 
 export type ObservationSaveResponse = {
@@ -325,5 +336,79 @@ export type ObservationDetail = {
   zone_nm?: string | null
   row_no?: string | null
   tree_no?: string | null
+  branch_no?: string | null
   sample_no?: string | null
+  root_obs_id?: string | null
+  parent_obs_id?: string | null
+  followup_dt?: string | null
+}
+
+export type FruitMeasurement = {
+  farm_cd?: string
+  obs_id?: string
+  width_mm?: number | null
+  height_mm?: number | null
+  circumference_mm?: number | null
+  estimated_weight_g?: number | null
+  shape_cd?: string | null
+  skin_color_cd?: string | null
+  asymmetry_level?: number | null
+  spot_yn?: string
+  wound_yn?: string
+  crack_yn?: string
+  russet_yn?: string
+  sunburn_yn?: string
+  deformity_yn?: string
+  stalk_status_cd?: string | null
+  calyx_status_cd?: string | null
+  fruit_rmk?: string | null
+}
+
+export type FruitMeasurementResponse = {
+  success: boolean
+  measurement: FruitMeasurement | null
+  error?: string
+  error_code?: string
+}
+
+export type ObservationTrackItem = {
+  obs_id: string
+  farm_cd: string
+  obs_dt: string
+  root_obs_id?: string | null
+  parent_obs_id?: string | null
+  followup_dt?: string | null
+  obs_title?: string | null
+  obs_content?: string | null
+  site_id?: string | null
+  zone_nm?: string | null
+  row_no?: string | null
+  tree_no?: string | null
+  branch_no?: string | null
+  sample_no?: string | null
+  thumb_photo_id?: string | null
+  thumb_path?: string | null
+  width_mm?: number | null
+  height_mm?: number | null
+  circumference_mm?: number | null
+  estimated_weight_g?: number | null
+  shape_cd?: string | null
+  skin_color_cd?: string | null
+  fruit_rmk?: string | null
+  delta_width_mm?: number | null
+  delta_height_mm?: number | null
+  delta_circumference_mm?: number | null
+  delta_estimated_weight_g?: number | null
+  is_current?: boolean
+}
+
+export type ObservationTrackResponse = {
+  success: boolean
+  root_obs_id: string
+  current_obs_id: string
+  track_count: number
+  followup_dt?: string | null
+  items: ObservationTrackItem[]
+  error?: string
+  error_code?: string
 }

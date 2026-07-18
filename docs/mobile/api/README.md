@@ -35,6 +35,7 @@
 ### 사진 규칙
 
 - 최대 **5장** (ODS / Project A)
+- **HEIC/HEIF:** 클라이언트에서 업로드 전 JPG 등으로 변환 (ODS v1.1.1)
 - 저장 루트: PC와 동일 `%LOCALAPPDATA%\OrchardPlatform\observation_photos` (또는 `OBS_MEDIA_ROOT`)
 - 상대경로: `{farm}/{YYYY}/{obs_id}/original|thumbnail/{photo_id}.{ext}`
 - `t_observation_photo` 사용, 스키마 변경 없음
@@ -43,6 +44,21 @@
   - development: `VITE_USER_ID` (`.env` / `.env.lan`)
   - production: Session/Auth provider (`setAuthUserProvider`) 의 `user_id`
   - 운영 코드에 user_id 하드코딩 금지. 로그인 연동 시 Auth Context 한 곳만 수정
+
+### 관찰일자
+
+- `obs_dt`는 **오늘 이하만** 허용 (서버·모바일 동일). 미래일이면 400 + 「관찰일자는 오늘까지만 허용됩니다.」
+
+### 과실 · 추적 (ODS v1.2)
+
+| 메서드 | 경로 | 용도 |
+|--------|------|------|
+| GET | `/api/v1/farms/{farm_cd}/observations/{obs_id}/track` | 동일 root 타임라인 |
+| GET/PUT | `.../fruit` | 열매 측정 조회·저장 |
+| PUT | `.../followup` | 재관찰 예정일 |
+
+- 1차(root) soft delete 시 동일 `root_obs_id` 의 2차 이상도 함께 삭제
+- 2차 이상 삭제는 해당 `obs_id`만
 
 ### 삭제 권한
 
@@ -61,4 +77,5 @@
 
 ## 향후 (미구현)
 
-관찰 등록 완료·GPS·AI·PSIS는 SCR-002 이후 단계. 모바일 번들에 API 키 금지.
+GPS 고도화 등은 후속. 모바일 번들에 API 키 금지.  
+관찰 완료·AI·PSIS·과실 추적 API는 Project A에서 사용 중(위 표·절 참고).

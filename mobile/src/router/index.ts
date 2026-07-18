@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import HomeView from '@/views/home/HomeView.vue'
 import ObservationDetailView from '@/views/observation/ObservationDetailView.vue'
+import ObservationFruitMeasureView from '@/views/observation/ObservationFruitMeasureView.vue'
 import ObservationNewView from '@/views/observation/ObservationNewView.vue'
 import ObservationPhotoView from '@/views/observation/ObservationPhotoView.vue'
 import ObservationView from '@/views/observation/ObservationView.vue'
@@ -28,6 +29,11 @@ const router = createRouter({
       path: '/observation/:obsId/photos',
       name: 'observation-photos',
       component: ObservationPhotoView,
+    },
+    {
+      path: '/observation/:obsId/fruit',
+      name: 'observation-fruit',
+      component: ObservationFruitMeasureView,
     },
     {
       path: '/observation/:obsId',

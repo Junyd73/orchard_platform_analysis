@@ -231,10 +231,10 @@ def _ensure_observation_stage2_common_codes(db: DBManager) -> None:
         (OBS_STALK_PARENT_CD, "FK010200", "약함"),
         (OBS_STALK_PARENT_CD, "FK010300", "탈락위험"),
         (OBS_STALK_PARENT_CD, "FK010400", "기타"),
+        # 배 꽃받침: 정상 / 숫배(잔존·돌출) / 기타
         (OBS_CALYX_PARENT_CD, "FY010100", "정상"),
-        (OBS_CALYX_PARENT_CD, "FY010200", "갈변"),
-        (OBS_CALYX_PARENT_CD, "FY010300", "부패"),
-        (OBS_CALYX_PARENT_CD, "FY010400", "기타"),
+        (OBS_CALYX_PARENT_CD, "FY010200", "숫배"),
+        (OBS_CALYX_PARENT_CD, "FY010300", "기타"),
     )
     now_sql = "datetime('now','localtime')"
     for farm_cd in farm_cds:
@@ -268,6 +268,45 @@ def _ensure_observation_stage2_common_codes(db: DBManager) -> None:
                 """,
                 (farm_cd, code_cd, code_nm, parent_cd, farm_cd, code_cd),
             )
+        # 기존 갈변/부패/구 기타 코드를 배 현장 구분(정상·숫배·기타)으로 정합
+        _sync_calyx_status_codes(db, farm_cd)
+
+
+def _sync_calyx_status_codes(db: DBManager, farm_cd: str) -> None:
+    """꽃받침: FY010100 정상, FY010200 숫배, FY010300 기타. 구 FY010400 비활성."""
+    farm = (farm_cd or "").strip()
+    if not farm:
+        return
+    updates = (
+        ("FY010100", "정상", "Y"),
+        ("FY010200", "숫배", "Y"),
+        ("FY010300", "기타", "Y"),
+        ("FY010400", "기타(미사용)", "N"),
+    )
+    for code_cd, code_nm, use_yn in updates:
+        db.execute_query(
+            """
+            UPDATE m_common_code
+            SET code_nm = ?, use_yn = ?, mod_id = 'SYSTEM',
+                mod_dt = datetime('now','localtime')
+            WHERE farm_cd = ? AND code_cd = ?
+            """,
+            (code_nm, use_yn, farm, code_cd),
+        )
+    # 구 '기타'(FY010400) 사용 건 → FY010300
+    try:
+        db.execute_query(
+            """
+            UPDATE t_observation_fruit_measurement
+            SET calyx_status_cd = 'FY010300',
+                mod_id = 'SYSTEM',
+                mod_dt = datetime('now','localtime')
+            WHERE farm_cd = ? AND calyx_status_cd = 'FY010400'
+            """,
+            (farm,),
+        )
+    except sqlite3.Error:
+        pass
 
 
 # --- 사진 CRUD: core.observation_photo_db 위임 (PyQt 비의존) ---
@@ -279,6 +318,7 @@ from core.observation_photo_db import (  # noqa: E402
     list_observation_photos,
     photo_hash_exists as _photo_hash_exists,
 )
+
 
 def update_observation_photo_meta(
     db: DBManager,

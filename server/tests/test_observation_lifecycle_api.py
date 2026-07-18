@@ -179,6 +179,116 @@ def test_soft_delete_completed(site_id: str) -> None:
         _delete_obs("OR001", oid)
 
 
+def test_soft_delete_root_cascades_tracks(site_id: str) -> None:
+    """1차 관찰 삭제 시 동일 root 의 2차 이상 추적도 함께 삭제."""
+    root = _create_draft(site_id, title="cascade-root")
+    child = None
+    try:
+        assert (
+            client.post(
+                f"/api/v1/farms/OR001/observations/{root}/complete",
+                headers={"X-User-Id": "TEST"},
+            ).status_code
+            == 200
+        )
+        child_body = {
+            "obs_dt": "2026-07-18",
+            "target_type_cd": OBS_TARGET_PEST_CD,
+            "site_id": site_id,
+            "obs_title": "cascade-track-1",
+            "obs_content": "추적",
+            "parent_obs_id": root,
+        }
+        child_res = client.post(
+            "/api/v1/farms/OR001/observations",
+            json=child_body,
+            headers={"X-User-Id": "TEST"},
+        )
+        assert child_res.status_code == 200, child_res.text
+        child = child_res.json()["obs_id"]
+        assert (
+            client.post(
+                f"/api/v1/farms/OR001/observations/{child}/complete",
+                headers={"X-User-Id": "TEST"},
+            ).status_code
+            == 200
+        )
+
+        deleted = client.delete(
+            f"/api/v1/farms/OR001/observations/{root}",
+            headers={"X-User-Id": "TEST"},
+            params={"delete_reason": "원 삭제 cascade"},
+        )
+        assert deleted.status_code == 200, deleted.text
+        assert "2차 이상 추적" in deleted.json()["message"]
+
+        assert client.get(f"/api/v1/farms/OR001/observations/{root}").status_code == 404
+        assert client.get(f"/api/v1/farms/OR001/observations/{child}").status_code == 404
+
+        listed = client.get("/api/v1/farms/OR001/observations?limit=200").json()
+        assert all(x["obs_id"] not in (root, child) for x in listed)
+    finally:
+        if child:
+            _delete_obs("OR001", child)
+        _delete_obs("OR001", root)
+
+
+def test_soft_delete_track_only_removes_self(site_id: str) -> None:
+    """2차 이상 상세 삭제는 해당 건만 제거하고 1차 관찰은 유지."""
+    root = _create_draft(site_id, title="keep-root")
+    child = None
+    try:
+        assert (
+            client.post(
+                f"/api/v1/farms/OR001/observations/{root}/complete",
+                headers={"X-User-Id": "TEST"},
+            ).status_code
+            == 200
+        )
+        child_res = client.post(
+            "/api/v1/farms/OR001/observations",
+            json={
+                "obs_dt": "2026-07-18",
+                "target_type_cd": OBS_TARGET_PEST_CD,
+                "site_id": site_id,
+                "obs_title": "track-only",
+                "obs_content": "추적만 삭제",
+                "parent_obs_id": root,
+            },
+            headers={"X-User-Id": "TEST"},
+        )
+        assert child_res.status_code == 200, child_res.text
+        child = child_res.json()["obs_id"]
+        assert (
+            client.post(
+                f"/api/v1/farms/OR001/observations/{child}/complete",
+                headers={"X-User-Id": "TEST"},
+            ).status_code
+            == 200
+        )
+
+        deleted = client.delete(
+            f"/api/v1/farms/OR001/observations/{child}",
+            headers={"X-User-Id": "TEST"},
+            params={"delete_reason": "추적만 삭제"},
+        )
+        assert deleted.status_code == 200, deleted.text
+        assert "2차 이상 추적" not in deleted.json()["message"]
+
+        assert client.get(f"/api/v1/farms/OR001/observations/{child}").status_code == 404
+        root_detail = client.get(
+            f"/api/v1/farms/OR001/observations/{root}",
+            headers={"X-User-Id": "TEST"},
+        )
+        assert root_detail.status_code == 200
+        assert root_detail.json()["obs_id"] == root
+        assert root_detail.json().get("can_delete") is True
+    finally:
+        if child:
+            _delete_obs("OR001", child)
+        _delete_obs("OR001", root)
+
+
 def test_delete_forbidden_for_other_user(site_id: str) -> None:
     oid = _create_draft(site_id)
     try:

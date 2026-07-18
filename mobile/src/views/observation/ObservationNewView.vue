@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
 import { fetchFarmSites } from '@/api/farms'
+import { fetchObservationTrack } from '@/api/observationFruit'
 import {
   createObservationBasic,
   fetchObservationDetail,
@@ -21,7 +22,7 @@ import {
   OBS_TARGET_FRUIT_CD,
   OBS_TARGET_PEST_CD,
 } from '@/composables/constants/app'
-import { formatDateKo } from '@/shared/formatDateKo'
+import { formatDateKo, todayLocalIso } from '@/shared/formatDateKo'
 import { clearObsDraft, writeObsDraft } from '@/composables/obsDraft'
 import { useAppStore } from '@/composables/stores/app'
 import type { FarmSiteSummary } from '@/types/farm'
@@ -33,12 +34,19 @@ const { farmCd, farm } = storeToRefs(store)
 
 const sites = ref<FarmSiteSummary[]>([])
 const obsId = ref('')
-const obsDt = ref(new Date().toISOString().slice(0, 10))
+const obsDt = ref(todayLocalIso())
 /** 신규 진입 시 미선택('') — 병해충/과실 필수 선택 */
 const targetTypeCd = ref('')
 const siteId = ref('')
 const obsTitle = ref('')
 const obsContent = ref('')
+/** 후속 관찰: 직전 obs_id */
+const parentObsId = ref('')
+const zoneNm = ref('')
+const rowNo = ref('')
+const treeNo = ref('')
+const branchNo = ref('')
+const sampleNo = ref('')
 
 const loading = ref(true)
 const saving = ref(false)
@@ -49,14 +57,29 @@ const datePicker = ref<HTMLInputElement | null>(null)
 
 const farmLabel = computed(() => farm.value?.farm_nm || farmCd.value)
 const obsDtLabel = computed(() => formatDateKo(obsDt.value))
+const todayMax = computed(() => todayLocalIso())
+const OBS_DT_FUTURE_MSG = '관찰일자는 오늘까지만 허용됩니다.'
 const fromDetail = computed(() => String(route.query.from || '') === 'detail')
 const isEditCompleted = computed(
   () => fromDetail.value || obsStatus.value === 'COMPLETED',
 )
+/** 추적 관찰(신규·수정): 부모 연결 건 — 일자·내용만 편집 */
+const isFollowUpObs = computed(() => Boolean(String(parentObsId.value || '').trim()))
 const canSubmit = computed(() => {
   if (saving.value) return false
-  if (!obsDt.value || !siteId.value || !targetTypeCd.value) return false
-  return Boolean(obsTitle.value.trim() && obsContent.value.trim())
+  if (!obsDt.value || !obsContent.value.trim()) return false
+  if (isFollowUpObs.value) {
+    return Boolean(siteId.value && targetTypeCd.value && obsTitle.value.trim())
+  }
+  if (!siteId.value || !targetTypeCd.value) return false
+  return Boolean(obsTitle.value.trim())
+})
+
+const pageTitle = computed(() => {
+  if (isFollowUpObs.value) {
+    return isEditCompleted.value && obsId.value ? '추적 관찰 수정' : '추적 관찰'
+  }
+  return isEditCompleted.value && obsId.value ? '관찰 수정' : '관찰기록'
 })
 
 const targetOptions = [
@@ -66,11 +89,17 @@ const targetOptions = [
 
 function resetBlankForm() {
   obsId.value = ''
-  obsDt.value = new Date().toISOString().slice(0, 10)
+  obsDt.value = todayLocalIso()
   targetTypeCd.value = ''
   siteId.value = sites.value.length === 1 ? sites.value[0].site_id : ''
   obsTitle.value = ''
   obsContent.value = ''
+  parentObsId.value = ''
+  zoneNm.value = ''
+  rowNo.value = ''
+  treeNo.value = ''
+  branchNo.value = ''
+  sampleNo.value = ''
   obsStatus.value = ''
   errorMessage.value = ''
   clearObsDraft(farmCd.value)
@@ -79,6 +108,34 @@ function resetBlankForm() {
 function resolveInitialObsId(): string {
   // 신규(+ 관찰하기)은 빈 폼. 복원은 ?obs_id= 가 있을 때만 (뒤로가기·사진 단계 복귀)
   return String(route.query.obs_id || '').trim()
+}
+
+function resolveParentObsId(): string {
+  return String(route.query.parent_obs_id || '').trim()
+}
+
+/** `{기본제목} N차` / 구형 `N차추적` 접미 제거 */
+function stripTrackSuffix(title: string): string {
+  const raw = String(title || '').trim()
+  const stripped = raw
+    .replace(/\s*\d+차추적\s*$/u, '')
+    .replace(/\s*\d+차\s*$/u, '')
+    .trim()
+  return stripped || raw || '과실 관찰'
+}
+
+/** 1차=최초, 추적은 2차부터. 다음 차수 = 현재 건수 + 1 */
+async function buildFollowUpTitle(parentId: string, fallbackTitle: string): Promise<string> {
+  const base = stripTrackSuffix(fallbackTitle)
+  try {
+    const track = await fetchObservationTrack(farmCd.value, parentId)
+    const count = Math.max(1, Number(track.track_count || track.items?.length || 1))
+    const nextRound = count + 1
+    const rootTitle = stripTrackSuffix(track.items?.[0]?.obs_title || base)
+    return `${rootTitle} ${nextRound}차`
+  } catch {
+    return `${base} 2차`
+  }
 }
 
 async function loadSites() {
@@ -91,6 +148,38 @@ async function loadSites() {
 
 async function restoreIfNeeded() {
   const id = resolveInitialObsId()
+  const parentId = resolveParentObsId()
+  if (!id && parentId) {
+    try {
+      const parent = await fetchObservationDetail(farmCd.value, parentId)
+      parentObsId.value = parent.obs_id
+      obsDt.value = todayLocalIso()
+      targetTypeCd.value =
+        parent.target_type_cd === OBS_TARGET_FRUIT_CD
+          ? OBS_TARGET_FRUIT_CD
+          : parent.target_type_cd === OBS_TARGET_PEST_CD
+            ? OBS_TARGET_PEST_CD
+            : OBS_TARGET_FRUIT_CD
+      siteId.value = parent.site_id || ''
+      zoneNm.value = parent.zone_nm || ''
+      rowNo.value = parent.row_no || ''
+      treeNo.value = parent.tree_no || ''
+      branchNo.value = parent.branch_no || ''
+      sampleNo.value = parent.sample_no || ''
+      obsTitle.value = await buildFollowUpTitle(
+        parent.obs_id,
+        parent.obs_title || '과실 관찰',
+      )
+      obsContent.value = '추적 관찰'
+      obsStatus.value = ''
+      obsId.value = ''
+      clearObsDraft(farmCd.value)
+    } catch {
+      resetBlankForm()
+      errorMessage.value = '추적 관찰의 원본을 불러오지 못했습니다.'
+    }
+    return
+  }
   if (!id) {
     resetBlankForm()
     return
@@ -106,8 +195,14 @@ async function restoreIfNeeded() {
           ? OBS_TARGET_PEST_CD
           : ''
     siteId.value = detail.site_id || ''
+    zoneNm.value = detail.zone_nm || ''
+    rowNo.value = detail.row_no || ''
+    treeNo.value = detail.tree_no || ''
+    branchNo.value = detail.branch_no || ''
+    sampleNo.value = detail.sample_no || ''
     obsTitle.value = detail.obs_title || ''
     obsContent.value = detail.obs_content || ''
+    parentObsId.value = detail.parent_obs_id || ''
     obsStatus.value = String(detail.observation_status || 'DRAFT').toUpperCase()
     writeObsDraft(farmCd.value, detail.obs_id)
   } catch {
@@ -155,17 +250,29 @@ function openDatePicker() {
 }
 
 function onObsDtInput(ev: Event) {
-  obsDt.value = (ev.target as HTMLInputElement).value
+  const next = (ev.target as HTMLInputElement).value
+  if (next && next > todayLocalIso()) {
+    obsDt.value = todayLocalIso()
+    errorMessage.value = OBS_DT_FUTURE_MSG
+    return
+  }
+  obsDt.value = next
+  if (errorMessage.value === OBS_DT_FUTURE_MSG) errorMessage.value = ''
 }
 
 async function onNext() {
-  if (!targetTypeCd.value) {
+  if (!isFollowUpObs.value && !targetTypeCd.value) {
     errorMessage.value = '관찰 대상을 선택해 주세요.'
     return
   }
   if (!canSubmit.value) {
-    errorMessage.value =
-      '필수 항목을 확인해 주세요. (관찰일자·대상·필지·제목·관찰 내용)'
+    errorMessage.value = isFollowUpObs.value
+      ? '필수 항목을 확인해 주세요. (관찰일자·관찰 내용)'
+      : '필수 항목을 확인해 주세요. (관찰일자·대상·필지·제목·관찰 내용)'
+    return
+  }
+  if (obsDt.value > todayLocalIso()) {
+    errorMessage.value = OBS_DT_FUTURE_MSG
     return
   }
   saving.value = true
@@ -176,6 +283,12 @@ async function onNext() {
     site_id: siteId.value,
     obs_title: obsTitle.value.trim() || null,
     obs_content: obsContent.value.trim() || null,
+    parent_obs_id: parentObsId.value || null,
+    zone_nm: zoneNm.value.trim() || null,
+    row_no: rowNo.value.trim() || null,
+    tree_no: treeNo.value.trim() || null,
+    branch_no: branchNo.value.trim() || null,
+    sample_no: sampleNo.value.trim() || null,
   }
   try {
     const res = obsId.value
@@ -218,15 +331,18 @@ onMounted(async () => {
   loading.value = false
 })
 
-// 동일 화면에서 ?obs_id 제거 시(신규 재진입)만 폼 초기화. 저장 후 obs_id 부여는 무시.
+// 동일 화면에서 ?obs_id / parent_obs_id 변경 시 폼 갱신
 watch(
-  () => String(route.query.obs_id || ''),
-  async (id, prev) => {
-    if (id === prev) return
-    if (id) return
+  () =>
+    [
+      String(route.query.obs_id || ''),
+      String(route.query.parent_obs_id || ''),
+    ].join('|'),
+  async (key, prev) => {
+    if (key === prev) return
     loading.value = true
-    resetBlankForm()
-    if (!siteId.value && sites.value.length === 1) {
+    await restoreIfNeeded()
+    if (!obsId.value && !siteId.value && sites.value.length === 1) {
       siteId.value = sites.value[0].site_id
     }
     loading.value = false
@@ -240,13 +356,22 @@ watch(
       <OdsAppBar show-back @back="onCancel" />
 
       <header class="top">
-        <h1 class="title">{{ isEditCompleted && obsId ? '관찰 수정' : '관찰기록' }}</h1>
+        <h1 class="title">{{ pageTitle }}</h1>
+        <p v-if="isFollowUpObs && obsTitle" class="sub-title">{{ obsTitle }}</p>
       </header>
 
       <nav class="steps" aria-label="등록 단계">
-        <span class="step step--active">1. 기본정보</span>
-        <span class="step">2. 사진</span>
-        <span class="step step--muted">3. 완료</span>
+        <template v-if="targetTypeCd === OBS_TARGET_FRUIT_CD">
+          <span class="step step--active">1. 기본정보</span>
+          <span class="step">2. 사진</span>
+          <span class="step">3. 열매</span>
+          <span class="step step--muted">4. 완료</span>
+        </template>
+        <template v-else>
+          <span class="step step--active">1. 기본정보</span>
+          <span class="step">2. 사진</span>
+          <span class="step step--muted">3. 완료</span>
+        </template>
       </nav>
 
       <p v-if="loading" class="status" role="status">불러오는 중…</p>
@@ -280,6 +405,7 @@ watch(
               class="date-field__native"
               type="date"
               :value="obsDt"
+              :max="todayMax"
               :disabled="saving"
               required
               tabindex="-1"
@@ -289,47 +415,53 @@ watch(
           </div>
         </OdsFormField>
 
-        <OdsFormField
-          class="field-target"
-          label="관찰 대상"
-          required
-          as="fieldset"
-        >
-          <OdsSegmented
-            v-model="targetTypeCd"
-            :options="targetOptions"
-            :disabled="saving"
-            aria-label="관찰 대상"
+        <template v-if="!isFollowUpObs">
+          <OdsFormField
+            class="field-target"
+            label="관찰 대상"
+            required
+            as="fieldset"
+          >
+            <OdsSegmented
+              v-model="targetTypeCd"
+              :options="targetOptions"
+              :disabled="saving"
+              aria-label="관찰 대상"
+            />
+          </OdsFormField>
+
+          <OdsFormField label="필지" required>
+            <OdsSelect v-model="siteId" variant="form" required>
+              <option value="" disabled>필지 선택</option>
+              <option v-for="s in sites" :key="s.site_id" :value="s.site_id">
+                {{ s.site_nm || s.site_id }}
+              </option>
+            </OdsSelect>
+          </OdsFormField>
+
+          <OdsInput
+            v-model="obsTitle"
+            label="제목"
+            variant="form"
+            required
+            placeholder="예: 잎 반점 관찰"
           />
-        </OdsFormField>
-
-        <OdsFormField label="필지" required>
-          <OdsSelect v-model="siteId" variant="form" required>
-            <option value="" disabled>필지 선택</option>
-            <option v-for="s in sites" :key="s.site_id" :value="s.site_id">
-              {{ s.site_nm || s.site_id }}
-            </option>
-          </OdsSelect>
-        </OdsFormField>
-
-        <OdsInput
-          v-model="obsTitle"
-          label="제목"
-          variant="form"
-          required
-          placeholder="예: 잎 반점 관찰"
-        />
+        </template>
 
         <OdsFormField
           label="관찰 내용"
           required
-          hint="현장에서 본 증상·상황을 적어 주세요. AI 분석을 위한 데이터 수집 단계이며, 장기적으로 AI 추천 정확도 향상에도 도움이 됩니다."
+          :hint="
+            isFollowUpObs
+              ? '이번 추적에서 본 변화를 적어 주세요.'
+              : '현장에서 본 증상·상황을 적어 주세요. AI 분석을 위한 데이터 수집 단계이며, 장기적으로 AI 추천 정확도 향상에도 도움이 됩니다.'
+          "
         >
           <textarea
             v-model="obsContent"
             class="textarea"
             rows="4"
-            placeholder="현장에서 본 증상을 적어 주세요"
+            :placeholder="isFollowUpObs ? '추적 관찰 내용을 적어 주세요' : '현장에서 본 증상을 적어 주세요'"
             required
           />
         </OdsFormField>
@@ -391,6 +523,13 @@ watch(
   margin: 0;
   font: var(--ods-font-title-1);
   color: var(--ods-color-text);
+}
+.sub-title {
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+  word-break: break-all;
 }
 .steps {
   display: flex;

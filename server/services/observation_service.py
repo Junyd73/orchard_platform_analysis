@@ -140,6 +140,9 @@ class ObservationService:
         obs_dt = str(body.obs_dt or "").strip()
         if not _DATE_RE.match(obs_dt):
             raise BusinessRuleError("관찰일은 YYYY-MM-DD 형식이어야 합니다.")
+        today = date.today().isoformat()
+        if obs_dt > today:
+            raise BusinessRuleError("관찰일자는 오늘까지만 허용됩니다.")
         target = str(body.target_type_cd or "").strip()
         if target not in MOBILE_BASIC_TARGET_CDS:
             raise BusinessRuleError(
@@ -232,9 +235,55 @@ class ObservationService:
         row = self._normalize_basic(body)
         if not self._repo.site_exists(farm, row["site_id"]):
             raise BusinessRuleError("선택한 필지를 찾을 수 없습니다.")
+
+        parent_id = str(body.parent_obs_id or "").strip() or None
+        if parent_id:
+            parent = self._repo.get_observation(farm, parent_id)
+            if not parent:
+                raise BusinessRuleError("후속 관찰의 원본을 찾을 수 없습니다.")
+            if parent.target_type_cd != row["target_type_cd"]:
+                raise BusinessRuleError("후속 관찰은 원본과 같은 관찰 대상이어야 합니다.")
+            root = str(parent.root_obs_id or "").strip() or parent.obs_id
+            row["parent_obs_id"] = parent.obs_id
+            row["root_obs_id"] = root
+            # 위치·필지 원본 승계 (요청에 없으면)
+            if not str(body.site_id or "").strip() and parent.site_id:
+                row["site_id"] = parent.site_id
+            row["zone_nm"] = str(body.zone_nm or parent.zone_nm or "").strip() or None
+            row["row_no"] = str(body.row_no or parent.row_no or "").strip() or None
+            row["tree_no"] = str(body.tree_no or parent.tree_no or "").strip() or None
+            row["branch_no"] = (
+                str(body.branch_no or parent.branch_no or "").strip() or None
+            )
+            row["sample_no"] = (
+                str(body.sample_no or parent.sample_no or "").strip() or None
+            )
+            if not str(body.obs_title or "").strip():
+                row["obs_title"] = f"{parent.obs_title or '과실 추적'} · 후속"
+            if not str(body.obs_content or "").strip():
+                row["obs_content"] = "후속 관찰"
+        else:
+            row["zone_nm"] = str(body.zone_nm or "").strip() or None
+            row["row_no"] = str(body.row_no or "").strip() or None
+            row["tree_no"] = str(body.tree_no or "").strip() or None
+            row["branch_no"] = str(body.branch_no or "").strip() or None
+            row["sample_no"] = str(body.sample_no or "").strip() or None
+
+        followup = str(body.followup_dt or "").strip() or None
+        if followup:
+            if not _DATE_RE.match(followup):
+                raise BusinessRuleError("재관찰 예정일은 YYYY-MM-DD 형식이어야 합니다.")
+            if followup < row["obs_dt"]:
+                raise BusinessRuleError(
+                    "재관찰 예정일은 관찰일자보다 이전일 수 없습니다."
+                )
+            row["followup_dt"] = followup
+
         obs_id = self._repo.generate_obs_id(farm, row["obs_dt"])
         row["farm_cd"] = farm
         row["obs_id"] = obs_id
+        if not row.get("root_obs_id"):
+            row["root_obs_id"] = obs_id
         self._repo.insert_observation(row, uid)
         return ObservationSaveResponse(
             obs_id=obs_id,
@@ -355,7 +404,10 @@ class ObservationService:
         user_role: str | None = None,
         delete_reason: str | None = None,
     ) -> ObservationSaveResponse:
-        """완료 관찰 업무 삭제 — 관련 데이터·파일 물리 삭제 + 마스터 DELETED."""
+        """완료 관찰 업무 삭제 — 관련 데이터·파일 물리 삭제 + 마스터 DELETED.
+
+        원 관찰(root) 삭제 시 동일 root_obs_id 의 추적 관찰(2차 이상)도 함께 삭제한다.
+        """
         farm = self._ensure_farm(farm_cd)
         oid = str(obs_id or "").strip()
         exist = self._repo.get_observation(farm, oid)
@@ -374,18 +426,26 @@ class ObservationService:
         ):
             raise BusinessRuleError("삭제 권한이 없습니다.")
 
+        root_id = str(exist.root_obs_id or "").strip() or oid
+        parent_id = str(exist.parent_obs_id or "").strip()
+        is_root = not parent_id or oid == root_id
+        target_ids = [oid]
+        if is_root:
+            target_ids = self._list_track_obs_ids(farm, root_id) or [oid]
+
         # 1) 삭제 대상 파일 경로 수집
         file_rels: list[str] = []
         if self._photo_repo is not None:
-            for p in self._photo_repo.list_all_photos_for_obs(farm, oid):
-                for key in ("file_path", "thumb_path"):
-                    rel = str(p.get(key) or "").strip()
-                    if rel:
-                        file_rels.append(rel)
+            for tid in target_ids:
+                for p in self._photo_repo.list_all_photos_for_obs(farm, tid):
+                    for key in ("file_path", "thumb_path"):
+                        rel = str(p.get(key) or "").strip()
+                        if rel:
+                            file_rels.append(rel)
 
-        # 2) DB 트랜잭션: 관련 행 삭제 + 마스터 DELETED
+        # 2) DB 트랜잭션: 관련 행 삭제 + 마스터 DELETED (root면 추적 일괄)
         self._purge_related_db_and_mark_deleted(
-            farm, oid, uid, delete_reason=delete_reason
+            farm, target_ids, uid, delete_reason=delete_reason
         )
 
         # 3) 파일 삭제 (DB 커밋 후 — 실패해도 목록에는 안 남음)
@@ -395,18 +455,61 @@ class ObservationService:
             except Exception:
                 logger.exception("observation file purge failed obs_id=%s", oid)
 
+        related = max(0, len(target_ids) - 1)
+        msg = "관찰 기록이 삭제되었습니다."
+        if is_root and related > 0:
+            msg = f"관찰 기록과 2차 이상 추적 {related}건이 함께 삭제되었습니다."
+
         return ObservationSaveResponse(
             obs_id=oid,
             farm_cd=farm,
             created=False,
-            message="관찰 기록이 삭제되었습니다.",
+            message=msg,
             observation_status=exist.observation_status,
         )
+
+    def _list_track_obs_ids(self, farm_cd: str, root_obs_id: str) -> list[str]:
+        """동일 root 의 ACTIVE 완료 관찰 id (root 포함, 오래된 순)."""
+        db_path = getattr(self._repo, "_db_path", None)
+        if db_path is None:
+            return [root_obs_id]
+        root = str(root_obs_id or "").strip()
+        if not root:
+            return []
+        try:
+            with get_sqlite_connection(db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT obs_id
+                    FROM t_observation_master
+                    WHERE farm_cd = ?
+                      AND (
+                        obs_id = ?
+                        OR COALESCE(root_obs_id, '') = ?
+                      )
+                      AND COALESCE(use_yn, 'Y') = 'Y'
+                      AND COALESCE(record_status, 'ACTIVE') = ?
+                      AND COALESCE(observation_status, 'DRAFT') = ?
+                    ORDER BY obs_dt ASC, obs_id ASC
+                    """,
+                    (
+                        farm_cd,
+                        root,
+                        root,
+                        OBS_RECORD_ACTIVE,
+                        OBS_STATUS_COMPLETED,
+                    ),
+                ).fetchall()
+            ids = [str(r[0]).strip() for r in rows if r and r[0]]
+            return ids or [root]
+        except sqlite3.Error:
+            logger.exception("list track obs ids failed root=%s", root)
+            return [root]
 
     def _purge_related_db_and_mark_deleted(
         self,
         farm_cd: str,
-        obs_id: str,
+        obs_ids: list[str],
         user_id: str,
         *,
         delete_reason: str | None,
@@ -415,6 +518,9 @@ class ObservationService:
         if db_path is None:
             raise BusinessRuleError("삭제에 실패했습니다.")
         reason = str(delete_reason or "").strip() or "사용자 삭제"
+        targets = [str(x).strip() for x in (obs_ids or []) if str(x).strip()]
+        if not targets:
+            raise BusinessRuleError("삭제에 실패했습니다.")
         try:
             with get_sqlite_write_connection(db_path) as conn:
                 existing = {
@@ -423,92 +529,95 @@ class ObservationService:
                         "SELECT name FROM sqlite_master WHERE type='table'"
                     ).fetchall()
                 }
-                # AI 자식 → 헤더
-                if _AI_ANALYSIS_TABLE in existing:
-                    aids = [
-                        str(r[0])
-                        for r in conn.execute(
-                            f"""
-                            SELECT analysis_id FROM {_AI_ANALYSIS_TABLE}
-                            WHERE farm_cd = ? AND obs_id = ?
-                            """,
-                            (farm_cd, obs_id),
-                        ).fetchall()
-                        if r[0]
-                    ]
-                    for aid in aids:
-                        if _AI_CANDIDATE_TABLE in existing:
-                            conn.execute(
-                                f"DELETE FROM {_AI_CANDIDATE_TABLE} WHERE analysis_id = ?",
-                                (aid,),
-                            )
-                        if _AI_PHOTO_TABLE in existing:
-                            conn.execute(
-                                f"DELETE FROM {_AI_PHOTO_TABLE} WHERE analysis_id = ?",
-                                (aid,),
-                            )
-                    conn.execute(
-                        f"""
-                        DELETE FROM {_AI_ANALYSIS_TABLE}
-                        WHERE farm_cd = ? AND obs_id = ?
-                        """,
-                        (farm_cd, obs_id),
-                    )
-                for table in _RELATED_TABLES_BY_OBS:
-                    if table not in existing:
-                        continue
-                    try:
-                        conn.execute(
-                            f"DELETE FROM {table} WHERE farm_cd = ? AND obs_id = ?",
-                            (farm_cd, obs_id),
-                        )
-                    except sqlite3.Error:
-                        logger.debug("purge skip %s", table, exc_info=True)
-
-                # 사진 DB
-                if "t_observation_photo" in existing:
-                    conn.execute(
-                        """
-                        DELETE FROM t_observation_photo
-                        WHERE farm_cd = ? AND obs_id = ?
-                        """,
-                        (farm_cd, obs_id),
-                    )
-
                 from datetime import datetime as _dt
 
                 from app.core.observation_lifecycle import OBS_RECORD_DELETED
 
                 now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-                cur = conn.execute(
-                    """
-                    UPDATE t_observation_master SET
-                        record_status = ?,
-                        use_yn = 'N',
-                        deleted_at = ?,
-                        deleted_by = ?,
-                        delete_reason = ?,
-                        mod_id = ?,
-                        mod_dt = ?
-                    WHERE farm_cd = ? AND obs_id = ?
-                      AND COALESCE(observation_status, 'DRAFT') = ?
-                      AND COALESCE(record_status, 'ACTIVE') = ?
-                      AND COALESCE(use_yn, 'Y') = 'Y'
-                    """,
-                    (
-                        OBS_RECORD_DELETED,
-                        now,
-                        user_id,
-                        reason,
-                        user_id,
-                        now,
-                        farm_cd,
-                        obs_id,
-                        OBS_STATUS_COMPLETED,
-                        OBS_RECORD_ACTIVE,
-                    ),
-                )
-                if cur.rowcount <= 0:
+                purged = 0
+                for oid in targets:
+                    # AI 자식 → 헤더
+                    if _AI_ANALYSIS_TABLE in existing:
+                        aids = [
+                            str(r[0])
+                            for r in conn.execute(
+                                f"""
+                                SELECT analysis_id FROM {_AI_ANALYSIS_TABLE}
+                                WHERE farm_cd = ? AND obs_id = ?
+                                """,
+                                (farm_cd, oid),
+                            ).fetchall()
+                            if r[0]
+                        ]
+                        for aid in aids:
+                            if _AI_CANDIDATE_TABLE in existing:
+                                conn.execute(
+                                    f"DELETE FROM {_AI_CANDIDATE_TABLE} WHERE analysis_id = ?",
+                                    (aid,),
+                                )
+                            if _AI_PHOTO_TABLE in existing:
+                                conn.execute(
+                                    f"DELETE FROM {_AI_PHOTO_TABLE} WHERE analysis_id = ?",
+                                    (aid,),
+                                )
+                        conn.execute(
+                            f"""
+                            DELETE FROM {_AI_ANALYSIS_TABLE}
+                            WHERE farm_cd = ? AND obs_id = ?
+                            """,
+                            (farm_cd, oid),
+                        )
+                    for table in _RELATED_TABLES_BY_OBS:
+                        if table not in existing:
+                            continue
+                        try:
+                            conn.execute(
+                                f"DELETE FROM {table} WHERE farm_cd = ? AND obs_id = ?",
+                                (farm_cd, oid),
+                            )
+                        except sqlite3.Error:
+                            logger.debug("purge skip %s", table, exc_info=True)
+
+                    if "t_observation_photo" in existing:
+                        conn.execute(
+                            """
+                            DELETE FROM t_observation_photo
+                            WHERE farm_cd = ? AND obs_id = ?
+                            """,
+                            (farm_cd, oid),
+                        )
+
+                    cur = conn.execute(
+                        """
+                        UPDATE t_observation_master SET
+                            record_status = ?,
+                            use_yn = 'N',
+                            deleted_at = ?,
+                            deleted_by = ?,
+                            delete_reason = ?,
+                            mod_id = ?,
+                            mod_dt = ?
+                        WHERE farm_cd = ? AND obs_id = ?
+                          AND COALESCE(observation_status, 'DRAFT') = ?
+                          AND COALESCE(record_status, 'ACTIVE') = ?
+                          AND COALESCE(use_yn, 'Y') = 'Y'
+                        """,
+                        (
+                            OBS_RECORD_DELETED,
+                            now,
+                            user_id,
+                            reason,
+                            user_id,
+                            now,
+                            farm_cd,
+                            oid,
+                            OBS_STATUS_COMPLETED,
+                            OBS_RECORD_ACTIVE,
+                        ),
+                    )
+                    purged += int(cur.rowcount or 0)
+
+                if purged <= 0:
                     raise BusinessRuleError("삭제에 실패했습니다.")
                 conn.commit()
         except BusinessRuleError:

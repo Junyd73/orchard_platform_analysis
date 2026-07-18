@@ -11,6 +11,7 @@ import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
 import AiAnalysisPanel from '@/views/observation/components/AiAnalysisPanel.vue'
 import PhotoPanel from '@/views/observation/components/PhotoPanel.vue'
+import { OBS_TARGET_FRUIT_CD } from '@/composables/constants/app'
 import { clearObsDraft } from '@/composables/obsDraft'
 import { useAppStore } from '@/composables/stores/app'
 import type { ObservationAiAnalysisResponse, ObservationPhotoItem } from '@/types/observation'
@@ -28,25 +29,35 @@ const finishing = ref(false)
 const errorMessage = ref('')
 const statusMessage = ref('')
 const obsStatus = ref('')
+const targetTypeCd = ref('')
 const photoIds = ref<string[]>([])
 const aiStatus = ref('')
 
 const isDraft = computed(() => obsStatus.value === 'DRAFT')
+const isFruitObs = computed(
+  () => String(targetTypeCd.value || '').trim() === OBS_TARGET_FRUIT_CD,
+)
 /** 신규 등록: 최종 완료 / 이미 완료된 건 수정: 수정 완료 */
 const showFinish = computed(() => Boolean(obsId.value) && (isDraft.value || fromWizard.value))
-const finishLabel = computed(() => (isDraft.value ? '최종 완료' : '수정 완료'))
+const finishLabel = computed(() => {
+  if (isFruitObs.value && fromWizard.value) return '다음 (열매측정)'
+  return isDraft.value ? '최종 완료' : '수정 완료'
+})
 const backToBasic = computed(() => fromWizard.value && Boolean(obsId.value))
 
 async function loadStatus() {
   if (!obsId.value) {
     obsStatus.value = ''
+    targetTypeCd.value = ''
     return
   }
   try {
     const d = await fetchObservationDetail(farmCd.value, obsId.value)
     obsStatus.value = String(d.observation_status || 'DRAFT').toUpperCase()
+    targetTypeCd.value = String(d.target_type_cd || '').trim()
   } catch {
     obsStatus.value = ''
+    targetTypeCd.value = ''
   }
 }
 
@@ -90,6 +101,16 @@ function goBack() {
 
 async function onFinish() {
   if (!obsId.value || finishing.value || !showFinish.value) return
+
+  // 과실 등록 마법사: 사진 다음 → 열매측정
+  if (isFruitObs.value && fromWizard.value) {
+    void router.push({
+      name: 'observation-fruit',
+      params: { obsId: obsId.value },
+      query: { from: 'new' },
+    })
+    return
+  }
 
   // 이미 COMPLETED 건 수정 흐름: API complete 없이 상세로 복귀
   if (!isDraft.value) {
@@ -136,15 +157,28 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
       </header>
 
       <nav v-if="fromWizard" class="steps" aria-label="등록 단계">
-        <span class="step">1. 기본정보</span>
-        <span class="step step--active">2. 사진</span>
-        <span class="step">3. 완료</span>
+        <template v-if="isFruitObs">
+          <span class="step">1. 기본정보</span>
+          <span class="step step--active">2. 사진</span>
+          <span class="step">3. 열매</span>
+          <span class="step">4. 완료</span>
+        </template>
+        <template v-else>
+          <span class="step">1. 기본정보</span>
+          <span class="step step--active">2. 사진</span>
+          <span class="step">3. 완료</span>
+        </template>
       </nav>
 
       <p v-if="!obsId" class="error" role="alert">관찰 번호가 없습니다.</p>
       <template v-else-if="ready">
-        <PhotoPanel :farm-cd="farmCd" :obs-id="obsId" @changed="onPhotosChanged" />
-        <OdsCard class="ai-card" aria-label="AI 분석">
+        <PhotoPanel
+          :farm-cd="farmCd"
+          :obs-id="obsId"
+          variant="scr004"
+          @changed="onPhotosChanged"
+        />
+        <OdsCard v-if="!isFruitObs" class="ai-card" aria-label="AI 분석">
           <h2 class="ai-title">AI 분석</h2>
           <AiAnalysisPanel
             :farm-cd="farmCd"

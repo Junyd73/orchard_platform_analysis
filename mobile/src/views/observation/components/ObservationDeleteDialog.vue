@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 const props = defineProps<{
   open: boolean
+  /** 1차 관찰 삭제 시 함께 삭제될 2차 이상 건수 (0이면 일반 경고만) */
+  relatedTrackCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -11,6 +13,9 @@ const emit = defineEmits<{
 }>()
 
 const cancelBtn = ref<HTMLButtonElement | null>(null)
+
+const relatedCount = computed(() => Math.max(0, Number(props.relatedTrackCount || 0)))
+const hasCascade = computed(() => relatedCount.value > 0)
 
 watch(
   () => props.open,
@@ -35,6 +40,14 @@ watch(
       <div class="dlg__panel">
         <h2 id="obs-del-title" class="dlg__title">관찰 기록 삭제</h2>
         <p class="dlg__lead">선택한 관찰 기록을 삭제하시겠습니까?</p>
+        <p
+          v-if="hasCascade"
+          class="dlg__cascade"
+          role="alert"
+        >
+          이 관찰은 1차 기록입니다. 연관된 2차 이상 추적 관찰
+          {{ relatedCount }}건도 모두 함께 삭제됩니다.
+        </p>
         <p class="dlg__body">삭제를 진행하면 아래 정보가 모두 삭제됩니다.</p>
         <ul class="dlg__list">
           <li>관찰 기본정보</li>
@@ -43,6 +56,7 @@ watch(
           <li>AI 분석 결과</li>
           <li>스마트 방제 가이드 결과</li>
           <li>첨부 데이터</li>
+          <li v-if="hasCascade">2차 이상 추적 관찰 전체 (측정·사진 포함)</li>
         </ul>
         <p class="dlg__warn">삭제된 데이터는 복구할 수 없습니다.</p>
         <p class="dlg__ask">계속하시겠습니까?</p>
@@ -98,6 +112,15 @@ watch(
   margin: var(--ods-space-8) 0 0;
   font: var(--ods-font-body-2);
   color: var(--ods-color-text);
+}
+.dlg__cascade {
+  margin: var(--ods-space-8) 0 0;
+  padding: var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-danger) 12%, transparent);
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-danger);
 }
 .dlg__list {
   margin: var(--ods-space-8) 0 0;

@@ -73,6 +73,17 @@ class ObservationBasicCreateRequest(BaseModel):
     site_id: str = Field(..., min_length=1)
     obs_title: str | None = None
     obs_content: str | None = None
+    parent_obs_id: str | None = Field(
+        default=None, description="후속 관찰 시 직전 obs_id"
+    )
+    followup_dt: str | None = Field(
+        default=None, description="재관찰 예정일 YYYY-MM-DD"
+    )
+    zone_nm: str | None = None
+    row_no: str | None = None
+    tree_no: str | None = None
+    branch_no: str | None = None
+    sample_no: str | None = None
 
 
 class ObservationBasicUpdateRequest(BaseModel):
@@ -122,7 +133,11 @@ class ObservationDetail(BaseModel):
     zone_nm: str | None = None
     row_no: str | None = None
     tree_no: str | None = None
+    branch_no: str | None = None
     sample_no: str | None = None
+    root_obs_id: str | None = None
+    parent_obs_id: str | None = None
+    followup_dt: str | None = None
 
 
 class ObservationSaveResponse(BaseModel):

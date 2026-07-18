@@ -14,8 +14,11 @@ import OdsCard from '@/components/ods/OdsCard.vue'
 import PhotoViewer from '@/views/observation/components/PhotoViewer.vue'
 import { OBS_PHOTO_MAX_COUNT } from '@/composables/constants/app'
 import { takeFilesFromInput } from '@/utils/fileInput'
+import { isHeicLikeFile, prepareObservationUploadFiles } from '@/shared/heicConvert'
+import { resolveMediaUrl } from '@/utils/mediaUrl'
 import {
   filterObservationUploadFiles,
+  OBS_PHOTO_INPUT_ACCEPT,
   photoIdentityKey,
 } from '@/shared/photoFilePolicy'
 import { formatPhotoCardLabel } from '@/utils/photoCardLabel'
@@ -64,6 +67,16 @@ const canRetryUpload = computed(() => Boolean(pendingRetryFiles.value?.length) &
 
 function cardLabel(photo: ObservationPhotoItem, index: number) {
   return formatPhotoCardLabel(photo.display_nm, index)
+}
+
+/** 썸네일 실패 시 원본 URL로 한 번만 폴백 */
+function onThumbError(ev: Event, photo: ObservationPhotoItem) {
+  const img = ev.target as HTMLImageElement | null
+  if (!img) return
+  const fallback = resolveMediaUrl(photo.original_url)
+  if (!fallback || img.dataset.fallbackTried === '1') return
+  img.dataset.fallbackTried = '1'
+  if (img.src !== fallback) img.src = fallback
 }
 
 function isAbortError(err: unknown): boolean {
@@ -129,45 +142,71 @@ async function uploadSelected(selected: File[]) {
     return
   }
 
-  const existingKeys = new Set(
-    photos.value.map((p) =>
-      photoIdentityKey({ name: p.original_nm, size: p.file_size }),
-    ),
-  )
-  const checked = filterObservationUploadFiles(selected, {
-    remaining: remaining.value,
-    maxCount: maxCount.value,
-    existingKeys,
-  })
-  if (!checked.ok) {
-    errorMessage.value = checked.message
-    pendingRetryFiles.value = null
-    return
-  }
-  const toUpload = checked.files
-
   busy.value = true
   errorMessage.value = ''
-  statusMessage.value = `업로드 중… (${toUpload.length}장)`
-  pendingRetryFiles.value = toUpload
+  const needsHeic = selected.some((f) => isHeicLikeFile(f))
+  statusMessage.value = needsHeic ? 'HEIC → JPG 변환 중…' : '사진 준비 중…'
+  pendingRetryFiles.value = selected
   uploadAbort?.abort()
   uploadAbort = new AbortController()
 
   try {
+    const prepared = await prepareObservationUploadFiles(selected)
+    if (!prepared.ok) {
+      errorMessage.value = prepared.message
+      statusMessage.value = ''
+      pendingRetryFiles.value = null
+      return
+    }
+
+    const existingKeys = new Set(
+      photos.value.map((p) =>
+        photoIdentityKey({ name: p.original_nm, size: p.file_size }),
+      ),
+    )
+    const checked = filterObservationUploadFiles(prepared.files, {
+      remaining: remaining.value,
+      maxCount: maxCount.value,
+      existingKeys,
+    })
+    if (!checked.ok) {
+      errorMessage.value = checked.message
+      statusMessage.value = ''
+      pendingRetryFiles.value = null
+      return
+    }
+    const toUpload = checked.files
+    pendingRetryFiles.value = toUpload
+    statusMessage.value = `업로드 중… (${toUpload.length}장)`
+
     const res = await uploadObservationPhotos(props.farmCd, props.obsId, toUpload, {
       signal: uploadAbort.signal,
     })
-    const listed = await fetchObservationPhotos(
-      props.farmCd,
-      props.obsId,
-      uploadAbort.signal,
-    )
-    photos.value = listed.photos
-    remaining.value = res.remaining
-    maxCount.value = res.max_count
+    let nextPhotos = res.uploaded?.length ? [...res.uploaded] : []
+    let nextRemaining = res.remaining
+    let nextMax = res.max_count
+    try {
+      const listed = await fetchObservationPhotos(
+        props.farmCd,
+        props.obsId,
+        uploadAbort.signal,
+      )
+      // 목록 재조회 성공 시 서버 기준으로 동기화 (실패해도 업로드 응답으로 즉시 표시)
+      if (listed.photos.length || !nextPhotos.length) {
+        nextPhotos = listed.photos
+      }
+      nextRemaining = listed.remaining
+      nextMax = listed.max_count
+    } catch (listErr) {
+      if (isAbortError(listErr)) throw listErr
+      // 업로드는 성공했으므로 응답 사진으로 화면 유지
+    }
+    photos.value = nextPhotos
+    remaining.value = nextRemaining
+    maxCount.value = nextMax
     pendingRetryFiles.value = null
     statusMessage.value = res.message || '업로드 성공'
-    emit('changed', listed.photos)
+    emit('changed', nextPhotos)
   } catch (err) {
     if (isAbortError(err)) {
       statusMessage.value = '업로드가 취소되었습니다.'
@@ -264,7 +303,7 @@ defineExpose({ reload: loadPhotos })
       ref="cameraInput"
       class="sr-only"
       type="file"
-      accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+      :accept="OBS_PHOTO_INPUT_ACCEPT"
       capture="environment"
       @change="onFilesSelected"
     >
@@ -272,7 +311,7 @@ defineExpose({ reload: loadPhotos })
       ref="galleryInput"
       class="sr-only"
       type="file"
-      accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+      :accept="OBS_PHOTO_INPUT_ACCEPT"
       multiple
       @change="onFilesSelected"
     >
@@ -307,6 +346,7 @@ defineExpose({ reload: loadPhotos })
             :src="photoThumbSrc(photo)"
             :alt="cardLabel(photo, index).fullName"
             loading="lazy"
+            @error="onThumbError($event, photo)"
           >
           <span v-if="index === 0 && photo.is_representative" class="strip__rep">대표</span>
           <span
@@ -379,7 +419,7 @@ defineExpose({ reload: loadPhotos })
       ref="cameraInput"
       class="sr-only"
       type="file"
-      accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+      :accept="OBS_PHOTO_INPUT_ACCEPT"
       capture="environment"
       @change="onFilesSelected"
     >
@@ -387,7 +427,7 @@ defineExpose({ reload: loadPhotos })
       ref="galleryInput"
       class="sr-only"
       type="file"
-      accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+      :accept="OBS_PHOTO_INPUT_ACCEPT"
       multiple
       @change="onFilesSelected"
     >
@@ -417,6 +457,7 @@ defineExpose({ reload: loadPhotos })
             :src="photoThumbSrc(photo)"
             :alt="cardLabel(photo, index).fullName"
             loading="lazy"
+            @error="onThumbError($event, photo)"
           >
           <span v-if="index === 0 && photo.is_representative" class="rep">대표</span>
         </button>
