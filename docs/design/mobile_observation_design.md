@@ -163,11 +163,14 @@ PSIS REST는 ApplicationService만 호출하며, 검색 알고리즘·스냅샷 
 관찰 내 농약 정보는 **GPT가 추천하지 않는다.**
 
 ```text
-AI 후보 확정(confirm_ai_candidate)
+AI 후보 확정(ObservationCandidateConfirmApplicationService
+  → confirm_ai_candidate)
   → 작물명 선택 + “공식 등록정보 조회”
-  → PsisSearchWorker → ObservationPesticideService (PSIS OpenAPI)
+  → ObservationPsisApplicationService → ObservationPesticideService (PSIS OpenAPI)
   → t_observation_pesticide_snapshot (캐시 정책 포함)
 ```
+
+REST: `POST /api/v1/farms/{farm_cd}/observations/{obs_id}/candidates/confirm`
 
 방제 AI 추천(`pesticide_ai_recommend_*`)과는 **코드·DB 미연결**.
 

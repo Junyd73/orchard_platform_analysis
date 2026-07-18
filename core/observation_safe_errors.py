@@ -17,6 +17,8 @@ SAFE_MESSAGES: dict[str, str] = {
     "AI_DEPENDENCY": "openai 패키지가 설치되지 않았습니다.",
     "AI_EMPTY": "AI가 빈 응답을 반환했습니다.",
     "AI_BUSY": "이미 AI 분석이 진행 중입니다. 완료 후 다시 확인해 주세요.",
+    "AI_CONFIRM_PARAM": "확정에 필요한 정보를 확인해 주세요.",
+    "AI_CONFIRM_NOT_FOUND": "확정할 후보를 찾을 수 없습니다.",
     "PSIS_AUTH": "공식 농약정보 인증에 실패했습니다. API 키·도메인 승인을 확인해 주세요.",
     "PSIS_DOMAIN": "공식 농약정보 도메인 승인이 필요합니다.",
     "PSIS_TIMEOUT": "공식 농약정보 조회 시간이 초과되었습니다.",

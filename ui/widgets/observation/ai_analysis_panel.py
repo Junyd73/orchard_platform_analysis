@@ -670,18 +670,31 @@ class AiAnalysisPanel(QWidget):
         if not name:
             QMessageBox.warning(self, "검증", "확정 병해충명을 입력해 주세요.")
             return
-        ok, msg = self.db.confirm_ai_candidate(
-            self.farm_cd,
-            self._analysis.get("analysis_id"),
-            int(c.get("candidate_seq") or row + 1),
-            name,
-            self.user_id,
-            obs_id=self.obs_id,
+        from core.ai.observation_candidate_confirm_application_service import (
+            ObservationCandidateConfirmApplicationService,
         )
-        if not ok:
-            QMessageBox.warning(self, "확정 실패", msg)
+
+        payload = ObservationCandidateConfirmApplicationService().confirm_candidate(
+            self.db,
+            farm_cd=self.farm_cd,
+            obs_id=self.obs_id,
+            user_id=self.user_id,
+            analysis_id=str(self._analysis.get("analysis_id") or ""),
+            candidate_seq=int(c.get("candidate_seq") or row + 1),
+            confirmed_name=name,
+        )
+        if not payload.get("ok"):
+            QMessageBox.warning(
+                self,
+                "확정 실패",
+                str(payload.get("error_message") or "확정에 실패했습니다."),
+            )
             return
-        QMessageBox.information(self, "확정", msg)
+        QMessageBox.information(
+            self,
+            "확정",
+            str(payload.get("error_message") or "병해충 후보가 확정되었습니다."),
+        )
         self.reload()
         self.analysisUpdated.emit()
 
