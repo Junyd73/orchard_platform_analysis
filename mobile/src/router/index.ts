@@ -8,6 +8,7 @@ import ObservationPhotoView from '@/views/observation/ObservationPhotoView.vue'
 import ObservationView from '@/views/observation/ObservationView.vue'
 import OrderView from '@/views/orders/OrderView.vue'
 import WorkLogView from '@/views/work-log/WorkLogView.vue'
+import WorkLogDailyView from '@/views/work-log/WorkLogDailyView.vue'
 import NotFoundView from '@/shared/NotFoundView.vue'
 
 const router = createRouter({
@@ -41,6 +42,11 @@ const router = createRouter({
       component: ObservationDetailView,
     },
     { path: '/work-log', name: 'work-log', component: WorkLogView },
+    {
+      path: '/work-log/:workDt',
+      name: 'work-log-daily',
+      component: WorkLogDailyView,
+    },
     { path: '/orders', name: 'orders', component: OrderView },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView },
   ],

@@ -9,6 +9,8 @@
 | SCR-002 | 병해충 생육관찰 | Approved + v1.1.1 | [SCR-002.md](./SCR-002.md) |
 | SCR-003 | 과실 생육관찰 · 추적 | Approved (v1.2) | [SCR-003.md](./SCR-003.md) |
 | SCR-004 | 생육관찰 상세 | Approved + v1.2 과실 분기 | [SCR-004.md](./SCR-004.md) |
+| SCR-010 | 영농일지 월간 | Draft (MVP) | [SCR-010.md](./SCR-010.md) |
+| SCR-011 | 영농일지 일간 | Draft (MVP) | [SCR-011.md](./SCR-011.md) |
 
 원본 시안·비주얼: `mobile/docs/ODS/ODS_v1.0.pdf` (페이지 12~17)  
 과실 추적 Addendum: `mobile/docs/ODS/ODS_v1.2_SCR-003_Fruit_Track.md`

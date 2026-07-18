@@ -193,6 +193,7 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 |------|------|
 | ODS v1.1 ~ v1.1.1 | Home, 관찰 목록·상세·등록/수정·사진, 영농일지·주문 (공통 셸) |
 | ODS v1.2 | 과실 생육관찰(SCR-003) · 상세 과실 분기(SCR-004) · 열매 측정 · 추적 |
+| 영농일지 MVP | SCR-010 월간 · SCR-011 일간 (기상·이슈·작업) |
 
 등록·사진·열매 Wizard도 공통 AppBar + Floating Bottom Action을 따른다.
 
