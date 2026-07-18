@@ -46,3 +46,18 @@ class ObservationPhotoUploadResponse(BaseModel):
     max_count: int = Field(ge=1)
     remaining: int = Field(ge=0)
     message: str
+    # 단일/첫 성공 건 편의 필드 (ApplicationService payload 정렬)
+    success: bool = True
+    photo_id: str | None = None
+    farm_cd: str | None = None
+    obs_id: str | None = None
+    file_name: str | None = None
+    file_path: str | None = None
+    thumbnail_path: str | None = None
+    file_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+    created_by: str | None = None
+    created_at: str | None = None
+    error: str | None = None
+    error_code: str | None = None

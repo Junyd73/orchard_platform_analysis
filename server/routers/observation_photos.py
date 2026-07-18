@@ -47,12 +47,22 @@ def get_representative(
 async def upload_photos(
     farm_cd: str,
     obs_id: str,
-    files: list[UploadFile] = File(..., description="multipart 이미지 (최대 남은 장수)"),
+    files: list[UploadFile] | None = File(
+        default=None, description="multipart 이미지 (files)"
+    ),
+    file: UploadFile | None = File(
+        default=None, description="단일 이미지 (file)"
+    ),
     x_user_id: str | None = Depends(_user_header),
     service: ObservationPhotoService = Depends(get_observation_photo_service),
 ) -> ObservationPhotoUploadResponse:
+    upload_list: list[UploadFile] = []
+    if file is not None:
+        upload_list.append(file)
+    if files:
+        upload_list.extend(files)
     return await service.upload_photos(
-        farm_cd, obs_id, files, user_id=x_user_id
+        farm_cd, obs_id, upload_list, user_id=x_user_id
     )
 
 

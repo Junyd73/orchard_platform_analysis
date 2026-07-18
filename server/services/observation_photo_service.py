@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
+from app.db.sqlite import get_sqlite_write_connection
 from app.repository.interfaces.observation_photo_repository import (
     ObservationPhotoRepository,
 )
@@ -14,13 +15,15 @@ from app.schemas.observation_photo import (
     ObservationPhotoListResponse,
     ObservationPhotoUploadResponse,
 )
+from app.services._core_path import ensure_repo_root_on_path
+from app.services.observation_ai_db_bridge import ServerDbBridge
 from app.services.observation_media import (
     OBS_PHOTO_MAX_COUNT,
-    compensate_photo_files,
-    process_observation_photo_bytes,
     resolve_media_path,
 )
 from app.services.photo_display_name import build_photo_display_nm
+
+_YN_Y = "Y"
 
 
 class ObservationPhotoService:
@@ -29,10 +32,12 @@ class ObservationPhotoService:
         repo: ObservationPhotoRepository,
         *,
         media_root: Path,
+        db_path: Path | str | None = None,
         default_user_id: str = "MOBILE",
     ):
         self._repo = repo
         self._media_root = Path(media_root)
+        self._db_path = Path(db_path) if db_path else None
         self._default_user_id = str(default_user_id or "MOBILE").strip() or "MOBILE"
 
     def _ensure_farm(self, farm_cd: str) -> str:
@@ -51,8 +56,15 @@ class ObservationPhotoService:
         return obs
 
     def _user_id(self, user_id: str | None) -> str:
+        """목록·삭제 등 기존 동작용. 업로드는 require_user_id 사용."""
         uid = str(user_id or "").strip()
         return uid or self._default_user_id
+
+    def _require_user_id(self, user_id: str | None) -> str:
+        uid = str(user_id or "").strip()
+        if not uid:
+            raise BusinessRuleError("사용자 세션 정보가 없습니다.")
+        return uid
 
     def _urls(self, farm_cd: str, obs_id: str, photo_id: str) -> tuple[str, str]:
         """VITE_API_BASE_URL(/api/v1)에 붙일 상대경로. /api/v1 중복 금지."""
@@ -139,62 +151,59 @@ class ObservationPhotoService:
     ) -> ObservationPhotoUploadResponse:
         farm = self._ensure_farm(farm_cd)
         obs = self._ensure_observation(farm, obs_id)
-        uid = self._user_id(user_id)
+        uid = self._require_user_id(user_id)
         oid = str(obs_id).strip()
-        obs_dt = str(obs.get("obs_dt") or "")
 
-        current = self._repo.count_active_photos(farm, oid)
-        remaining = OBS_PHOTO_MAX_COUNT - current
-        if remaining <= 0:
-            raise BusinessRuleError(f"사진은 최대 {OBS_PHOTO_MAX_COUNT}장까지 등록할 수 있습니다.")
+        if self._db_path is None:
+            raise BusinessRuleError("사진 저장소 설정이 없습니다.")
 
         upload_files = list(files or [])
         if not upload_files:
             raise BusinessRuleError("업로드할 파일이 없습니다.")
-        if len(upload_files) > remaining:
-            raise BusinessRuleError(
-                f"남은 등록 가능 개수는 {remaining}장입니다. "
-                f"(최대 {OBS_PHOTO_MAX_COUNT}장)"
-            )
 
+        ensure_repo_root_on_path()
+        from core.observation_photo_upload_application_service import (
+            ObservationPhotoUploadApplicationService,
+        )
+
+        app_svc = ObservationPhotoUploadApplicationService()
         new_photo_ids: list[str] = []
         skipped: list[str] = []
-        sort_no = self._repo.next_sort_no(farm, oid)
+        last_ok: dict | None = None
+        last_fail: dict | None = None
 
-        for f in upload_files:
-            filename = str(getattr(f, "filename", None) or "photo.jpg")
-            data = await f.read()
-            photo_id = self._repo.next_photo_id(farm)
-            created_rel: list[str] = []
-            try:
-                meta = process_observation_photo_bytes(
-                    self._media_root,
-                    farm,
-                    oid,
-                    obs_dt,
+        with get_sqlite_write_connection(self._db_path) as conn:
+            db = ServerDbBridge(conn)
+            for f in upload_files:
+                filename = str(getattr(f, "filename", None) or "photo.jpg")
+                data = await f.read()
+                payload = app_svc.upload(
+                    db,
+                    farm_cd=farm,
+                    obs_id=oid,
+                    user_id=uid,
+                    media_root=self._media_root,
                     data=data,
                     original_nm=filename,
-                    photo_id=photo_id,
+                    max_count=OBS_PHOTO_MAX_COUNT,
                 )
-                created_rel = [
-                    str(meta.get("file_path") or ""),
-                    str(meta.get("thumb_path") or ""),
-                ]
-                fh = str(meta.get("file_hash") or "")
-                if fh and self._repo.hash_exists(farm, oid, fh):
-                    compensate_photo_files(self._media_root, created_rel)
-                    skipped.append(filename)
-                    continue
-                meta["sort_no"] = sort_no
-                self._repo.insert_photo(farm, oid, meta, uid)
-                new_photo_ids.append(photo_id)
-                sort_no += 1
-            except BusinessRuleError:
-                compensate_photo_files(self._media_root, created_rel)
-                raise
-            except Exception:
-                compensate_photo_files(self._media_root, created_rel)
-                raise
+                if payload.get("ok"):
+                    new_photo_ids.append(str(payload.get("photo_id") or ""))
+                    last_ok = payload
+                else:
+                    last_fail = payload
+                    code = str(payload.get("error_code") or "")
+                    if code == "PHOTO_DUP":
+                        skipped.append(filename)
+                        continue
+                    # 첫 실패(한도·형식 등)는 즉시 중단
+                    raise BusinessRuleError(
+                        str(
+                            payload.get("error_message")
+                            or payload.get("error")
+                            or "사진 업로드에 실패했습니다."
+                        )
+                    )
 
         listing = self.list_photos(farm, oid)
         id_set = set(new_photo_ids)
@@ -202,13 +211,29 @@ class ObservationPhotoService:
         msg = f"{len(uploaded)}장이 등록되었습니다."
         if skipped:
             msg += f" (중복 {len(skipped)}장 제외)"
+
+        first = last_ok or {}
         return ObservationPhotoUploadResponse(
             uploaded=uploaded,
             skipped=skipped,
             count=listing.count,
-            max_count=OBS_PHOTO_MAX_COUNT,
+            max_count=listing.max_count,
             remaining=listing.remaining,
             message=msg,
+            success=bool(uploaded),
+            photo_id=first.get("photo_id") if uploaded else None,
+            farm_cd=farm if uploaded else None,
+            obs_id=oid if uploaded else None,
+            file_name=first.get("file_name") if uploaded else None,
+            file_path=first.get("file_path") if uploaded else None,
+            thumbnail_path=first.get("thumbnail_path") if uploaded else None,
+            file_size=first.get("file_size") if uploaded else None,
+            width=first.get("width") if uploaded else None,
+            height=first.get("height") if uploaded else None,
+            created_by=first.get("created_by") if uploaded else None,
+            created_at=first.get("created_at") if uploaded else None,
+            error=None,
+            error_code=None,
         )
 
     def delete_photo(

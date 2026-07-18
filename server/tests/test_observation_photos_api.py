@@ -191,3 +191,60 @@ def test_photos_obs_not_found() -> None:
         pytest.skip("OR001 없음")
     res = client.get("/api/v1/farms/OR001/observations/NO_SUCH_OBS/photos")
     assert res.status_code == 404
+
+
+def test_upload_requires_user_header(photo_env) -> None:
+    farm, oid, _media = photo_env
+    res = client.post(
+        f"/api/v1/farms/{farm}/observations/{oid}/photos",
+        files=[("file", ("a.png", _png_bytes(), "image/png"))],
+    )
+    assert res.status_code == 400
+
+
+def test_upload_rejects_empty_and_bad_type(photo_env) -> None:
+    farm, oid, _media = photo_env
+    empty = client.post(
+        f"/api/v1/farms/{farm}/observations/{oid}/photos",
+        files=[("file", ("e.png", b"", "image/png"))],
+        headers={"X-User-Id": "TEST"},
+    )
+    assert empty.status_code == 400
+
+    bad = client.post(
+        f"/api/v1/farms/{farm}/observations/{oid}/photos",
+        files=[("file", ("x.txt", b"not-an-image", "text/plain"))],
+        headers={"X-User-Id": "TEST"},
+    )
+    assert bad.status_code == 400
+
+
+def test_upload_strips_exif_and_single_file_field(photo_env) -> None:
+    farm, oid, media = photo_env
+    img = Image.new("RGB", (80, 60), (10, 20, 30))
+    exif = img.getexif()
+    exif[274] = 6  # Orientation
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    raw = buf.getvalue()
+    assert b"Exif" in raw or len(raw) > 100
+
+    up = client.post(
+        f"/api/v1/farms/{farm}/observations/{oid}/photos",
+        files=[("file", ("orient.jpg", raw, "image/jpeg"))],
+        headers={"X-User-Id": "TEST"},
+    )
+    assert up.status_code == 200, up.text
+    body = up.json()
+    assert body["success"] is True
+    assert body["photo_id"]
+    assert body["file_path"]
+    assert body["thumbnail_path"]
+    assert body["created_by"] == "TEST"
+
+    abs_path = media / Path(*Path(body["file_path"]).parts)
+    assert abs_path.is_file()
+    with Image.open(abs_path) as stored:
+        stored_exif = stored.getexif()
+        # Orientation 등 EXIF 제거됨
+        assert not stored_exif or 274 not in stored_exif

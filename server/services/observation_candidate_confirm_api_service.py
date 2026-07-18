@@ -38,14 +38,13 @@ class ObservationCandidateConfirmApiService:
         *,
         db_path: Path | str,
         photo_repo: ObservationPhotoRepository,
-        default_user_id: str = "MOBILE",
     ):
         self._db_path = Path(db_path)
         self._photo_repo = photo_repo
-        self._default_user_id = str(default_user_id or "MOBILE").strip() or "MOBILE"
 
     def _user_id(self, user_id: str | None) -> str:
-        return str(user_id or "").strip() or self._default_user_id
+        """기본값(MOBILE) 없음 — 공백이면 ApplicationService 검증에 맡긴다."""
+        return str(user_id or "").strip()
 
     def _ensure_farm_and_obs(self, farm_cd: str, obs_id: str) -> dict:
         farm = str(farm_cd or "").strip()

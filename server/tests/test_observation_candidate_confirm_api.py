@@ -183,7 +183,6 @@ def test_confirm_candidate_rest(cand_env) -> None:
     svc = ObservationCandidateConfirmApiService(
         db_path=settings.sqlite_path,
         photo_repo=deps.get_observation_photo_repository(),
-        default_user_id="TEST",
     )
     app.dependency_overrides[deps.get_observation_candidate_confirm_api_service] = (
         lambda: svc
@@ -236,6 +235,59 @@ def test_confirm_rejects_bad_analysis(cand_env) -> None:
     )
     assert r.status_code == 200
     assert r.json()["success"] is False
+
+
+def test_confirm_requires_user_header(cand_env) -> None:
+    farm = cand_env["farm_cd"]
+    oid = cand_env["obs_id"]
+    aid = cand_env["analysis_id"]
+    settings = get_settings()
+    svc = ObservationCandidateConfirmApiService(
+        db_path=settings.sqlite_path,
+        photo_repo=deps.get_observation_photo_repository(),
+    )
+    app.dependency_overrides[deps.get_observation_candidate_confirm_api_service] = (
+        lambda: svc
+    )
+
+    with get_sqlite_write_connection(settings.sqlite_path) as conn:
+        ai_before = conn.execute(
+            "SELECT ai_status FROM t_observation_master WHERE farm_cd=? AND obs_id=?",
+            (farm, oid),
+        ).fetchone()["ai_status"]
+
+    r = client.post(
+        f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
+        json={"analysis_id": aid, "candidate_seq": 1},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False
+    assert body["error_code"] == "AI_CONFIRM_PARAM"
+
+    r2 = client.post(
+        f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
+        json={"analysis_id": aid, "candidate_seq": 1},
+        headers={"X-User-Id": "   "},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["success"] is False
+
+    with get_sqlite_write_connection(settings.sqlite_path) as conn:
+        row = conn.execute(
+            """
+            SELECT selected_yn, confirmed_by FROM t_observation_ai_candidate
+            WHERE farm_cd = ? AND analysis_id = ? AND candidate_seq = 1
+            """,
+            (farm, aid),
+        ).fetchone()
+        ai_after = conn.execute(
+            "SELECT ai_status FROM t_observation_master WHERE farm_cd=? AND obs_id=?",
+            (farm, oid),
+        ).fetchone()["ai_status"]
+    assert str(row["selected_yn"] or "N") != "Y"
+    assert not row["confirmed_by"]
+    assert ai_after == ai_before
 
 
 def test_confirm_wrong_obs_blocks(cand_env) -> None:

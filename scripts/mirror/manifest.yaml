@@ -122,6 +122,18 @@ include:
   - src: core/observation_safe_errors.py
     dest: core/observation_safe_errors.py
 
+  - src: core/observation_photo_files.py
+    dest: core/observation_photo_files.py
+
+  - src: core/observation_photo_upload_application_service.py
+    dest: core/observation_photo_upload_application_service.py
+
+  - src: core/observation_media.py
+    dest: core/observation_media.py
+
+  - src: core/observation_stage2.py
+    dest: core/observation_stage2.py
+
   - src: core/pesticide/**
     dest: core/pesticide/**
 
