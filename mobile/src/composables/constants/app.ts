@@ -7,6 +7,9 @@ export const DEFAULT_FARM_CD = 'OR001'
 /** ODS Project A: 관찰 사진 최대 장수 */
 export const OBS_PHOTO_MAX_COUNT = 5
 
+/** 서버 OBS_PHOTO_MAX_BYTES 와 동일 (20MB) */
+export const OBS_PHOTO_MAX_BYTES = 20 * 1024 * 1024
+
 /** AI 분석에 동시에 보낼 사진 최대 장수 (ODS AI 흐름) */
 export const OBS_AI_PHOTO_MAX_COUNT = 3
 

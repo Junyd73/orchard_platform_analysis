@@ -36,12 +36,15 @@ export function aiLabel(status: string): string {
 export function aiHint(status: string): string {
   const s = status.toUpperCase()
   if (s === 'NONE' || s === 'PENDING') {
-    return '분석 요청 · 결과 카드는 이후 단계에서 확장합니다.'
+    return '사진 업로드 후 AI 분석을 요청할 수 있습니다.'
   }
   if (s === 'ANALYZING') return '분석이 진행 중입니다.'
   if (s === 'FAILED') return '분석에 실패했습니다. 재분석을 요청할 수 있습니다.'
   if (s === 'REVIEW_REQUIRED') return '분석 결과 검토가 필요합니다.'
-  return '분석 결과는 이후 단계에서 상세 표시됩니다.'
+  if (s === 'ANALYZED' || s === 'COMPLETED' || s === 'CONFIRMED') {
+    return '분석 결과입니다. 후보 확정은 다음 단계에서 진행합니다.'
+  }
+  return '분석 상태를 확인해 주세요.'
 }
 
 export function isAiCompleteStatus(status: string): boolean {
@@ -85,4 +88,4 @@ export const PSIS_USAGE_FIELDS = [
 ] as const
 
 export const AI_PENDING_API_HINT =
-  'API 연동 예정 · 병명·신뢰도·요약·권장사항은 연동 후 표시됩니다.'
+  'AI 분석 결과가 없습니다. 아래에서 분석을 요청해 주세요.'

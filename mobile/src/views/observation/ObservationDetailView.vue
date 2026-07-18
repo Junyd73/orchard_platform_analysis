@@ -31,9 +31,9 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
 import ObservationDeleteDialog from '@/views/observation/components/ObservationDeleteDialog.vue'
+import AiAnalysisPanel from '@/views/observation/components/AiAnalysisPanel.vue'
 import PhotoPanel from '@/views/observation/components/PhotoPanel.vue'
 import {
-  AI_PENDING_API_HINT,
   PSIS_AI_GUIDE_INTRO,
   PSIS_CARD_TITLE,
   PSIS_LOAD_FAILED,
@@ -44,16 +44,13 @@ import {
   PSIS_STOCK_SECTION,
   PSIS_USAGE_FIELDS,
   PSIS_USAGE_SECTION,
-  aiHint,
   aiLabel,
   aiTone,
-  hasAiResultData,
   isAiCompleteStatus,
   severityTone,
-  type ObservationAiResult,
 } from '@/views/observation/scr004DetailUi'
 import { useAppStore } from '@/composables/stores/app'
-import type { ObservationDetail } from '@/types/observation'
+import type { ObservationAiAnalysisResponse, ObservationDetail, ObservationPhotoItem } from '@/types/observation'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +67,7 @@ const metaOpen = ref(false)
 const copyOk = ref(false)
 
 const canDelete = computed(() => Boolean(detail.value?.can_delete))
+const photoIds = ref<string[]>([])
 
 const contextLine = computed(() => {
   const d = detail.value
@@ -147,19 +145,6 @@ function severityLabel(d: ObservationDetail): string {
 
 const aiComplete = computed(() => isAiCompleteStatus(detail.value?.ai_status || ''))
 
-const aiHasResult = computed(() => hasAiResultData(detail.value))
-
-const aiResultRows = computed(() => {
-  const d = detail.value as (ObservationDetail & ObservationAiResult) | null
-  if (!d) return null
-  return {
-    disease: String(d.ai_disease_nm || '').trim() || '—',
-    confidence: d.ai_confidence != null ? String(d.ai_confidence) : '—',
-    summary: String(d.ai_summary || '').trim() || '—',
-    recommendation: String(d.ai_recommendation || '').trim() || '—',
-  }
-})
-
 const psisIntro = computed(() => {
   const s = String(detail.value?.ai_status || '').toUpperCase()
   if (s === 'ANALYZING') return PSIS_PREPARING
@@ -169,6 +154,16 @@ const psisIntro = computed(() => {
 })
 
 const psisEmptyMessage = computed(() => PSIS_NOT_FOUND)
+
+function onPhotosChanged(photos: ObservationPhotoItem[]) {
+  photoIds.value = photos.map((p) => p.photo_id)
+}
+
+function onAiUpdated(res: ObservationAiAnalysisResponse) {
+  if (detail.value && res.ai_status) {
+    detail.value = { ...detail.value, ai_status: res.ai_status }
+  }
+}
 
 async function load() {
   if (!obsId.value) {
@@ -315,7 +310,12 @@ watch(showDeleteDlg, async (open) => {
           <p class="body-text">{{ detail.obs_content }}</p>
         </OdsCard>
 
-        <PhotoPanel :farm-cd="farmCd" :obs-id="obsId" variant="scr004" />
+        <PhotoPanel
+          :farm-cd="farmCd"
+          :obs-id="obsId"
+          variant="scr004"
+          @changed="onPhotosChanged"
+        />
 
         <OdsCard class="detail-card detail-card--ai" aria-label="AI 분석">
           <div class="card__row">
@@ -324,34 +324,12 @@ watch(showDeleteDlg, async (open) => {
                 <img class="card-title__icon" :src="iconAi" alt="" aria-hidden="true">
                 AI 분석
               </h2>
-              <p class="ext-lead">{{ aiLabel(detail.ai_status) }}</p>
-              <p class="ext-hint">{{ aiHint(detail.ai_status) }}</p>
-              <p v-if="aiComplete && !aiHasResult" class="ext-hint ext-hint--api">
-                {{ AI_PENDING_API_HINT }}
-              </p>
-              <dl v-if="aiHasResult && aiResultRows" class="detail-dl">
-                <div class="detail-dl__row">
-                  <dt>병명</dt><dd>{{ aiResultRows.disease }}</dd>
-                </div>
-                <div class="detail-dl__row">
-                  <dt>신뢰도</dt><dd>{{ aiResultRows.confidence }}</dd>
-                </div>
-                <div class="detail-dl__row">
-                  <dt>요약</dt><dd>{{ aiResultRows.summary }}</dd>
-                </div>
-                <div class="detail-dl__row">
-                  <dt>권장사항</dt><dd>{{ aiResultRows.recommendation }}</dd>
-                </div>
-              </dl>
-              <OdsButton
-                v-if="aiComplete"
-                variant="ai"
-                :block="false"
-                class="reanalyze"
-                disabled
-              >
-                재분석
-              </OdsButton>
+              <AiAnalysisPanel
+                :farm-cd="farmCd"
+                :obs-id="obsId"
+                :photo-ids="photoIds"
+                @updated="onAiUpdated"
+              />
             </div>
             <img class="card__illus" :src="aiIllustration" alt="" aria-hidden="true">
           </div>

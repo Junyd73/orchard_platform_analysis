@@ -14,6 +14,10 @@ import OdsCard from '@/components/ods/OdsCard.vue'
 import PhotoViewer from '@/views/observation/components/PhotoViewer.vue'
 import { OBS_PHOTO_MAX_COUNT } from '@/composables/constants/app'
 import { takeFilesFromInput } from '@/utils/fileInput'
+import {
+  filterObservationUploadFiles,
+  photoIdentityKey,
+} from '@/shared/photoFilePolicy'
 import { formatPhotoCardLabel } from '@/utils/photoCardLabel'
 import type { ObservationPhotoItem } from '@/types/observation'
 
@@ -30,6 +34,10 @@ const props = withDefaults(
   }>(),
   { variant: 'default' },
 )
+
+const emit = defineEmits<{
+  changed: [photos: ObservationPhotoItem[]]
+}>()
 
 const photos = ref<ObservationPhotoItem[]>([])
 const maxCount = ref(OBS_PHOTO_MAX_COUNT)
@@ -72,6 +80,7 @@ async function loadPhotos() {
     photos.value = res.photos
     maxCount.value = res.max_count
     remaining.value = res.remaining
+    emit('changed', res.photos)
   } catch (err) {
     if (isAbortError(err)) return
     photos.value = []
@@ -113,21 +122,39 @@ function closeViewer() {
 
 async function uploadSelected(selected: File[]) {
   if (!selected.length) return
+  if (busy.value) return
   if (selected.length > remaining.value) {
     errorMessage.value = `남은 등록 가능 개수는 ${remaining.value}장입니다. (최대 ${maxCount.value}장)`
     pendingRetryFiles.value = null
     return
   }
 
+  const existingKeys = new Set(
+    photos.value.map((p) =>
+      photoIdentityKey({ name: p.original_nm, size: p.file_size }),
+    ),
+  )
+  const checked = filterObservationUploadFiles(selected, {
+    remaining: remaining.value,
+    maxCount: maxCount.value,
+    existingKeys,
+  })
+  if (!checked.ok) {
+    errorMessage.value = checked.message
+    pendingRetryFiles.value = null
+    return
+  }
+  const toUpload = checked.files
+
   busy.value = true
   errorMessage.value = ''
-  statusMessage.value = `업로드 중… (${selected.length}장)`
-  pendingRetryFiles.value = selected
+  statusMessage.value = `업로드 중… (${toUpload.length}장)`
+  pendingRetryFiles.value = toUpload
   uploadAbort?.abort()
   uploadAbort = new AbortController()
 
   try {
-    const res = await uploadObservationPhotos(props.farmCd, props.obsId, selected, {
+    const res = await uploadObservationPhotos(props.farmCd, props.obsId, toUpload, {
       signal: uploadAbort.signal,
     })
     const listed = await fetchObservationPhotos(
@@ -140,13 +167,16 @@ async function uploadSelected(selected: File[]) {
     maxCount.value = res.max_count
     pendingRetryFiles.value = null
     statusMessage.value = res.message || '업로드 성공'
+    emit('changed', listed.photos)
   } catch (err) {
     if (isAbortError(err)) {
       statusMessage.value = '업로드가 취소되었습니다.'
       return
     }
     const reason =
-      err instanceof ApiClientError ? err.message : '업로드에 실패했습니다.'
+      err instanceof ApiClientError
+        ? err.message
+        : '업로드에 실패했습니다.'
     errorMessage.value = `업로드 실패: ${reason}`
     statusMessage.value = ''
   } finally {
@@ -192,6 +222,7 @@ async function movePhoto(index: number, delta: -1 | 1) {
     photos.value = res.photos
     remaining.value = res.remaining
     statusMessage.value = '순서를 변경했습니다. 첫 번째가 대표사진입니다.'
+    emit('changed', res.photos)
   } catch (err) {
     errorMessage.value =
       err instanceof ApiClientError ? err.message : '순서 변경에 실패했습니다.'

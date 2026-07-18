@@ -8,9 +8,12 @@ import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
+import OdsCard from '@/components/ods/OdsCard.vue'
+import AiAnalysisPanel from '@/views/observation/components/AiAnalysisPanel.vue'
 import PhotoPanel from '@/views/observation/components/PhotoPanel.vue'
 import { clearObsDraft } from '@/composables/obsDraft'
 import { useAppStore } from '@/composables/stores/app'
+import type { ObservationAiAnalysisResponse, ObservationPhotoItem } from '@/types/observation'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +28,8 @@ const finishing = ref(false)
 const errorMessage = ref('')
 const statusMessage = ref('')
 const obsStatus = ref('')
+const photoIds = ref<string[]>([])
+const aiStatus = ref('')
 
 const isDraft = computed(() => obsStatus.value === 'DRAFT')
 /** 신규 등록: 최종 완료 / 이미 완료된 건 수정: 수정 완료 */
@@ -110,6 +115,14 @@ async function onFinish() {
     finishing.value = false
   }
 }
+
+function onPhotosChanged(photos: ObservationPhotoItem[]) {
+  photoIds.value = photos.map((p) => p.photo_id)
+}
+
+function onAiUpdated(res: ObservationAiAnalysisResponse) {
+  aiStatus.value = res.ai_status || ''
+}
 </script>
 
 <template>
@@ -129,7 +142,18 @@ async function onFinish() {
       </nav>
 
       <p v-if="!obsId" class="error" role="alert">관찰 번호가 없습니다.</p>
-      <PhotoPanel v-else-if="ready" :farm-cd="farmCd" :obs-id="obsId" />
+      <template v-else-if="ready">
+        <PhotoPanel :farm-cd="farmCd" :obs-id="obsId" @changed="onPhotosChanged" />
+        <OdsCard class="ai-card" aria-label="AI 분석">
+          <h2 class="ai-title">AI 분석</h2>
+          <AiAnalysisPanel
+            :farm-cd="farmCd"
+            :obs-id="obsId"
+            :photo-ids="photoIds"
+            @updated="onAiUpdated"
+          />
+        </OdsCard>
+      </template>
 
       <p v-if="statusMessage" class="status" role="status">{{ statusMessage }}</p>
       <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
@@ -216,6 +240,15 @@ async function onFinish() {
   font: var(--ods-font-body-2);
   color: var(--ods-color-primary);
   font-weight: 600;
+}
+.ai-card {
+  margin-top: var(--ods-space-16);
+}
+.ai-title {
+  margin: 0 0 var(--ods-space-8);
+  font: var(--ods-font-title-3, var(--ods-font-body-1));
+  font-weight: 700;
+  color: var(--ods-color-text);
 }
 .footer-actions {
   position: fixed;

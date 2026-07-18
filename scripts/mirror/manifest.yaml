@@ -87,6 +87,9 @@ include:
   - src: mobile/src/api-mirror/observationPhotos.ts
     dest: mobile/src/api/observationPhotos.ts
 
+  - src: mobile/src/api-mirror/observationAi.ts
+    dest: mobile/src/api/observationAi.ts
+
   - src: mobile/src/api-mirror/farms.ts
     dest: mobile/src/api/farms.ts
 

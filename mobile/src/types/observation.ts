@@ -90,6 +90,61 @@ export type ObservationPhotoUploadResponse = {
   max_count: number
   remaining: number
   message: string
+  success?: boolean
+  photo_id?: string | null
+  farm_cd?: string | null
+  obs_id?: string | null
+  file_name?: string | null
+  file_path?: string | null
+  thumbnail_path?: string | null
+  file_size?: number | null
+  width?: number | null
+  height?: number | null
+  created_by?: string | null
+  created_at?: string | null
+  error?: string | null
+  error_code?: string | null
+}
+
+/** POST/GET /observations/{obs_id}/analysis */
+export type ObservationAiCandidate = {
+  candidate_seq: number
+  category?: string | null
+  name_ko?: string | null
+  scientific_name?: string | null
+  confidence?: number | null
+  visual_evidence?: string[]
+  differential_reason?: string | null
+  urgency?: string | null
+  selected_yn?: string | null
+  confirmed_name?: string | null
+}
+
+export type ObservationAiPhotoRef = {
+  photo_id: string
+}
+
+export type ObservationAiAnalyzeRequest = {
+  consent: boolean
+  photo_ids?: string[] | null
+  crop_hint?: string
+}
+
+export type ObservationAiAnalysisResponse = {
+  success: boolean
+  ai_status: string
+  analysis_id?: string | null
+  summary?: string | null
+  candidates: ObservationAiCandidate[]
+  photos: ObservationAiPhotoRef[]
+  confidence?: number | null
+  analyzed_at?: string | null
+  error?: string | null
+  error_code?: string | null
+  analysis_status?: string | null
+  review_required?: boolean
+  image_quality?: string | null
+  analysis_possible?: boolean | null
 }
 
 export type ObservationBasicSavePayload = {
