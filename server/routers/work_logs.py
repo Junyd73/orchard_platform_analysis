@@ -8,9 +8,16 @@ from fastapi import APIRouter, Depends, Header, Query
 from app.api.dependencies import get_work_log_service
 from app.schemas.work_log import (
     WorkLogDailyResponse,
+    WorkLogIntegratedSaveRequest,
     WorkLogMasterUpsertRequest,
     WorkLogMonthlyResponse,
+    WorkLogPesticideCancelAllRequest,
+    WorkLogPesticideCancelRequest,
+    WorkLogPesticideCancelResponse,
+    WorkLogPesticideReplaceRequest,
     WorkLogSaveResponse,
+    WorkLogWeatherFetchRequest,
+    WorkLogWeatherFetchResponse,
     WorkLogWorksUpsertRequest,
 )
 from app.services.work_log_service import WorkLogService
@@ -46,6 +53,23 @@ def get_work_log_daily(
     return service.get_daily(farm_cd, work_dt)
 
 
+@router.post(
+    "/daily/{work_dt}/weather/fetch",
+    response_model=WorkLogWeatherFetchResponse,
+)
+def fetch_work_log_weather(
+    farm_cd: str,
+    work_dt: str,
+    body: WorkLogWeatherFetchRequest | None = None,
+    service: WorkLogService = Depends(get_work_log_service),
+) -> WorkLogWeatherFetchResponse:
+    """PC WeatherManager.fetch_work_log_weather 위임 (캐시→외부 API)."""
+    req = body or WorkLogWeatherFetchRequest()
+    return service.fetch_weather(
+        farm_cd, work_dt, force_refresh=bool(req.force_refresh)
+    )
+
+
 @router.put("/daily/{work_dt}/master", response_model=WorkLogSaveResponse)
 def upsert_work_log_master(
     farm_cd: str,
@@ -66,6 +90,62 @@ def upsert_work_log_works(
     service: WorkLogService = Depends(get_work_log_service),
 ) -> WorkLogSaveResponse:
     return service.upsert_works(farm_cd, work_dt, body, user_id=user_id)
+
+
+@router.put("/daily/{work_dt}/integrated", response_model=WorkLogSaveResponse)
+def save_work_log_integrated(
+    farm_cd: str,
+    work_dt: str,
+    body: WorkLogIntegratedSaveRequest,
+    user_id: str | None = Depends(_user_header),
+    service: WorkLogService = Depends(get_work_log_service),
+) -> WorkLogSaveResponse:
+    """PC 최종승인과 동일 — 인력/경비 Ledger + 농약 재고 확정."""
+    return service.save_integrated(farm_cd, work_dt, body, user_id=user_id)
+
+
+@router.post(
+    "/pesticide/cancel",
+    response_model=WorkLogPesticideCancelResponse,
+)
+def cancel_work_log_pesticide(
+    farm_cd: str,
+    body: WorkLogPesticideCancelRequest,
+    user_id: str | None = Depends(_user_header),
+    service: WorkLogService = Depends(get_work_log_service),
+) -> WorkLogPesticideCancelResponse:
+    """농약 사용 취소 — use_id 단위."""
+    return service.cancel_pesticide_use(farm_cd, body, user_id=user_id)
+
+
+@router.post(
+    "/pesticide/cancel-all",
+    response_model=WorkLogPesticideCancelResponse,
+)
+def cancel_all_work_log_pesticide(
+    farm_cd: str,
+    body: WorkLogPesticideCancelAllRequest,
+    user_id: str | None = Depends(_user_header),
+    service: WorkLogService = Depends(get_work_log_service),
+) -> WorkLogPesticideCancelResponse:
+    """작업 연결 확정 농약 전건 취소."""
+    return service.cancel_all_pesticide_uses_for_work(
+        farm_cd, body.work_id, user_id=user_id
+    )
+
+
+@router.post(
+    "/pesticide/replace",
+    response_model=WorkLogPesticideCancelResponse,
+)
+def replace_work_log_pesticide(
+    farm_cd: str,
+    body: WorkLogPesticideReplaceRequest,
+    user_id: str | None = Depends(_user_header),
+    service: WorkLogService = Depends(get_work_log_service),
+) -> WorkLogPesticideCancelResponse:
+    """확정 농약 수정 저장: 취소·복원·신규·차감 단일 TX."""
+    return service.replace_pesticide_use(farm_cd, body, user_id=user_id)
 
 
 @router.delete("/works/{work_id}", response_model=WorkLogSaveResponse)

@@ -1,47 +1,66 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { fetchFarmSites } from '@/api/farms'
 import {
+  cancelWorkLogPesticide,
   deleteWorkLogWork,
   fetchWorkLogDaily,
+  fetchWorkLogWeather,
+  saveWorkLogIntegrated,
   saveWorkLogMaster,
   saveWorkLogWorks,
 } from '@/api/workLogs'
-import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
-import OdsFormField from '@/components/ods/OdsFormField.vue'
-import OdsInput from '@/components/ods/OdsInput.vue'
-import OdsSelect from '@/components/ods/OdsSelect.vue'
-import WorkLogHero from '@/views/work-log/components/WorkLogHero.vue'
+import WorkLogDailyDateBar from '@/views/work-log/components/WorkLogDailyDateBar.vue'
+import WorkLogDailyExtras from '@/views/work-log/components/WorkLogDailyExtras.vue'
+import WorkLogDailySummary from '@/views/work-log/components/WorkLogDailySummary.vue'
+import WorkLogDailyTimeline from '@/views/work-log/components/WorkLogDailyTimeline.vue'
+import WorkLogDailyWeatherStrip from '@/views/work-log/components/WorkLogDailyWeatherStrip.vue'
+import WorkLogDailyWorkCard from '@/views/work-log/components/WorkLogDailyWorkCard.vue'
+import WorkLogDailyWorkForm, {
+  type DailyPickOption,
+} from '@/views/work-log/components/WorkLogDailyWorkForm.vue'
+import iconTrash from '@/assets/ods/scr004/icon-trash.svg'
 import {
+  createEmptyWorkForm,
+  DAILY_SHELL_SUMMARY,
+  DAILY_TAB_WORK,
+  hasWorkLogWeather,
   isFutureDate,
+  mapWorkItemToTimeline,
+  MSG_DETAIL_PENDING,
+  MSG_DRAFT_OK,
   MSG_FUTURE_WORK_LOG,
-  WEATHER_PARENT_CD,
-  WEEKDAY_LABELS,
+  MSG_LOAD_DAILY_FAILED,
+  MSG_SAVE_FAILED,
+  MSG_SAVE_OK,
+  MSG_WORK_CONTENT_REQUIRED,
+  todayIso,
   WORK_STATUS_PARENT_CD,
   WORK_TYPE_PARENT_CD,
+  type DailyShellExpenseRow,
+  type DailyShellLaborRow,
+  type DailyShellPesticideRow,
+  type DailyTimelineItem,
+  type DailyWorkFormModel,
+  type DailyWorkTabKey,
 } from '@/views/work-log/workLogConstants'
 import { useAppStore } from '@/composables/stores/app'
-import type { CommonCodeItem } from '@/types/commonCode'
-import type { FarmSiteSummary } from '@/types/farm'
-import type { WorkLogWorkUpsertItem } from '@/types/workLog'
-
-type DraftWork = {
-  key: string
-  work_id: string | null
-  work_mid_cd: string
-  work_loc_id: string
-  start_tm: string
-  end_tm: string
-  status_cd: string
-  rmk: string
-}
+import type {
+  WorkLogExpenseDto,
+  WorkLogIntegratedSavePayload,
+  WorkLogMasterDto,
+  WorkLogPesticideDocDto,
+  WorkLogResourceDto,
+  WorkLogWorkItem,
+  WorkLogWorkUpsertItem,
+} from '@/types/workLog'
 
 const store = useAppStore()
 const router = useRouter()
@@ -50,187 +69,507 @@ const { farmCd, farm } = storeToRefs(store)
 
 const workDt = computed(() => String(route.params.workDt || '').trim())
 const isFuture = computed(() => isFutureDate(workDt.value))
-const weekdayLabel = computed(() => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDt.value)) return ''
-  const d = new Date(`${workDt.value}T12:00:00`)
-  return WEEKDAY_LABELS[d.getDay()] || ''
-})
-const heroContext = computed(() => {
-  const w = weekdayLabel.value
-  return w ? `${workDt.value} (${w})` : workDt.value
-})
 
-const loading = ref(true)
+const dailyLoading = ref(false)
 const saving = ref(false)
-const errorMessage = ref('')
+const master = ref<WorkLogMasterDto | null>(null)
 const toastMessage = ref('')
+const activeTab = ref<DailyWorkTabKey>(DAILY_TAB_WORK)
 
-const weatherCodes = ref<CommonCodeItem[]>([])
-const workCodes = ref<CommonCodeItem[]>([])
-const statusCodes = ref<CommonCodeItem[]>([])
-const sites = ref<FarmSiteSummary[]>([])
+/** API 원본 작업 (저장 시 merge) */
+const sourceWorks = ref<WorkLogWorkItem[]>([])
+const workItems = ref<DailyTimelineItem[]>([])
+const selectedId = ref<string | null>(null)
+const isEditing = ref(true)
+const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
 
-const weatherCd = ref('')
-const tempMin = ref('')
-const tempMax = ref('')
-const precip = ref('')
-const humidity = ref('')
-const workRmk = ref('')
-const works = ref<DraftWork[]>([])
+const laborRows = ref<DailyShellLaborRow[]>([])
+const expenseRows = ref<DailyShellExpenseRow[]>([])
+const pesticideRows = ref<DailyShellPesticideRow[]>([])
+const pesticideAppliedYn = ref('N')
+const pesticideUseId = ref<number | null>(null)
+/** 수정 모드: 저장 시에만 기존 use_id 교체(진입만으로 재고 복원 안 함) */
+const pesticideReplaceUseId = ref<number | null>(null)
+const removedResIds = ref<number[]>([])
+const removedExpIds = ref<number[]>([])
 
-let draftSeq = 0
+const workOptions = ref<DailyPickOption[]>([])
+const siteOptions = ref<DailyPickOption[]>([])
+const statusOptions = ref<DailyPickOption[]>([])
 
-function newDraft(partial?: Partial<DraftWork>): DraftWork {
-  draftSeq += 1
-  return {
-    key: `d-${draftSeq}`,
-    work_id: null,
-    work_mid_cd: '',
-    work_loc_id: '',
-    start_tm: '',
-    end_tm: '',
-    status_cd: statusCodes.value[0]?.code_cd || '',
-    rmk: '',
-    ...partial,
+const hasWorks = computed(() => workItems.value.length > 0)
+const showForm = computed(() => isEditing.value || !hasWorks.value)
+
+const selectedItem = computed(
+  () => workItems.value.find((it) => it.id === selectedId.value) || null,
+)
+
+function applyWorksFromApi(works: WorkLogWorkItem[]) {
+  sourceWorks.value = [...(works || [])]
+  const items = sourceWorks.value.map((w, i) => mapWorkItemToTimeline(w, i))
+  workItems.value = items
+  if (items.length > 0) {
+    selectedId.value = items[0]?.id || null
+    isEditing.value = false
+    activeTab.value = DAILY_TAB_WORK
+  } else {
+    selectedId.value = null
+    isEditing.value = true
+    formModel.value = createEmptyWorkForm()
   }
 }
 
-function toNum(v: string): number | null {
-  const t = v.trim()
-  if (!t) return null
-  const n = Number(t)
-  return Number.isFinite(n) ? n : null
+function mapResourceToShell(r: WorkLogResourceDto): DailyShellLaborRow {
+  return {
+    id: `res-${r.res_id ?? r.emp_cd}`,
+    resId: r.res_id ?? null,
+    empCd: r.emp_cd || '',
+    empNm: r.emp_nm || r.emp_cd || '',
+    manHour: String(r.man_hour ?? 0),
+    dayPay: String(Math.round(r.daily_wage ?? 0)),
+    payMethodCd: r.pay_method_cd || '',
+    payMethod: r.pay_method_nm || r.pay_method_cd || '',
+    paidYn: r.pay_status || 'N',
+    status: 'ORG',
+  }
 }
 
-function goBack() {
-  void router.push({ name: 'work-log' })
+function mapExpenseToShell(e: WorkLogExpenseDto): DailyShellExpenseRow {
+  return {
+    id: `exp-${e.exp_id ?? e.acct_cd}`,
+    expId: e.exp_id ?? null,
+    occurDt: e.trans_dt || workDt.value,
+    acctCd: e.acct_cd || '',
+    expenseNm: e.acct_nm || e.acct_cd || '',
+    detail: e.item_nm || '',
+    amount: String(Math.round(e.total_amt ?? 0)),
+    unitPrice: '0',
+    qty: '1',
+    payMethodCd: e.pay_method_cd || '',
+    payMethod: e.pay_method_nm || e.pay_method_cd || '',
+    paidYn: e.pay_status || 'N',
+    status: 'ORG',
+  }
+}
+
+function mapPesticideDoc(
+  doc: WorkLogPesticideDocDto | undefined,
+): void {
+  pesticideAppliedYn.value = doc?.stock_applied_yn || 'N'
+  pesticideUseId.value = doc?.use_id ?? null
+  pesticideReplaceUseId.value = null
+  pesticideRows.value = (doc?.lines || []).map((ln, i) => ({
+    id: `pest-${doc?.use_id ?? 'x'}-${i}`,
+    itemId: ln.item_id,
+    itemNm: ln.item_nm_snapshot || '',
+    spec: ln.spec_nm_snapshot || '',
+    useQty: String(ln.use_qty ?? 0),
+    purpose: ln.purpose_nm || '',
+    rmk: ln.line_rmk || '',
+  }))
+}
+
+function loadSideForWork(
+  workId: string | null,
+  resources: WorkLogResourceDto[],
+  expenses: WorkLogExpenseDto[],
+  pesticides: WorkLogPesticideDocDto[],
+) {
+  if (!workId) {
+    laborRows.value = []
+    expenseRows.value = []
+    pesticideRows.value = []
+    pesticideAppliedYn.value = 'N'
+    pesticideUseId.value = null
+    return
+  }
+  laborRows.value = resources
+    .filter((r) => r.work_id === workId)
+    .map(mapResourceToShell)
+  expenseRows.value = expenses
+    .filter((e) => e.work_id === workId)
+    .map(mapExpenseToShell)
+  mapPesticideDoc(pesticides.find((p) => p.work_id === workId))
+}
+
+let cachedResources: WorkLogResourceDto[] = []
+let cachedExpenses: WorkLogExpenseDto[] = []
+let cachedPesticides: WorkLogPesticideDocDto[] = []
+
+function onSelectTimeline(id: string) {
+  selectedId.value = id
+  activeTab.value = DAILY_TAB_WORK
+  isEditing.value = false
+  loadSideForWork(id, cachedResources, cachedExpenses, cachedPesticides)
+}
+
+function onAddWork() {
+  isEditing.value = true
+  activeTab.value = DAILY_TAB_WORK
+  formModel.value = createEmptyWorkForm()
+  laborRows.value = []
+  expenseRows.value = []
+  pesticideRows.value = []
+  pesticideAppliedYn.value = 'N'
+  pesticideUseId.value = null
+}
+
+function onEditSelected() {
+  const w = sourceWorks.value.find((it) => it.work_id === selectedId.value)
+  if (!w) {
+    onPending()
+    return
+  }
+  formModel.value = {
+    workId: w.work_id,
+    workMidCd: String(w.work_mid_cd || ''),
+    workContent: String(w.work_mid_nm || ''),
+    workLocId: String(w.work_loc_id || ''),
+    siteNm: String(w.work_loc_nm || ''),
+    startTime: String(w.start_tm || '08:00').slice(0, 5),
+    endTime: String(w.end_tm || '09:00').slice(0, 5),
+    statusCd: String(w.status_cd || ''),
+    statusNm: String(w.status_nm || ''),
+    rmk: String(w.rmk || ''),
+  }
+  isEditing.value = true
+  activeTab.value = DAILY_TAB_WORK
 }
 
 function showToast(msg: string) {
   toastMessage.value = msg
   window.setTimeout(() => {
     if (toastMessage.value === msg) toastMessage.value = ''
-  }, 2800)
+  }, 2400)
 }
 
-async function loadCodes() {
-  const [wt, wk, wo, st] = await Promise.all([
-    fetchCommonCodes(farmCd.value, WEATHER_PARENT_CD).catch(() => []),
-    fetchCommonCodes(farmCd.value, WORK_TYPE_PARENT_CD).catch(() => []),
-    fetchCommonCodes(farmCd.value, WORK_STATUS_PARENT_CD).catch(() => []),
-    fetchFarmSites(farmCd.value, true).catch(() => []),
-  ])
-  weatherCodes.value = wt
-  workCodes.value = wk
-  statusCodes.value = wo
-  sites.value = st
+function onPending() {
+  showToast(MSG_DETAIL_PENDING)
+}
+
+function goBack() {
+  const dt = workDt.value
+  const q: Record<string, string> = {}
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+    q.year = dt.slice(0, 4)
+    q.month = String(Number(dt.slice(5, 7)))
+  }
+  void router.push({ name: 'work-log', query: q })
+}
+
+function goToday() {
+  const t = todayIso()
+  if (workDt.value === t) return
+  void router.push({ name: 'work-log-daily', params: { workDt: t } })
+}
+
+/** 기능2: DB(마스터·캐시 병합) → 없으면 외부 API */
+async function ensureWeather(
+  current: WorkLogMasterDto | null,
+): Promise<WorkLogMasterDto | null> {
+  if (hasWorkLogWeather(current) || isFutureDate(workDt.value)) {
+    return current
+  }
+  try {
+    const fetched = await fetchWorkLogWeather(farmCd.value, workDt.value)
+    return fetched.master || current
+  } catch {
+    return current
+  }
+}
+
+async function loadPickOptions() {
+  const farm = farmCd.value
+  if (!farm) return
+  try {
+    const [works, sites, statuses] = await Promise.all([
+      fetchCommonCodes(farm, WORK_TYPE_PARENT_CD),
+      fetchFarmSites(farm),
+      fetchCommonCodes(farm, WORK_STATUS_PARENT_CD),
+    ])
+    workOptions.value = (works || [])
+      .filter((c) => String(c.code_cd || '').length === 8)
+      .map((c) => ({
+        value: c.code_cd,
+        label: String(c.code_nm || c.code_cd),
+      }))
+    siteOptions.value = (sites || []).map((s) => ({
+      value: s.site_id,
+      label: String(s.site_nm || s.site_id),
+    }))
+    statusOptions.value = (statuses || []).map((c) => ({
+      value: c.code_cd,
+      label: String(c.code_nm || c.code_cd),
+    }))
+  } catch {
+    workOptions.value = []
+    siteOptions.value = []
+    statusOptions.value = []
+  }
 }
 
 async function loadDaily() {
-  loading.value = true
-  errorMessage.value = ''
+  if (!workDt.value || !/^\d{4}-\d{2}-\d{2}$/.test(workDt.value)) {
+    master.value = null
+    sourceWorks.value = []
+    workItems.value = []
+    selectedId.value = null
+    isEditing.value = true
+    return
+  }
+  dailyLoading.value = true
   try {
-    const res = await fetchWorkLogDaily(farmCd.value, workDt.value)
-    const m = res.master
-    weatherCd.value = m?.weather_cd || ''
-    tempMin.value = m?.temp_min != null ? String(m.temp_min) : ''
-    tempMax.value = m?.temp_max != null ? String(m.temp_max) : ''
-    precip.value = m?.precip != null ? String(m.precip) : ''
-    humidity.value = m?.humidity != null ? String(m.humidity) : ''
-    workRmk.value = m?.work_rmk || ''
-    works.value = (res.works || []).map((w) =>
-      newDraft({
-        work_id: w.work_id,
-        work_mid_cd: w.work_mid_cd || '',
-        work_loc_id: w.work_loc_id || '',
-        start_tm: w.start_tm || '',
-        end_tm: w.end_tm || '',
-        status_cd: w.status_cd || '',
-        rmk: w.rmk || '',
-      }),
+    const daily = await fetchWorkLogDaily(farmCd.value, workDt.value)
+    master.value = await ensureWeather(daily.master)
+    cachedResources = daily.resources || []
+    cachedExpenses = daily.expenses || []
+    cachedPesticides = daily.pesticides || []
+    applyWorksFromApi(daily.works || [])
+    loadSideForWork(
+      selectedId.value,
+      cachedResources,
+      cachedExpenses,
+      cachedPesticides,
     )
-  } catch (err) {
-    errorMessage.value =
-      err instanceof ApiClientError ? err.message : '일간 영농일지를 불러오지 못했습니다.'
+  } catch {
+    master.value = null
+    sourceWorks.value = []
+    workItems.value = []
+    selectedId.value = null
+    isEditing.value = true
+    showToast(MSG_LOAD_DAILY_FAILED)
   } finally {
-    loading.value = false
+    dailyLoading.value = false
   }
 }
 
-function addWork() {
-  works.value.push(newDraft())
+function toUpsertItem(w: WorkLogWorkItem): WorkLogWorkUpsertItem {
+  return {
+    work_id: w.work_id,
+    work_mid_cd: String(w.work_mid_cd || ''),
+    work_loc_id: w.work_loc_id || null,
+    rmk: w.rmk || null,
+    start_tm: w.start_tm || null,
+    end_tm: w.end_tm || null,
+    status_cd: w.status_cd || null,
+  }
 }
 
-async function removeWork(idx: number) {
-  const row = works.value[idx]
-  if (!row) return
-  if (row.work_id) {
-    const ok = window.confirm('이 작업을 삭제할까요?')
-    if (!ok) return
-    try {
-      await deleteWorkLogWork(farmCd.value, row.work_id)
-    } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : '작업 삭제에 실패했습니다.')
-      return
+function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
+  const list = sourceWorks.value.map(toUpsertItem)
+
+  if (showForm.value) {
+    if (!formModel.value.workMidCd) {
+      showToast(MSG_WORK_CONTENT_REQUIRED)
+      return null
+    }
+    const draft: WorkLogWorkUpsertItem = {
+      work_id: formModel.value.workId,
+      work_mid_cd: formModel.value.workMidCd,
+      work_loc_id: formModel.value.workLocId || null,
+      rmk: formModel.value.rmk || null,
+      start_tm: formModel.value.startTime || null,
+      end_tm: formModel.value.endTime || null,
+      status_cd: formModel.value.statusCd || null,
+    }
+    if (draft.work_id) {
+      const idx = list.findIndex((w) => w.work_id === draft.work_id)
+      if (idx >= 0) list[idx] = draft
+      else list.push(draft)
+    } else {
+      list.push(draft)
     }
   }
-  works.value.splice(idx, 1)
+
+  const valid = list.filter((w) => String(w.work_mid_cd || '').trim())
+  if (valid.length === 0) {
+    showToast(MSG_WORK_CONTENT_REQUIRED)
+    return null
+  }
+  return valid
 }
 
-async function onSave() {
+async function persistMasterIfNeeded() {
+  const m = master.value
+  if (!m || !hasWorkLogWeather(m)) return
+  await saveWorkLogMaster(farmCd.value, workDt.value, {
+    day_of_week: m.day_of_week,
+    weather_cd: m.weather_cd,
+    temp_min: m.temp_min,
+    temp_max: m.temp_max,
+    precip: m.precip,
+    humidity: m.humidity,
+    sun_rise: m.sun_rise,
+    sun_set: m.sun_set,
+    sunshine_hr: m.sunshine_hr,
+    wind_max: m.wind_max,
+    wind_min: m.wind_min,
+    work_rmk: m.work_rmk,
+  })
+}
+
+/** 임시저장: 작업만 · 저장하기: 통합(Ledger+농약 확정) */
+async function onSave(mode: 'draft' | 'final') {
   if (isFuture.value) {
     showToast(MSG_FUTURE_WORK_LOG)
     return
   }
-  for (const w of works.value) {
-    if (!w.work_mid_cd) {
-      showToast('작업 유형을 선택해 주세요.')
+  const payload = buildWorksPayload()
+  if (!payload) return
+  saving.value = true
+  try {
+    if (mode === 'draft') {
+      await persistMasterIfNeeded()
+      await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
+      await loadDaily()
+      showToast(MSG_DRAFT_OK)
       return
     }
-  }
-  saving.value = true
-  errorMessage.value = ''
-  try {
-    await saveWorkLogMaster(farmCd.value, workDt.value, {
-      day_of_week: weekdayLabel.value || null,
-      weather_cd: weatherCd.value || null,
-      temp_min: toNum(tempMin.value),
-      temp_max: toNum(tempMax.value),
-      precip: toNum(precip.value),
-      humidity: toNum(humidity.value),
-      work_rmk: workRmk.value.trim() || null,
-    })
-    const payload: WorkLogWorkUpsertItem[] = works.value.map((w) => ({
-      work_id: w.work_id,
-      work_mid_cd: w.work_mid_cd,
-      work_loc_id: w.work_loc_id || null,
-      start_tm: w.start_tm || null,
-      end_tm: w.end_tm || null,
-      status_cd: w.status_cd || null,
-      rmk: w.rmk.trim() || null,
-    }))
-    await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
-    showToast('저장되었습니다.')
+
+    const laborWorkId =
+      selectedId.value ||
+      formModel.value.workId ||
+      payload[0]?.work_id ||
+      null
+    const integrated: WorkLogIntegratedSavePayload = {
+      master: master.value
+        ? {
+            day_of_week: master.value.day_of_week,
+            weather_cd: master.value.weather_cd,
+            temp_min: master.value.temp_min,
+            temp_max: master.value.temp_max,
+            precip: master.value.precip,
+            humidity: master.value.humidity,
+            sun_rise: master.value.sun_rise,
+            sun_set: master.value.sun_set,
+            sunshine_hr: master.value.sunshine_hr,
+            wind_max: master.value.wind_max,
+            wind_min: master.value.wind_min,
+            work_rmk: master.value.work_rmk,
+          }
+        : null,
+      works: payload.map((w) => ({
+        ...w,
+        work_mid_nm:
+          workOptions.value.find((o) => o.value === w.work_mid_cd)?.label ||
+          null,
+        replace_pesticide_use_id:
+          w.work_id === laborWorkId || (!w.work_id && showForm.value)
+            ? pesticideReplaceUseId.value
+            : null,
+        pesticide_lines:
+          (w.work_id === laborWorkId || (!w.work_id && showForm.value)
+            ? pesticideRows.value
+            : []
+          )
+            .filter((p) => Number(p.itemId) > 0 && Number(p.useQty) > 0)
+            .map((p) => ({
+              item_id: Number(p.itemId),
+              use_qty: Number(p.useQty || 0),
+              item_nm_snapshot: p.itemNm || null,
+              spec_nm_snapshot: p.spec || null,
+              purpose_nm: p.purpose || null,
+              line_rmk: p.rmk || null,
+            })),
+      })),
+      labor_work_id: laborWorkId,
+      expense_work_id: laborWorkId,
+      labor_rows: laborRows.value
+        .filter((r) => r.empCd || r.empNm)
+        .map((r) => ({
+          status: r.status || (r.resId ? 'ORG' : 'INS'),
+          res_id: r.resId ?? null,
+          emp_cd: r.empCd || r.empNm,
+          emp_nm: r.empNm || null,
+          man_hour: Number(r.manHour || 0),
+          daily_wage: Number(String(r.dayPay || '0').replace(/,/g, '')),
+          pay_method_cd: r.payMethodCd || '',
+          pay_status: r.paidYn || 'N',
+        })),
+      expense_rows: expenseRows.value
+        .filter((r) => r.acctCd)
+        .map((r) => ({
+          status: r.status || (r.expId ? 'ORG' : 'INS'),
+          exp_id: r.expId ?? null,
+          acct_cd: r.acctCd,
+          item_nm: r.detail || r.expenseNm || null,
+          amt: Number(String(r.amount || '0').replace(/,/g, '')),
+          pay_method_cd: r.payMethodCd || '',
+          pay_status: r.paidYn || 'N',
+          trans_dt: r.occurDt || workDt.value,
+        })),
+      removed_res_ids: removedResIds.value,
+      removed_exp_ids: removedExpIds.value,
+    }
+    await saveWorkLogIntegrated(farmCd.value, workDt.value, integrated)
+    removedResIds.value = []
+    removedExpIds.value = []
+    pesticideReplaceUseId.value = null
     await loadDaily()
-  } catch (err) {
-    errorMessage.value =
-      err instanceof ApiClientError ? err.message : '저장에 실패했습니다.'
+    showToast(MSG_SAVE_OK)
+    window.setTimeout(() => goBack(), 600)
+  } catch {
+    showToast(MSG_SAVE_FAILED)
   } finally {
     saving.value = false
   }
 }
 
-onMounted(async () => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDt.value)) {
-    errorMessage.value = '잘못된 작업일입니다.'
-    loading.value = false
+async function onCancelPesticide() {
+  if (!pesticideUseId.value) {
+    showToast('취소할 농약 사용 ID가 없습니다.')
     return
   }
+  saving.value = true
+  try {
+    await cancelWorkLogPesticide(farmCd.value, {
+      use_id: pesticideUseId.value,
+    })
+    pesticideReplaceUseId.value = null
+    await loadDaily()
+    showToast('농약 사용이 취소되었습니다.')
+  } catch {
+    showToast(MSG_SAVE_FAILED)
+  } finally {
+    saving.value = false
+  }
+}
+
+function onEditPesticide() {
+  if (!pesticideUseId.value || pesticideAppliedYn.value !== 'Y') {
+    onPending()
+    return
+  }
+  pesticideReplaceUseId.value = pesticideUseId.value
+  showToast('수정 모드: 저장 시 기존 사용이 교체됩니다.')
+}
+
+async function onDeleteSelected() {
+  if (!selectedId.value) {
+    onPending()
+    return
+  }
+  saving.value = true
+  try {
+    await deleteWorkLogWork(farmCd.value, selectedId.value)
+    await loadDaily()
+    showToast(MSG_SAVE_OK)
+  } catch {
+    showToast(MSG_SAVE_FAILED)
+  } finally {
+    saving.value = false
+  }
+}
+
+watch(workDt, () => {
+  void loadDaily()
+})
+
+onMounted(async () => {
   if (!farm.value) {
     await store.refreshAll()
   }
-  await loadCodes()
-  await loadDaily()
+  await Promise.all([loadDaily(), loadPickOptions()])
 })
 </script>
 
@@ -239,213 +578,113 @@ onMounted(async () => {
     <main class="content">
       <OdsAppBar show-back @back="goBack" />
 
-      <WorkLogHero
-        mode="daily"
-        :farm-name="farm?.farm_nm || undefined"
-        :context-label="heroContext"
+      <p v-if="isFuture" class="warn" role="alert">{{ MSG_FUTURE_WORK_LOG }}</p>
+
+      <WorkLogDailyDateBar :work-dt="workDt" @go-today="goToday" />
+
+      <WorkLogDailyWeatherStrip :master="master" :loading="dailyLoading" />
+
+      <WorkLogDailyTimeline
+        :items="workItems"
+        :selected-id="selectedId"
+        @select="onSelectTimeline"
+        @add="onAddWork"
       />
 
-      <p v-if="isFuture" class="warn" role="alert">{{ MSG_FUTURE_WORK_LOG }}</p>
-      <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
-      <p v-else-if="loading" class="status" role="status">불러오는 중…</p>
+      <WorkLogDailyWorkForm
+        v-if="showForm"
+        v-model="formModel"
+        v-model:active-tab="activeTab"
+        v-model:labor-rows="laborRows"
+        v-model:expense-rows="expenseRows"
+        v-model:pesticide-rows="pesticideRows"
+        :work-options="workOptions"
+        :site-options="siteOptions"
+        :status-options="statusOptions"
+        :work-dt="workDt"
+        :stock-applied-yn="pesticideAppliedYn"
+        :editing-replace="!!pesticideReplaceUseId"
+        @pending="onPending"
+        @cancel-pesticide="onCancelPesticide"
+        @edit-pesticide="onEditPesticide"
+      />
+      <WorkLogDailyWorkCard
+        v-else-if="selectedItem"
+        v-model:active-tab="activeTab"
+        v-model:labor-rows="laborRows"
+        v-model:expense-rows="expenseRows"
+        v-model:pesticide-rows="pesticideRows"
+        :item="selectedItem"
+        :work-dt="workDt"
+        :stock-applied-yn="pesticideAppliedYn"
+        :editing-replace="!!pesticideReplaceUseId"
+        @edit="onEditSelected"
+        @copy="onPending"
+        @pending="onPending"
+        @cancel-pesticide="onCancelPesticide"
+        @edit-pesticide="onEditPesticide"
+      />
 
-      <form
-        v-if="!loading && !errorMessage"
-        id="work-log-daily-form"
-        class="stack"
-        @submit.prevent="onSave"
-      >
-        <section class="form" aria-label="기상">
-          <h2 class="form__title">기상</h2>
-          <OdsFormField label="날씨" optional>
-            <OdsSelect v-model="weatherCd" variant="form" :disabled="isFuture">
-              <option value="">선택</option>
-              <option
-                v-for="c in weatherCodes"
-                :key="c.code_cd"
-                :value="c.code_cd"
-              >
-                {{ c.code_nm }}
-              </option>
-            </OdsSelect>
-          </OdsFormField>
-          <div class="row2">
-            <OdsInput
-              v-model="tempMin"
-              label="최저(℃)"
-              type="number"
-              inputmode="decimal"
-              variant="form"
-              optional
-              :disabled="isFuture"
-            />
-            <OdsInput
-              v-model="tempMax"
-              label="최고(℃)"
-              type="number"
-              inputmode="decimal"
-              variant="form"
-              optional
-              :disabled="isFuture"
-            />
-          </div>
-          <div class="row2">
-            <OdsInput
-              v-model="precip"
-              label="강수(mm)"
-              type="number"
-              inputmode="decimal"
-              variant="form"
-              optional
-              :disabled="isFuture"
-            />
-            <OdsInput
-              v-model="humidity"
-              label="습도(%)"
-              type="number"
-              inputmode="decimal"
-              variant="form"
-              optional
-              :disabled="isFuture"
-            />
-          </div>
-        </section>
+      <WorkLogDailySummary
+        :cards="DAILY_SHELL_SUMMARY"
+        :empty="!hasWorks"
+      />
 
-        <section class="form" aria-label="이슈">
-          <h2 class="form__title">이슈</h2>
-          <OdsFormField label="특이사항" optional>
-            <textarea
-              v-model="workRmk"
-              class="textarea"
-              rows="3"
-              placeholder="현장 이슈·특이사항"
-              :disabled="isFuture"
-            />
-          </OdsFormField>
-        </section>
-
-        <section class="form" aria-label="작업 목록">
-          <div class="form__head">
-            <h2 class="form__title">작업</h2>
-            <button
-              type="button"
-              class="add-btn"
-              :disabled="isFuture || saving"
-              @click="addWork"
-            >
-              + 추가
-            </button>
-          </div>
-
-          <p v-if="!works.length" class="empty">등록된 작업이 없습니다.</p>
-
-          <article
-            v-for="(w, idx) in works"
-            :key="w.key"
-            class="work"
-          >
-            <p class="work__idx">작업 {{ idx + 1 }}</p>
-            <OdsFormField label="유형" required>
-              <OdsSelect
-                v-model="w.work_mid_cd"
-                variant="form"
-                required
-                :disabled="isFuture"
-              >
-                <option value="" disabled>유형 선택</option>
-                <option
-                  v-for="c in workCodes"
-                  :key="c.code_cd"
-                  :value="c.code_cd"
-                >
-                  {{ c.code_nm }}
-                </option>
-              </OdsSelect>
-            </OdsFormField>
-            <OdsFormField label="장소" optional>
-              <OdsSelect v-model="w.work_loc_id" variant="form" :disabled="isFuture">
-                <option value="">선택</option>
-                <option
-                  v-for="s in sites"
-                  :key="s.site_id"
-                  :value="s.site_id"
-                >
-                  {{ s.site_nm }}
-                </option>
-              </OdsSelect>
-            </OdsFormField>
-            <div class="row2">
-              <OdsInput
-                v-model="w.start_tm"
-                label="시작"
-                type="time"
-                variant="form"
-                optional
-                :disabled="isFuture"
-              />
-              <OdsInput
-                v-model="w.end_tm"
-                label="종료"
-                type="time"
-                variant="form"
-                optional
-                :disabled="isFuture"
-              />
-            </div>
-            <OdsFormField label="상태" optional>
-              <OdsSelect v-model="w.status_cd" variant="form" :disabled="isFuture">
-                <option value="">선택</option>
-                <option
-                  v-for="c in statusCodes"
-                  :key="c.code_cd"
-                  :value="c.code_cd"
-                >
-                  {{ c.code_nm }}
-                </option>
-              </OdsSelect>
-            </OdsFormField>
-            <OdsInput
-              v-model="w.rmk"
-              label="비고"
-              type="text"
-              variant="form"
-              optional
-              :disabled="isFuture"
-            />
-            <OdsButton
-              variant="danger"
-              type="button"
-              :disabled="isFuture || saving"
-              @click="removeWork(idx)"
-            >
-              삭제
-            </OdsButton>
-          </article>
-        </section>
-      </form>
+      <WorkLogDailyExtras
+        :work-dt="workDt"
+        :show-examples="hasWorks"
+      />
     </main>
 
-    <div v-if="!loading && !errorMessage" class="footer-actions">
+    <div
+      v-if="showForm"
+      class="footer-actions"
+      aria-label="임시 저장·저장하기"
+    >
       <OdsButton
         variant="secondary"
         type="button"
-        :disabled="saving"
         :block="false"
-        class="footer-btn"
-        @click="goBack"
+        class="footer-btn footer-btn--outline"
+        :busy="saving"
+        @click="onSave('draft')"
       >
-        취소
+        임시 저장
       </OdsButton>
       <OdsButton
         variant="primary"
-        type="submit"
-        form="work-log-daily-form"
-        :disabled="isFuture"
-        :busy="saving"
+        type="button"
         :block="false"
         class="footer-btn"
+        :busy="saving"
+        @click="onSave('final')"
       >
-        {{ saving ? '저장 중…' : '저장' }}
+        저장하기
+      </OdsButton>
+    </div>
+    <div v-else class="footer-actions" aria-label="저장·삭제">
+      <OdsButton
+        variant="primary"
+        type="button"
+        :block="false"
+        class="footer-btn"
+        :busy="saving"
+        @click="onSave('final')"
+      >
+        저장
+      </OdsButton>
+      <OdsButton
+        variant="danger"
+        type="button"
+        :block="false"
+        class="footer-btn"
+        :busy="saving"
+        @click="onDeleteSelected"
+      >
+        <span class="footer-btn__inner">
+          <img :src="iconTrash" alt="" aria-hidden="true" />
+          삭제
+        </span>
       </OdsButton>
     </div>
 
@@ -457,116 +696,29 @@ onMounted(async () => {
 <style scoped>
 .page {
   min-height: 100dvh;
-  background: var(--ods-color-bg-muted);
-  padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
+  background: var(--ods-color-bg);
+  padding-bottom: calc(160px + env(safe-area-inset-bottom));
 }
+
 .content {
   max-width: 480px;
   margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-16);
+  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-20);
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-16);
 }
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
-  margin: 0;
-}
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-form-field-gap);
-  padding: var(--ods-space-16);
-  background: var(--ods-color-white);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-card);
-  box-shadow: var(--ods-shadow-card);
-}
-.form__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ods-space-8);
-}
-.form__title {
-  margin: 0;
-  font: var(--ods-font-headline);
-  color: var(--ods-color-text);
-}
-.row2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--ods-space-8);
-}
-.textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 108px;
-  padding: var(--ods-space-12) var(--ods-space-16);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button);
-  font: var(--ods-font-form-value);
-  color: var(--ods-color-text);
-  background: var(--ods-color-white);
-  resize: vertical;
-}
-.textarea::placeholder {
-  font: var(--ods-font-form-placeholder);
-  color: var(--ods-color-gray-500);
-}
-.textarea:disabled {
-  background: var(--ods-color-gray-100);
-  color: var(--ods-color-gray-500);
-}
-.add-btn {
-  border: none;
-  background: transparent;
-  color: var(--ods-color-primary);
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  min-height: 40px;
-  cursor: pointer;
-}
-.add-btn:disabled {
-  color: var(--ods-color-gray-500);
-  cursor: not-allowed;
-}
-.work {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-form-field-gap);
-  padding-top: var(--ods-space-12);
-  border-top: 1px solid var(--ods-color-border);
-}
-.work__idx {
-  margin: 0;
-  font: var(--ods-font-caption);
-  font-weight: 700;
-  color: var(--ods-color-primary);
-}
-.empty {
-  margin: 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text-secondary);
-}
+
 .warn {
   margin: 0;
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-caution) 18%, transparent);
+  color: var(--ods-color-text);
   font: var(--ods-font-body-2);
   font-weight: 600;
-  color: var(--ods-color-danger);
 }
-.error {
-  margin: 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-danger);
-}
-.status {
-  margin: 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text-secondary);
-}
+
 .footer-actions {
   position: fixed;
   left: 0;
@@ -577,23 +729,45 @@ onMounted(async () => {
   gap: var(--ods-space-8);
   max-width: 480px;
   margin: 0 auto;
-  padding: 0 var(--ods-page-padding-x);
-  box-sizing: border-box;
+  padding: var(--ods-space-8) var(--ods-page-padding-x)
+    calc(var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--ods-color-bg) 92%, transparent);
+  backdrop-filter: blur(8px);
 }
 .footer-btn {
   flex: 1;
 }
+.footer-actions :deep(.ods-btn) {
+  min-height: 48px;
+}
+.footer-btn--outline :deep(.ods-btn),
+.footer-actions :deep(.footer-btn--outline) {
+  background: var(--ods-color-white);
+  border: 1.5px solid var(--ods-color-primary);
+  color: var(--ods-color-primary);
+}
+.footer-btn__inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ods-space-8);
+}
+.footer-btn__inner img {
+  width: 18px;
+  height: 18px;
+}
+
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(120px + env(safe-area-inset-bottom));
+  bottom: calc(150px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 70;
   max-width: min(420px, calc(100vw - 32px));
   margin: 0;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(33, 33, 33, 0.92);
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-gray-900) 92%, transparent);
   color: var(--ods-color-white);
   font: var(--ods-font-body-2);
   font-weight: 600;

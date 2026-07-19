@@ -36,8 +36,11 @@ def _build_tmp_db() -> Path:
     conn = sqlite3.connect(str(path))
     conn.executescript(
         """
-        CREATE TABLE m_farm_info (farm_cd TEXT PRIMARY KEY, farm_nm TEXT);
-        INSERT INTO m_farm_info VALUES ('OR001', '테스트농장');
+        CREATE TABLE m_farm_info (
+            farm_cd TEXT PRIMARY KEY, farm_nm TEXT,
+            lat REAL, lon REAL, nx INTEGER, ny INTEGER
+        );
+        INSERT INTO m_farm_info VALUES ('OR001', '테스트농장', NULL, NULL, NULL, NULL);
 
         CREATE TABLE m_common_code (
             farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT
@@ -71,7 +74,11 @@ def _build_tmp_db() -> Path:
         );
 
         CREATE TABLE t_work_resource (
-            work_id TEXT, farm_cd TEXT, daily_wage REAL
+            work_id TEXT, farm_cd TEXT, emp_cd TEXT,
+            daily_wage REAL, man_hour REAL DEFAULT 0
+        );
+        CREATE TABLE m_partner (
+            pt_id TEXT, farm_cd TEXT, worker_type_cd TEXT
         );
         CREATE TABLE t_work_expense (
             work_id TEXT, farm_cd TEXT, total_amt REAL
@@ -81,6 +88,52 @@ def _build_tmp_db() -> Path:
     conn.commit()
     conn.close()
     return path
+
+
+def _insert_work_with_resources(
+    db: Path,
+    *,
+    work_dt: str,
+    work_id: str,
+    work_mid_cd: str = "WK010100",
+    resources: list[tuple[str, float, float]],
+) -> None:
+    """resources: (emp_cd, man_hour, daily_wage)"""
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO t_work_master (
+            work_dt, farm_cd, weather_cd, work_rmk
+        ) VALUES (?, 'OR001', 'WT010100', '')
+        """,
+        (work_dt,),
+    )
+    conn.execute(
+        """
+        INSERT INTO t_work_detail (
+            work_id, work_dt, farm_cd, work_main_cd, work_mid_cd, status_cd
+        ) VALUES (?, ?, 'OR001', 'WK01', ?, 'WO010300')
+        """,
+        (work_id, work_dt, work_mid_cd),
+    )
+    for emp_cd, man_hour, wage in resources:
+        conn.execute(
+            """
+            INSERT INTO t_work_resource (
+                work_id, farm_cd, emp_cd, man_hour, daily_wage
+            ) VALUES (?, 'OR001', ?, ?, ?)
+            """,
+            (work_id, emp_cd, man_hour, wage),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO m_partner (pt_id, farm_cd, worker_type_cd)
+            VALUES (?, 'OR001', 'EMP')
+            """,
+            (emp_cd,),
+        )
+    conn.commit()
+    conn.close()
 
 
 class WorkLogServiceTests(unittest.TestCase):
@@ -152,6 +205,43 @@ class WorkLogServiceTests(unittest.TestCase):
         self.assertTrue(cell.has_issue)
         self.assertTrue(cell.has_work)
         self.assertTrue(cell.has_in_progress)
+
+    def test_monthly_unique_people_and_hours(self):
+        """동일인 다작업=1명, man_hour 합산."""
+        dt = self.today
+        y, m, _ = (int(x) for x in dt.split("-"))
+        _insert_work_with_resources(
+            self.db,
+            work_dt=dt,
+            work_id=f"{dt.replace('-', '')}-01",
+            resources=[("E1", 4.0, 50000), ("E2", 3.0, 40000)],
+        )
+        _insert_work_with_resources(
+            self.db,
+            work_dt=dt,
+            work_id=f"{dt.replace('-', '')}-02",
+            work_mid_cd="WK010200",
+            resources=[("E1", 3.0, 30000)],
+        )
+        month = self.svc.get_monthly("OR001", year=y, month=m)
+        cell = month.days.get(dt)
+        self.assertIsNotNone(cell)
+        assert cell is not None
+        self.assertEqual(cell.resource_count, 2)  # E1, E2
+        self.assertEqual(cell.labor_hour_sum, 10.0)  # 4+3+3
+        self.assertEqual(month.summary.resource_count, 2)
+        self.assertEqual(month.summary.labor_hour_sum, 10.0)
+        self.assertEqual(month.summary.pesticide_count, 1)
+
+    def test_weather_fetch_requires_location(self):
+        with self.assertRaises(BusinessRuleError) as ctx:
+            self.svc.fetch_weather("OR001", self.today)
+        self.assertIn("위치", str(ctx.exception.message))
+
+    def test_weather_fetch_future_blocked(self):
+        future = (date.today() + timedelta(days=2)).isoformat()
+        with self.assertRaises(BusinessRuleError):
+            self.svc.fetch_weather("OR001", future)
 
 
 if __name__ == "__main__":

@@ -97,6 +97,44 @@ class ServerDbBridge:
             except Exception:
                 pass
 
+    def fetch_all(self, query, params=()):
+        """AccountManager 등 PC DBManager.fetch_all 호환."""
+        return self.execute_query(query, params)
+
+    def transaction(self):
+        """동일 connection/cursor Context Manager (DBManager.transaction 호환)."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx():
+            conn = self.conn
+            prev_isolation = conn.isolation_level
+            self._txn_depth += 1
+            try:
+                conn.isolation_level = None
+                if conn.row_factory is None:
+                    conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                yield cur
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                self._txn_depth = max(0, self._txn_depth - 1)
+                try:
+                    conn.isolation_level = (
+                        prev_isolation if prev_isolation is not None else ""
+                    )
+                except Exception:
+                    conn.isolation_level = ""
+
+        return _ctx()
+
     def get_observation(self, farm_cd: str, obs_id: str) -> dict[str, Any] | None:
         farm = str(farm_cd or "").strip()
         oid = str(obs_id or "").strip()
