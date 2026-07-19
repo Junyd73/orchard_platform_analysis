@@ -5,21 +5,21 @@ import { ApiClientError } from '@/api/client'
 import {
   confirmObservationAiCandidate,
   fetchObservationAiAnalysis,
-  fetchObservationPsis,
   fetchObservationSmartSprayGuide,
   requestObservationAiAnalysis,
-  requestObservationPsis,
 } from '@/api/observationAi'
 import { fetchObservationPhotos } from '@/api/observationPhotos'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import {
   categoryLabel,
   formatConfidence,
-  matchTypeLabel,
   messageForAiErrorCode,
   urgencyLabel,
 } from '@/shared/aiErrorMessages'
-import { OBS_AI_PHOTO_MAX_COUNT } from '@/composables/constants/app'
+import {
+  OBS_AI_DURATION_NOTICE,
+  OBS_AI_PHOTO_MAX_COUNT,
+} from '@/composables/constants/app'
 import {
   aiHint,
   aiLabel,
@@ -29,7 +29,6 @@ import {
 import type {
   ObservationAiAnalysisResponse,
   ObservationAiCandidate,
-  ObservationPsisResponse,
   ObservationSmartSprayGuideResponse,
 } from '@/types/observation'
 
@@ -41,14 +40,13 @@ export type AiPanelPhase =
   | 'error'
 
 export type ConfirmPhase = 'idle' | 'confirming' | 'confirmed' | 'error'
-export type PsisPhase = 'not_ready' | 'loading' | 'success' | 'empty' | 'error'
 
 const props = withDefaults(
   defineProps<{
     farmCd: string
     obsId: string
     photoIds?: string[]
-    /** PSIS 조회용 작물명 (PC cb_crop 대응) */
+    /** AI 분석 crop_hint 기본값 (PC cb_crop 대응) */
     cropName?: string
   }>(),
   { cropName: '배' },
@@ -64,7 +62,6 @@ const emit = defineEmits<{
       ai_status: string
     },
   ]
-  psisUpdated: [result: ObservationPsisResponse | null]
   guideUpdated: [
     payload: {
       phase: GuideUiPhase
@@ -75,18 +72,16 @@ const emit = defineEmits<{
 
 const phase = ref<AiPanelPhase>('idle')
 const confirmPhase = ref<ConfirmPhase>('idle')
-const psisPhase = ref<PsisPhase>('not_ready')
 const analysis = ref<ObservationAiAnalysisResponse | null>(null)
-const psis = ref<ObservationPsisResponse | null>(null)
 const errorMessage = ref('')
 const confirmError = ref('')
-const psisError = ref('')
 const statusMessage = ref('')
 const localPhotoIds = ref<string[]>([])
 const consentChecked = ref(false)
 const selectedSeq = ref<number | null>(null)
 const cropInput = ref(props.cropName || '배')
-const lastPsisKey = ref('')
+/** 분석 중 경과 초 (버튼·상태 표시용) */
+const analyzeElapsedSec = ref(0)
 
 /** radio value는 문자열로 올 수 있어 숫자로 정규화 */
 function onSelectCandidate(raw: number | string) {
@@ -96,18 +91,41 @@ function onSelectCandidate(raw: number | string) {
 
 let reqSeq = 0
 let confirmSeq = 0
-let psisSeq = 0
 let guideSeq = 0
 let loadAbort: AbortController | null = null
 let analyzeAbort: AbortController | null = null
 let confirmAbort: AbortController | null = null
-let psisAbort: AbortController | null = null
 let guideAbort: AbortController | null = null
+let analyzeTickTimer: ReturnType<typeof setInterval> | null = null
 let alive = true
 
+function stopAnalyzeTick() {
+  if (analyzeTickTimer != null) {
+    clearInterval(analyzeTickTimer)
+    analyzeTickTimer = null
+  }
+  analyzeElapsedSec.value = 0
+}
+
+function startAnalyzeTick() {
+  stopAnalyzeTick()
+  analyzeElapsedSec.value = 0
+  analyzeTickTimer = setInterval(() => {
+    analyzeElapsedSec.value += 1
+  }, 1000)
+}
+
+const analyzeBusyLabel = computed(() => {
+  const sec = analyzeElapsedSec.value
+  if (sec <= 0) return '사진 분석 중…'
+  return `사진 분석 중… ${sec}초`
+})
+
 const effectivePhotoIds = computed(() => {
+  // 서버에서 갱신한 localPhotoIds 를 우선 (재분석 직전 동기화)
+  if (localPhotoIds.value.length) return localPhotoIds.value
   if (props.photoIds && props.photoIds.length) return props.photoIds
-  return localPhotoIds.value
+  return []
 })
 
 const canAnalyze = computed(
@@ -117,8 +135,7 @@ const canAnalyze = computed(
     consentChecked.value &&
     phase.value !== 'analyzing' &&
     phase.value !== 'loading' &&
-    confirmPhase.value !== 'confirming' &&
-    psisPhase.value !== 'loading',
+    confirmPhase.value !== 'confirming',
 )
 
 const candidates = computed(() => analysis.value?.candidates ?? [])
@@ -173,10 +190,7 @@ function evidenceLine(c: ObservationAiCandidate): string {
 }
 
 async function refreshPhotoIds(signal?: AbortSignal) {
-  if (props.photoIds && props.photoIds.length) {
-    localPhotoIds.value = [...props.photoIds]
-    return
-  }
+  // 재분석 시 항상 서버 목록을 기준으로 맞춤 (부모 prop 지연·불일치 방지)
   const list = await fetchObservationPhotos(props.farmCd, props.obsId, signal)
   localPhotoIds.value = list.photos.map((p) => p.photo_id)
 }
@@ -202,11 +216,11 @@ async function loadLatest() {
     if (res.analysis_id) {
       phase.value = 'success'
       if (confirmedName.value) {
-        await loadCachedPsis(seq)
+        await loadSmartGuide()
       }
     } else {
       phase.value = 'idle'
-      clearPsis()
+      clearGuide()
     }
   } catch (err) {
     if (!alive || seq !== reqSeq || isAbortError(err)) return
@@ -216,51 +230,12 @@ async function loadLatest() {
   }
 }
 
-async function loadCachedPsis(parentSeq: number) {
-  try {
-    const cached = await fetchObservationPsis(props.farmCd, props.obsId)
-    if (!alive || parentSeq !== reqSeq) return
-    if (cached.success && (cached.similar_cases?.length || cached.psis_status === 'EMPTY')) {
-      applyPsisResult(cached)
-    }
-    await loadSmartGuide()
-  } catch {
-    /* 캐시 조회 실패는 무시 — 확정 후 재조회 */
-    if (alive && parentSeq === reqSeq) await loadSmartGuide()
-  }
-}
-
 function clearGuide() {
   guideAbort?.abort()
   guideSeq += 1
   emit('guideUpdated', { phase: 'idle', guide: null })
 }
 
-function clearPsis() {
-  psis.value = null
-  psisPhase.value = 'not_ready'
-  psisError.value = ''
-  lastPsisKey.value = ''
-  emit('psisUpdated', null)
-  clearGuide()
-}
-
-function applyPsisResult(res: ObservationPsisResponse) {
-  psis.value = res
-  if (!res.success) {
-    psisPhase.value = 'error'
-    psisError.value = messageForAiErrorCode(res.error_code, res.error)
-  } else if (!res.similar_cases?.length || res.psis_status === 'EMPTY') {
-    psisPhase.value = 'empty'
-    psisError.value = ''
-  } else {
-    psisPhase.value = 'success'
-    psisError.value = ''
-  }
-  emit('psisUpdated', res)
-}
-
-/** PSIS 완료 후 Smart Spray Guide 조회 (기존 카드용) */
 async function loadSmartGuide() {
   if (!props.farmCd || !props.obsId) return
   const seq = ++guideSeq
@@ -306,12 +281,26 @@ async function runAnalyze() {
   phase.value = 'analyzing'
   errorMessage.value = ''
   confirmError.value = ''
-  statusMessage.value = 'AI 분석 중…'
-  clearPsis()
+  startAnalyzeTick()
+  statusMessage.value = `AI 분석 중… ${OBS_AI_DURATION_NOTICE}`
+  clearGuide()
   selectedSeq.value = null
   confirmPhase.value = 'idle'
   try {
+    // 재분석 직전 사진 목록을 서버와 재동기화 (부모 prop 지연·누락 방지)
+    await refreshPhotoIds(analyzeAbort.signal)
+    if (!alive || seq !== reqSeq) return
+    if (props.farmCd !== farm || props.obsId !== oid) return
+
     const ids = effectivePhotoIds.value.slice(0, OBS_AI_PHOTO_MAX_COUNT)
+    if (!ids.length) {
+      phase.value = 'error'
+      errorMessage.value = '업로드된 사진이 없습니다. 사진을 먼저 등록해 주세요.'
+      statusMessage.value = ''
+      stopAnalyzeTick()
+      return
+    }
+
     const res = await requestObservationAiAnalysis(
       farm,
       oid,
@@ -331,16 +320,23 @@ async function runAnalyze() {
       phase.value = 'error'
       errorMessage.value = messageForAiErrorCode(res.error_code, res.error)
       statusMessage.value = ''
+      stopAnalyzeTick()
       return
     }
     phase.value = 'success'
     statusMessage.value = '분석이 완료되었습니다.'
+    stopAnalyzeTick()
     emit('updated', res)
   } catch (err) {
-    if (!alive || seq !== reqSeq || isAbortError(err)) return
+    if (!alive || seq !== reqSeq) return
+    if (isAbortError(err)) {
+      stopAnalyzeTick()
+      return
+    }
     if (props.farmCd !== farm || props.obsId !== oid) return
     phase.value = 'error'
     statusMessage.value = ''
+    stopAnalyzeTick()
     if (err instanceof ApiClientError) {
       errorMessage.value = messageForAiErrorCode(err.errorCode, err.message)
     } else {
@@ -368,7 +364,7 @@ async function runConfirm() {
   if (already) {
     confirmPhase.value = 'confirmed'
     statusMessage.value = '이미 확정된 후보입니다.'
-    await runPsisSearch(false)
+    await loadSmartGuide()
     return
   }
 
@@ -382,7 +378,7 @@ async function runConfirm() {
   confirmPhase.value = 'confirming'
   confirmError.value = ''
   statusMessage.value = '후보 확정 중…'
-  clearPsis()
+  clearGuide()
 
   try {
     const res = await confirmObservationAiCandidate(
@@ -420,7 +416,7 @@ async function runConfirm() {
     syncSelectionFromAnalysis(refreshed)
     emit('updated', refreshed)
 
-    await runPsisSearch(false)
+    await loadSmartGuide()
   } catch (err) {
     if (!alive || seq !== confirmSeq || isAbortError(err)) return
     confirmPhase.value = 'error'
@@ -433,78 +429,13 @@ async function runConfirm() {
   }
 }
 
-async function runPsisSearch(forceRefresh: boolean) {
-  const disease =
-    confirmedName.value ||
-    String(selectedCandidate.value?.name_ko || '').trim()
-  const crop = cropInput.value.trim()
-  if (!disease) {
-    psisPhase.value = 'error'
-    psisError.value = '확정된 병해충명이 없습니다.'
-    return
-  }
-  if (!crop) {
-    psisPhase.value = 'error'
-    psisError.value = '작물명을 입력해 주세요.'
-    return
-  }
-
-  const key = `${props.farmCd}|${props.obsId}|${crop}|${disease}|${forceRefresh ? '1' : '0'}`
-  if (!forceRefresh && key === lastPsisKey.value && psisPhase.value === 'success') {
-    await loadSmartGuide()
-    return
-  }
-
-  const seq = ++psisSeq
-  const farm = props.farmCd
-  const oid = props.obsId
-  psisAbort?.abort()
-  psisAbort = new AbortController()
-  psisPhase.value = 'loading'
-  psisError.value = ''
-
-  try {
-    const res = await requestObservationPsis(
-      farm,
-      oid,
-      {
-        analysis_id: analysis.value?.analysis_id,
-        candidate_seq: selectedSeq.value,
-        crop_name: crop,
-        disease_name: disease,
-        force_refresh: forceRefresh,
-        allow_similar: false,
-      },
-      { signal: psisAbort.signal },
-    )
-    if (!alive || seq !== psisSeq) return
-    if (props.farmCd !== farm || props.obsId !== oid) return
-    lastPsisKey.value = `${farm}|${oid}|${crop}|${disease}|0`
-    applyPsisResult(res)
-    await loadSmartGuide()
-  } catch (err) {
-    if (!alive || seq !== psisSeq || isAbortError(err)) return
-    psisPhase.value = 'error'
-    if (err instanceof ApiClientError) {
-      psisError.value = messageForAiErrorCode(err.errorCode, err.message)
-    } else {
-      psisError.value = '공식 농약정보 조회에 실패했습니다.'
-    }
-    emit('psisUpdated', null)
-    // PSIS 실패여도 가이드는 DB 기준으로 조회 시도
-    await loadSmartGuide()
-  }
-}
-
 function resetForObsChange() {
   reqSeq += 1
   confirmSeq += 1
-  psisSeq += 1
   guideSeq += 1
   loadAbort?.abort()
   analyzeAbort?.abort()
   confirmAbort?.abort()
-  psisAbort?.abort()
   guideAbort?.abort()
   analysis.value = null
   errorMessage.value = ''
@@ -515,7 +446,8 @@ function resetForObsChange() {
   selectedSeq.value = null
   confirmPhase.value = 'idle'
   cropInput.value = props.cropName || '배'
-  clearPsis()
+  stopAnalyzeTick()
+  clearGuide()
   phase.value = 'idle'
 }
 
@@ -551,12 +483,11 @@ onBeforeUnmount(() => {
   alive = false
   reqSeq += 1
   confirmSeq += 1
-  psisSeq += 1
   guideSeq += 1
+  stopAnalyzeTick()
   loadAbort?.abort()
   analyzeAbort?.abort()
   confirmAbort?.abort()
-  psisAbort?.abort()
   guideAbort?.abort()
 })
 
@@ -564,12 +495,9 @@ defineExpose({
   reload: loadLatest,
   analyze: runAnalyze,
   confirm: runConfirm,
-  searchPsis: runPsisSearch,
   loadGuide: loadSmartGuide,
   phase,
   confirmPhase,
-  psisPhase,
-  psis,
   selectedSeq,
 })
 </script>
@@ -584,6 +512,8 @@ defineExpose({
     </p>
     <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
     <p v-if="confirmError" class="error" role="alert">{{ confirmError }}</p>
+
+    <p class="duration-notice" role="note">{{ OBS_AI_DURATION_NOTICE }}</p>
 
     <label class="consent">
       <input
@@ -601,21 +531,27 @@ defineExpose({
         type="text"
         class="crop-field__input"
         placeholder="예: 배"
-        :disabled="confirmPhase === 'confirming' || psisPhase === 'loading'"
+        :disabled="confirmPhase === 'confirming'"
       >
     </label>
 
     <div class="actions">
       <OdsButton
         variant="ai"
-        :disabled="!canAnalyze"
+        :disabled="!canAnalyze && phase !== 'analyzing'"
+        :busy="phase === 'analyzing'"
         :block="false"
         class="analyze-btn"
         @click="runAnalyze"
       >
+        <span
+          v-if="phase === 'analyzing'"
+          class="analyze-spin"
+          aria-hidden="true"
+        />
         {{
           phase === 'analyzing'
-            ? '분석 중…'
+            ? analyzeBusyLabel
             : analysis?.analysis_id
               ? '재분석'
               : 'AI 분석'
@@ -682,48 +618,6 @@ defineExpose({
         </OdsButton>
       </div>
     </template>
-
-    <section v-if="confirmPhase === 'confirmed' || psisPhase !== 'not_ready'" class="psis" aria-label="공식 농약정보">
-      <h3 class="psis__title">공식 농약정보</h3>
-      <p v-if="psisPhase === 'loading'" class="status" role="status">공식 등록정보 조회 중…</p>
-      <p v-if="psisError" class="error" role="alert">{{ psisError }}</p>
-      <p v-if="psisPhase === 'empty'" class="warn">
-        확정 병해충에 대한 등록정보가 없습니다.
-      </p>
-      <template v-if="psisPhase === 'success' && psis">
-        <p class="psis__meta">
-          조회: {{ psis.query_candidate || '—' }}
-          · 작물 {{ psis.crop_name || cropInput }}
-          · {{ psis.similar_cases.length }}건
-          <span v-if="psis.from_cache"> (캐시)</span>
-        </p>
-        <ul class="psis__list">
-          <li v-for="item in psis.similar_cases" :key="item.snapshot_id || item.rank" class="psis__item">
-            <p class="psis__name">
-              {{ item.rank }}. {{ item.pesticide_name || item.brand_name || '—' }}
-              <span class="psis__sim">{{ matchTypeLabel(item.similarity) }}</span>
-            </p>
-            <p class="psis__line">성분: {{ item.active_ingredient || '—' }}</p>
-            <p class="psis__line">용도: {{ item.purpose_name || '—' }}</p>
-            <p class="psis__line">희석: {{ item.dilution || '—' }}</p>
-            <p class="psis__line">사용법: {{ item.usage_method || '—' }}</p>
-            <p class="psis__line">
-              안전사용: {{ item.preharvest_interval || '—' }}
-              · 횟수 {{ item.max_use_count || '—' }}
-            </p>
-          </li>
-        </ul>
-      </template>
-      <OdsButton
-        v-if="confirmPhase === 'confirmed' && psisPhase !== 'loading'"
-        variant="secondary"
-        :block="false"
-        class="psis__retry"
-        @click="runPsisSearch(true)"
-      >
-        방제정보 다시 조회
-      </OdsButton>
-    </section>
   </div>
 </template>
 
@@ -751,13 +645,18 @@ defineExpose({
   color: var(--ods-color-primary);
   font-weight: 600;
 }
+.duration-notice {
+  margin: 0;
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-caution, #c2410c);
+}
 .error {
   margin: 0;
   font: var(--ods-font-body-2);
   color: var(--ods-color-danger);
 }
-.consent,
-.crop-field {
+.consent {
   display: flex;
   align-items: flex-start;
   gap: var(--ods-space-8);
@@ -765,16 +664,33 @@ defineExpose({
   color: var(--ods-color-text-secondary);
 }
 .crop-field {
-  flex-direction: column;
-  gap: var(--ods-space-4);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ods-space-8);
+}
+.crop-field__lbl {
+  flex-shrink: 0;
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-text);
 }
 .crop-field__input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  width: auto;
   min-height: 40px;
   padding: 0 var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-badge, 8px);
   font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-text);
+  background: var(--ods-color-white, #fff);
+}
+.crop-field__input::placeholder {
+  font-weight: 400;
+  color: var(--ods-color-text-secondary);
 }
 .actions {
   display: flex;
@@ -783,7 +699,21 @@ defineExpose({
   gap: var(--ods-space-8);
 }
 .analyze-btn {
-  min-width: 120px;
+  min-width: 168px;
+}
+.analyze-spin {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: analyze-spin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes analyze-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .warn {
   margin: 0;
@@ -832,49 +762,5 @@ defineExpose({
   margin: 4px 0 0;
   font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
-}
-.psis {
-  margin-top: var(--ods-space-8);
-  padding-top: var(--ods-space-8);
-  border-top: 1px solid var(--ods-color-border);
-}
-.psis__title {
-  margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-body-1);
-  font-weight: 700;
-}
-.psis__meta {
-  margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
-}
-.psis__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.psis__item {
-  margin: 0 0 var(--ods-space-12);
-  padding: var(--ods-space-8);
-  border: 1px solid var(--ods-color-border);
-  border-radius: 8px;
-}
-.psis__name {
-  margin: 0 0 4px;
-  font-weight: 700;
-  font: var(--ods-font-body-2);
-}
-.psis__sim {
-  margin-left: 6px;
-  font-weight: 500;
-  color: var(--ods-color-primary);
-}
-.psis__line {
-  margin: 2px 0;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
-}
-.psis__retry {
-  margin-top: var(--ods-space-8);
 }
 </style>

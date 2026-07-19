@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-PROMPT_VERSION = "obs_ai_v1"
+PROMPT_VERSION = "obs_ai_v2"
 
 IMAGE_QUALITY_VALUES = frozenset({"GOOD", "FAIR", "POOR"})
 CATEGORY_VALUES = frozenset(
@@ -87,6 +87,7 @@ OBSERVATION_AI_JSON_SCHEMA: dict[str, Any] = {
 
 SYSTEM_PROMPT = """당신은 과수원 병해충·생리장해 관찰 보조 분석가입니다.
 사진만으로 확진하지 말고 '가능성'과 '후보'로만 표현하십시오.
+사용자가 제공한 관찰일·작물·생육단계·절기·기상은 참고 맥락이며, 사진 소견과 모순되면 사진을 우선하십시오.
 농약 상표명·제품명·희석배수·살포 횟수·약제명을 절대 추천하거나 언급하지 마십시오.
 확진 표현을 사용하지 마십시오.
 후보는 최대 3개까지, confidence는 0~1입니다.

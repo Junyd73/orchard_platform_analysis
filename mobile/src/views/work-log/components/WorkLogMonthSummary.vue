@@ -5,6 +5,7 @@ import iconLabor from '@/assets/ods/work-log/icon-labor.svg'
 import iconPesticide from '@/assets/ods/work-log/icon-pesticide.svg'
 import iconWork from '@/assets/ods/work-log/icon-work.svg'
 import {
+  formatLaborSummary,
   formatWonWithUnit,
   monthRangeLabel,
 } from '@/views/work-log/workLogConstants'
@@ -22,6 +23,8 @@ const emit = defineEmits<{
 }>()
 
 const PLACEHOLDER = '—'
+const SUB_CUMULATIVE = '누적'
+const SUB_VS_PLAN = '계획 대비'
 const title = () => `${props.month}월 월간 요약`
 const range = () => monthRangeLabel(props.year, props.month)
 </script>
@@ -47,13 +50,22 @@ const range = () => monthRangeLabel(props.year, props.month)
         <p class="sum__value">
           {{ summary ? `${summary.work_count}건` : PLACEHOLDER }}
         </p>
+        <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
       </article>
       <article class="sum__card">
         <img class="sum__ico" :src="iconLabor" alt="" />
         <p class="sum__label">투입 인력</p>
-        <p class="sum__value">
-          {{ summary ? `${summary.resource_count}명` : PLACEHOLDER }}
+        <p class="sum__value sum__value--sm">
+          {{
+            summary
+              ? formatLaborSummary(
+                  summary.resource_count,
+                  summary.labor_hour_sum,
+                )
+              : PLACEHOLDER
+          }}
         </p>
+        <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
       </article>
       <article class="sum__card">
         <img class="sum__ico" :src="iconExpense" alt="" />
@@ -65,21 +77,29 @@ const range = () => monthRangeLabel(props.year, props.month)
               : PLACEHOLDER
           }}
         </p>
+        <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
       </article>
       <article class="sum__card">
         <img class="sum__ico" :src="iconPesticide" alt="" />
         <p class="sum__label">농약 사용</p>
-        <p class="sum__value">{{ PLACEHOLDER }}</p>
+        <p class="sum__value">
+          {{ summary ? `${summary.pesticide_count ?? 0}건` : PLACEHOLDER }}
+        </p>
+        <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
       </article>
       <article class="sum__card">
         <img class="sum__ico" :src="iconFertilizer" alt="" />
         <p class="sum__label">비료 사용</p>
-        <p class="sum__value">{{ PLACEHOLDER }}</p>
+        <p class="sum__value">
+          {{ summary ? `${summary.fertilizer_count ?? 0}건` : PLACEHOLDER }}
+        </p>
+        <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
       </article>
       <article class="sum__card">
         <img class="sum__ico" :src="iconWork" alt="" />
         <p class="sum__label">수확 진행</p>
         <p class="sum__value">{{ PLACEHOLDER }}</p>
+        <p class="sum__sub">{{ SUB_VS_PLAN }}</p>
       </article>
     </div>
   </section>
@@ -129,42 +149,56 @@ const range = () => monthRangeLabel(props.year, props.month)
 .sum__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--ods-space-12);
+  gap: var(--ods-space-8);
 }
 .sum__card {
-  min-height: 104px;
-  padding: var(--ods-space-16) var(--ods-space-12);
+  min-height: 96px;
+  padding: var(--ods-space-12) var(--ods-space-8) var(--ods-space-12);
   border-radius: var(--ods-radius-card);
   background: var(--ods-color-white);
   box-shadow: var(--ods-shadow-card);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
   transition: box-shadow var(--ods-motion-fast) var(--ods-motion-ease);
 }
 .sum__card:hover {
   box-shadow: var(--ods-shadow-elevated);
 }
 .sum__ico {
-  width: 24px;
-  height: 24px;
-  margin: 0 auto var(--ods-space-8);
+  width: 22px;
+  height: 22px;
+  margin: 0 auto var(--ods-space-4);
   display: block;
 }
 .sum__label {
   margin: 0;
   font-size: 10px;
-  line-height: 1.3;
+  line-height: 1.25;
   color: var(--ods-color-text-secondary);
 }
 .sum__value {
-  margin: var(--ods-space-8) 0 0;
-  font-size: 18px;
+  margin: var(--ods-space-4) 0 0;
+  font-size: 17px;
   font-weight: 800;
   color: var(--ods-color-text);
   line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sum__value--sm {
-  font-size: 13px;
-  letter-spacing: -0.02em;
+  font-size: 12px;
+  letter-spacing: -0.03em;
+}
+.sum__sub {
+  margin: var(--ods-space-4) 0 0;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--ods-color-text-secondary);
 }
 .anim-fade {
   animation: wl-fade var(--ods-motion-base) var(--ods-motion-ease) both;

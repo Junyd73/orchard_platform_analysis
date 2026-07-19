@@ -1,5 +1,7 @@
 # Mobile Architecture Overview
 
+> 문서 버전: **v1.2.2** · 기준일: 2026-07-18 · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
+
 ## 목적
 
 PC(PyQt) 업무 로직을 FastAPI로 노출하고, 모바일 PWA는 ODS UI로 소비한다.
@@ -17,6 +19,7 @@ PC(PyQt) 업무 로직을 FastAPI로 노출하고, 모바일 PWA는 ODS UI로 �
 ```text
 mobile/
 ├── docs/                    # Documentation · Development Rule · SCR · API 메모
+│   ├── VERSIONS.md          # 버전 SSOT
 │   ├── DEVELOPMENT_RULE.md
 │   ├── ODS/
 │   ├── architecture/
@@ -32,8 +35,8 @@ mobile/
     ├── design-system/       # tokens.css (런타임)
     ├── features/            # 화면·기능 단위
     │   ├── home/
-    │   ├── observation/     # 생육관찰 (SCR-001~003)
-    │   ├── work-log/
+    │   ├── observation/     # 생육관찰 (SCR-001~004)
+    │   ├── work-log/        # 영농일지 (SCR-010 1차 · SCR-011 UI 확정)
     │   └── orders/
     ├── shared/              # layouts · stores · constants · lib
     ├── router/
@@ -53,6 +56,9 @@ mobile/
 | `shared/` | 공통 상태·레이아웃·상수 | Feature 전용 로직 |
 | `design-system/` | ODS 토큰 | 임의 색상 추가 |
 
-## Project A 포커스
+## Project 포커스
 
-단기 확장은 `features/observation` + 관련 API 가 중심이다.
+| 영역 | 상태 |
+|------|------|
+| `features/observation` | Project A 완료 (SCR-001~004 · ODS v1.2) |
+| `features/work-log` | **SCR-010 월간 1차 마감** (ODS v1.2.2) · SCR-011 **UI 확정** · 기능 구현 중 |

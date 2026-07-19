@@ -176,7 +176,10 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: var(--ods-space-12);
   min-height: 48px;
-  padding: var(--ods-space-4) var(--ods-page-padding-x);
+  /* 아이콘(22px)이 카드 좌·우 여백(--ods-page-padding-x)과 시각 정렬되도록
+     터치영역(44px) 보정: (44-22)/2 = 11px 바깥으로 당김 */
+  padding: var(--ods-space-4)
+    calc(var(--ods-page-padding-x) - ((var(--ods-touch-min) - 22px) / 2));
 }
 
 .ods-appbar__left {
@@ -185,6 +188,11 @@ onUnmounted(() => {
   gap: var(--ods-space-4);
   min-width: 0;
   flex: 1 1 auto;
+}
+
+/* Back 없을 때 Farm Mark도 동일 좌측 정렬 */
+.ods-appbar__left > .ods-appbar__farm:first-child {
+  margin-left: calc((var(--ods-touch-min) - 22px) / 2);
 }
 
 .ods-appbar__right {

@@ -30,6 +30,8 @@ const bars = computed(() => {
   }))
 })
 
+const isEmpty = computed(() => bars.value.every((b) => b.count === 0))
+
 const axisLabels = computed(() => {
   const last = daysInMonth(props.year, props.month)
   const labels = [...AXIS]
@@ -38,6 +40,7 @@ const axisLabels = computed(() => {
 })
 
 function showTip(day: number, count: number) {
+  if (isEmpty.value) return
   tip.value = `${day}일 · ${count}건`
 }
 function clearTip() {
@@ -48,7 +51,7 @@ function clearTip() {
 <template>
   <section class="chart" aria-label="작업 일자 분포">
     <h2 class="chart__title">작업 일자 분포</h2>
-    <div class="chart__card">
+    <div class="chart__card" :class="{ 'chart__card--empty': isEmpty }">
       <p v-if="tip" class="chart__tip" role="status">{{ tip }}</p>
       <div class="chart__plot">
         <div class="chart__grid" aria-hidden="true">
@@ -66,12 +69,12 @@ function clearTip() {
             class="chart__bar"
             :class="{ 'chart__bar--empty': b.count === 0 }"
             :style="{
-              height: `${Math.max(
-                b.count === 0 ? 6 : 10,
-                (b.pct / 100) * 72,
-              )}px`,
+              height: isEmpty
+                ? '10px'
+                : `${Math.max(b.count === 0 ? 6 : 10, (b.pct / 100) * 72)}px`,
             }"
-            :title="`${b.day}일 · ${b.count}건`"
+            :title="isEmpty ? undefined : `${b.day}일 · ${b.count}건`"
+            :tabindex="isEmpty ? -1 : 0"
             @mouseenter="showTip(b.day, b.count)"
             @mouseleave="clearTip"
             @focus="showTip(b.day, b.count)"
@@ -99,6 +102,10 @@ function clearTip() {
   border-radius: var(--ods-radius-card-lg);
   background: var(--ods-color-white);
   box-shadow: var(--ods-shadow-card);
+}
+.chart__card--empty .chart__bar--empty {
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, var(--ods-color-gray-100));
+  opacity: 0.85;
 }
 .chart__tip {
   position: absolute;
@@ -143,12 +150,16 @@ function clearTip() {
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 3px 3px 0 0;
+  border-radius: 2px 2px 0 0;
   background: var(--ods-color-primary);
   cursor: pointer;
 }
 .chart__bar--empty {
   background: var(--ods-color-gray-100);
+}
+.chart__card--empty .chart__bar {
+  cursor: default;
+  pointer-events: none;
 }
 .chart__bar:hover,
 .chart__bar:focus-visible {

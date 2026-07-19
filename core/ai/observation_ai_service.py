@@ -45,6 +45,7 @@ class ObservationAiService:
         paths: list[str],
         *,
         crop_hint: str = "",
+        extra_note: str = "",
     ) -> ObservationAiResponse:
         ok, msg, images = prepare_images_for_ai(paths)
         if not ok:
@@ -56,5 +57,9 @@ class ObservationAiService:
             )
         # data_url 만 전달 — 경로·농장코드 미포함
         payload = [{"data_url": x["data_url"]} for x in images]
-        req = ObservationAiRequest(images=payload, crop_hint=crop_hint or "")
+        req = ObservationAiRequest(
+            images=payload,
+            crop_hint=crop_hint or "",
+            extra_note=extra_note or "",
+        )
         return self.provider.analyze(req)

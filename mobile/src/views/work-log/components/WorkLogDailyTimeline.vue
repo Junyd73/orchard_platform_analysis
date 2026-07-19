@@ -244,31 +244,31 @@ const showMoreHint = computed(
   align-items: flex-start;
   gap: 12px;
   min-width: max-content;
-  padding: 0 0 10px;
+  padding: 0;
 }
 
 .tl__axis {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(10px + 4.5px - 1px);
+  /* 도트 center = bottom 3px + 5px */
+  bottom: 7px;
   height: 2px;
   border-radius: 1px;
   background: #d0d0d0;
   pointer-events: none;
+  z-index: 0;
 }
 
 .tl__node {
   position: relative;
   z-index: 1;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  flex: 0 0 80px;
   width: 80px;
+  display: block;
   margin: 0;
-  padding: 0;
+  /* 칩(76) + 도트 영역(16) */
+  padding: 0 0 16px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -278,16 +278,18 @@ const showMoreHint = computed(
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  width: 100%;
-  padding: 10px 6px 9px;
+  justify-content: space-between;
+  gap: 2px;
+  width: 80px;
+  height: 76px;
+  padding: 8px 5px 6px;
   border-radius: 14px;
   box-sizing: border-box;
+  overflow: hidden;
   transition:
     background 0.15s ease,
     color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
+    box-shadow 0.15s ease;
 }
 
 .tl__node--mint .tl__chip {
@@ -306,7 +308,6 @@ const showMoreHint = computed(
 .tl__node--on .tl__chip {
   background: var(--ods-color-primary);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--ods-color-primary) 32%, transparent);
-  transform: translateY(-1px);
 }
 
 .tl__node--on .tl__name,
@@ -319,31 +320,55 @@ const showMoreHint = computed(
 }
 
 .tl__ico {
-  width: 22px;
-  height: 22px;
-  margin-bottom: 1px;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
 }
 
 .tl__name {
-  font-size: 12px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.25;
   color: var(--ods-color-text);
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-all;
 }
 
 .tl__time {
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 0;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1.2;
   color: var(--ods-color-text-secondary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tl__dot {
-  width: 9px;
-  height: 9px;
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: 0;
   border-radius: 50%;
   box-sizing: border-box;
   background: var(--ods-color-primary);
   border: 2px solid var(--ods-color-primary);
+  transform: translateX(-50%);
 }
 
 .tl__node--gold .tl__dot {
@@ -355,11 +380,13 @@ const showMoreHint = computed(
   border-color: #7e57c2;
 }
 
+/* 선택 시에도 크기 고정 — 링만 강조 */
 .tl__node--on .tl__dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   background: #fff;
-  border: 3px solid var(--ods-color-primary);
+  border: 2.5px solid var(--ods-color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ods-color-primary) 35%, transparent);
 }
 
 .tl__more {
@@ -367,10 +394,10 @@ const showMoreHint = computed(
   width: var(--tl-more-gutter, 28px);
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   gap: 4px;
-  padding-top: 28px;
+  height: 76px;
   box-sizing: border-box;
   user-select: none;
   pointer-events: none;

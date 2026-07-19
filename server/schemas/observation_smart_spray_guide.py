@@ -47,6 +47,10 @@ class SmartSprayGuideItemDto(BaseModel):
     stock_unit: str = "낱개"
     has_stock: bool = False
     last_used_date: str | None = None
+    spec_nm: str = Field(default="", description="재고/사전 규격 (예: 250ml, 250g)")
+    dilution_unit: str = Field(
+        default="", description="희석 환산 단위 g|ml (불명이면 빈 문자열)"
+    )
     dilution: str = ""
     phi: str = Field(default="", description="수확 전 안전사용기간")
     max_use_count: str = ""
@@ -72,7 +76,8 @@ class ObservationSmartSprayGuideResponse(BaseModel):
     observation: SmartSprayGuideObservationDto | None = None
     confirmed_candidate: SmartSprayGuideCandidateDto | None = None
     psis_status: str = Field(
-        default="NONE", description="CACHED | EMPTY | NONE"
+        default="NONE",
+        description="CACHED(사전 조회됨) | EMPTY(사전 없음) | NONE(후보 없음)",
     )
     crop_name: str = ""
     disease_name: str = ""

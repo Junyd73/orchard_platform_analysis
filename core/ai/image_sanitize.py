@@ -6,7 +6,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-MAX_PHOTOS_PER_ANALYSIS = 3
+MAX_PHOTOS_PER_ANALYSIS = 5
 MAX_LONG_EDGE_PX = 1600
 JPEG_QUALITY = 85
 
@@ -75,7 +75,7 @@ def to_data_url_jpeg(jpeg_bytes: bytes) -> str:
 def prepare_images_for_ai(
     paths: list[str],
 ) -> tuple[bool, str, list[dict]]:
-    """경로 목록 → [{path_label, data_url}] (최대 3장). 개인정보·절대경로 미포함."""
+    """경로 목록 → [{path_label, data_url}] (최대 MAX_PHOTOS_PER_ANALYSIS장). 개인정보·절대경로 미포함."""
     selected = [p for p in (paths or []) if str(p or "").strip()][:MAX_PHOTOS_PER_ANALYSIS]
     if not selected:
         return False, "분석할 사진을 선택해 주세요.", []

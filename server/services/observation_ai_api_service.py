@@ -21,8 +21,6 @@ from app.schemas.observation_ai import (
 from app.services.observation_ai_db_bridge import ServerDbBridge
 from app.services.observation_media import resolve_media_path
 
-# PC image_sanitize.MAX_PHOTOS_PER_ANALYSIS 와 동일 (상수만 미러, 로직 아님)
-_MAX_PHOTOS_PER_ANALYSIS = 3
 _AI_STATUS_NONE = "NONE"
 _AI_STATUS_REVIEW_REQUIRED = "REVIEW_REQUIRED"
 
@@ -35,6 +33,14 @@ def _ensure_repo_root_on_path() -> Path:
     if root_s not in sys.path:
         sys.path.append(root_s)
     return root
+
+
+def _max_photos_per_analysis() -> int:
+    """core.ai.image_sanitize.MAX_PHOTOS_PER_ANALYSIS 와 동일 값."""
+    _ensure_repo_root_on_path()
+    from core.ai.image_sanitize import MAX_PHOTOS_PER_ANALYSIS  # noqa: WPS433
+
+    return int(MAX_PHOTOS_PER_ANALYSIS)
 
 
 def _import_application_service():
@@ -98,11 +104,12 @@ class ObservationAiApiService:
             raise BusinessRuleError("분석할 사진이 없습니다. 사진을 먼저 업로드해 주세요.")
 
         by_id = {str(r.get("photo_id") or ""): r for r in rows}
+        max_n = _max_photos_per_analysis()
         if photo_ids:
             wanted = [str(p or "").strip() for p in photo_ids if str(p or "").strip()]
-            if len(wanted) > _MAX_PHOTOS_PER_ANALYSIS:
+            if len(wanted) > max_n:
                 raise BusinessRuleError(
-                    f"사진은 최대 {_MAX_PHOTOS_PER_ANALYSIS}장까지 분석할 수 있습니다."
+                    f"사진은 최대 {max_n}장까지 분석할 수 있습니다."
                 )
             selected_rows = []
             for pid in wanted:
@@ -111,7 +118,7 @@ class ObservationAiApiService:
                     raise BusinessRuleError(f"사진을 찾을 수 없습니다: {pid}")
                 selected_rows.append(row)
         else:
-            selected_rows = list(rows)[:_MAX_PHOTOS_PER_ANALYSIS]
+            selected_rows = list(rows)[:max_n]
 
         ids: list[str] = []
         paths: list[str] = []
@@ -127,7 +134,9 @@ class ObservationAiApiService:
             paths.append(str(abs_p))
 
         if not paths:
-            raise BusinessRuleError("분석할 사진을 1~3장 선택해 주세요.")
+            raise BusinessRuleError(
+                f"분석할 사진을 1~{max_n}장 선택해 주세요."
+            )
         return ids, paths
 
     @staticmethod

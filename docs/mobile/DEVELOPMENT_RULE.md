@@ -2,7 +2,7 @@
 
 > 공식 개발 기준 문서.  
 > **새 작업 전:** `mobile/PROJECT_MASTER.md` 를 먼저 읽고, 이어서 본 문서를 확인한다.  
-> 버전: 1.2 · Project A · 2026-07
+> 버전: **1.2.2** · Project A · 2026-07 · SSOT: `mobile/docs/VERSIONS.md`
 
 ---
 
@@ -15,7 +15,7 @@ Orchard Platform 모바일은 **새로운 프로그램이 아니다.**
 | 구분 | 기준 |
 |------|------|
 | 업무 로직 | PC 프로그램 (분석 저장소 포함) |
-| UI/UX | **Orchard Design System (ODS) v1.2** (`mobile/docs/ODS/ODS_v1.md`) |
+| UI/UX | **Orchard Design System (ODS) v1.2.2** (`mobile/docs/ODS/ODS_v1.md`) |
 | 데이터 | 기존 DB 구조 유지·확장 |
 | API | FastAPI (`server/`), 응답 스키마 임의 변경 금지 |
 
@@ -34,7 +34,7 @@ Orchard Platform 모바일은 **새로운 프로그램이 아니다.**
 ## 2. ODS 우선 원칙
 
 - ODS는 공식 디자인 기준이다. 정책: `mobile/docs/ODS/ODS_v1.md` · 원본 PDF: `ODS_v1.0.pdf`
-- **SCR-001 ~ SCR-004** 승인 화면은 **절대 임의 변경하지 않는다.** (변경 시 제안·승인)
+- **SCR-001 ~ SCR-004 · SCR-010(1차 마감)** 승인 화면은 **절대 임의 변경하지 않는다.** (변경 시 제안·승인)
 - Color / Typography / Spacing / Radius / Button / Card / Badge / Input / Navigation 은 ODS 토큰·공통 컴포넌트를 사용한다.
 - **새로운 디자인을 만들지 않는다.** 변경이 필요하면 먼저 제안하고 대표님 승인을 받는다.
 - 구현 토큰: `src/design-system/tokens.css`  

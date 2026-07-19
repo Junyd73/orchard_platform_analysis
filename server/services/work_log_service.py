@@ -13,6 +13,7 @@ from typing import Any
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.schemas.work_log import (
+    WorkLogAccountCodeOption,
     WorkLogDailyResponse,
     WorkLogDayCell,
     WorkLogDayWorkItem,
@@ -22,9 +23,11 @@ from app.schemas.work_log import (
     WorkLogMasterUpsertRequest,
     WorkLogMonthlyResponse,
     WorkLogMonthSummary,
+    WorkLogPartnerOption,
     WorkLogPesticideCancelRequest,
     WorkLogPesticideCancelResponse,
     WorkLogPesticideDocDto,
+    WorkLogPesticideItemOption,
     WorkLogPesticideLineDto,
     WorkLogPesticideReplaceRequest,
     WorkLogResourceDto,
@@ -214,6 +217,94 @@ class WorkLogService:
         if not row:
             raise EntityNotFoundError("Farm not found")
         return farm
+
+    def list_partners(self, farm_cd: str) -> list[WorkLogPartnerOption]:
+        """PC CodeManager.get_partners — 인력 직원 콤보."""
+        farm = self._ensure_farm(farm_cd)
+        with get_sqlite_connection(self._db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT pt_id, pt_nm, base_price, worker_type_cd
+                FROM m_partner
+                WHERE farm_cd = ? AND IFNULL(use_yn, 'Y') = 'Y'
+                ORDER BY pt_nm ASC
+                """,
+                (farm,),
+            ).fetchall()
+        out: list[WorkLogPartnerOption] = []
+        for r in rows or []:
+            out.append(
+                WorkLogPartnerOption(
+                    pt_id=str(r["pt_id"]),
+                    pt_nm=_s(r["pt_nm"]) or str(r["pt_id"]),
+                    base_price=float(r["base_price"])
+                    if r["base_price"] is not None
+                    else None,
+                    worker_type_cd=_s(r["worker_type_cd"]) or None,
+                )
+            )
+        return out
+
+    def list_account_codes(
+        self,
+        farm_cd: str,
+        *,
+        prefix: str,
+        level: int | None = None,
+    ) -> list[WorkLogAccountCodeOption]:
+        """PC AccountManager.get_account_codes — 지급방식·지출내용."""
+        self._ensure_farm(farm_cd)
+        pref = _s(prefix)
+        if not pref:
+            raise BusinessRuleError("계정 prefix가 필요합니다.")
+        sql = """
+            SELECT acct_cd, acct_nm, acct_level
+            FROM m_account_code
+            WHERE acct_cd LIKE ? AND IFNULL(use_yn, 'Y') = 'Y'
+        """
+        params: list[Any] = [f"{pref}%"]
+        if level is not None:
+            sql += " AND CAST(acct_level AS TEXT) = ?"
+            params.append(str(int(level)))
+        sql += " ORDER BY acct_cd ASC"
+        with get_sqlite_connection(self._db_path) as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [
+            WorkLogAccountCodeOption(
+                acct_cd=_s(r["acct_cd"]),
+                acct_nm=_s(r["acct_nm"]) or _s(r["acct_cd"]),
+                acct_level=int(r["acct_level"])
+                if r["acct_level"] is not None
+                else None,
+            )
+            for r in (rows or [])
+            if _s(r["acct_cd"])
+        ]
+
+    def list_pesticide_items(
+        self, farm_cd: str
+    ) -> list[WorkLogPesticideItemOption]:
+        """PC PesticideManager.list_items — 농약 품목 콤보."""
+        farm = self._ensure_farm(farm_cd)
+        with get_sqlite_connection(self._db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT item_id, item_nm, spec_nm, qty_piece
+                FROM m_pesticide_item
+                WHERE farm_cd = ? AND IFNULL(use_yn, 'Y') = 'Y'
+                ORDER BY IFNULL(sort_ord, 0), item_nm
+                """,
+                (farm,),
+            ).fetchall()
+        return [
+            WorkLogPesticideItemOption(
+                item_id=int(r["item_id"]),
+                item_nm=_s(r["item_nm"]) or f"품목{r['item_id']}",
+                spec_nm=_s(r["spec_nm"]) or None,
+                qty_piece=int(r["qty_piece"] or 0),
+            )
+            for r in (rows or [])
+        ]
 
     def _load_weather_cache_payload(
         self, farm_cd: str, work_dt: str
@@ -562,13 +653,13 @@ class WorkLogService:
             res_rows = conn.execute(
                 f"""
                 SELECT r.*, COALESCE(p.pt_nm, '') AS emp_nm,
-                       COALESCE(pm.code_nm, '') AS pay_method_nm
+                       COALESCE(pm.acct_nm, '') AS pay_method_nm
                 FROM t_work_resource r
                 LEFT JOIN m_partner p
                   ON p.farm_cd = r.farm_cd
                  AND TRIM(CAST(p.pt_id AS TEXT)) = TRIM(CAST(r.emp_cd AS TEXT))
-                LEFT JOIN m_common_code pm
-                  ON pm.farm_cd = r.farm_cd AND pm.code_cd = r.pay_method_cd
+                LEFT JOIN m_account_code pm
+                  ON pm.acct_cd = r.pay_method_cd
                 WHERE r.farm_cd = ? AND r.work_id IN ({ph})
                 ORDER BY r.res_id
                 """,
@@ -592,12 +683,12 @@ class WorkLogService:
             exp_rows = conn.execute(
                 f"""
                 SELECT e.*, COALESCE(ac.acct_nm, '') AS acct_nm,
-                       COALESCE(pm.code_nm, '') AS pay_method_nm
+                       COALESCE(pm.acct_nm, '') AS pay_method_nm
                 FROM t_work_expense e
                 LEFT JOIN m_account_code ac
                   ON ac.acct_cd = e.acct_cd
-                LEFT JOIN m_common_code pm
-                  ON pm.farm_cd = e.farm_cd AND pm.code_cd = e.pay_method_cd
+                LEFT JOIN m_account_code pm
+                  ON pm.acct_cd = e.pay_method_cd
                 WHERE e.farm_cd = ? AND e.work_id IN ({ph})
                 ORDER BY e.exp_id
                 """,
@@ -739,6 +830,8 @@ class WorkLogService:
                     status_cd=_s(w.status_cd),
                     pesticide_lines=pest_lines,
                     replace_pesticide_use_id=w.replace_pesticide_use_id,
+                    # 라인이 있으면 방제 작업이 아니어도 농약 확정 경로로 진입
+                    is_pesticide=True if pest_lines else None,
                 )
             )
 

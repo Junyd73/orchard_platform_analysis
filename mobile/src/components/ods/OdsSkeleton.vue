@@ -76,7 +76,7 @@ withDefaults(
   border-radius: var(--ods-radius-badge);
 }
 .ods-skel__block--hero {
-  height: 300px;
+  height: 262px;
   border-radius: var(--ods-radius-card-lg);
 }
 .ods-skel__block--kpi {

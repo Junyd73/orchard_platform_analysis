@@ -38,6 +38,9 @@ from ui.widgets.observation.psis_search_worker import PsisSearchWorker
 AI_DISCLAIMER = (
     "AI 분석은 사진에 기반한 참고 후보이며 병해충 확진 결과가 아닙니다."
 )
+AI_DURATION_NOTICE = (
+    "정확한 분석을 위해 60초정도의 시간이 소요됩니다."
+)
 PESTI_DISCLAIMER = (
     "농약은 현재 작물과 병해충에 등록된 제품인지 공식 정보를 다시 확인하고, "
     "제품 라벨과 안전사용기준을 준수하십시오."
@@ -216,6 +219,13 @@ class AiAnalysisPanel(QWidget):
         btns.addWidget(self.btn_back_current)
         btns.addStretch(1)
         lay.addLayout(btns)
+
+        self.lbl_duration = QLabel(AI_DURATION_NOTICE)
+        self.lbl_duration.setWordWrap(True)
+        self.lbl_duration.setStyleSheet(
+            "color: #C2410C; font-size: 11px; font-weight: 700; border: none;"
+        )
+        lay.addWidget(self.lbl_duration)
 
         self.lbl_status = QLabel("분석 상태: -")
         self.lbl_status.setStyleSheet("font-size: 10px; border: none;")
@@ -563,11 +573,15 @@ class AiAnalysisPanel(QWidget):
         ids, paths, sel_n = self._selected_photo_paths()
         if sel_n > MAX_PHOTOS_PER_ANALYSIS:
             QMessageBox.information(
-                self, "안내", "사진은 최대 3장까지 선택할 수 있습니다."
+                self, "안내", f"사진은 최대 {MAX_PHOTOS_PER_ANALYSIS}장까지 선택할 수 있습니다."
             )
             return
         if not paths:
-            QMessageBox.information(self, "안내", "분석할 사진을 1~3장 선택해 주세요.")
+            QMessageBox.information(
+                self,
+                "안내",
+                f"분석할 사진을 1~{MAX_PHOTOS_PER_ANALYSIS}장 선택해 주세요.",
+            )
             return
         ans = QMessageBox.question(
             self,
@@ -583,7 +597,7 @@ class AiAnalysisPanel(QWidget):
         req = self._req_id
         crop = self.cb_crop.currentText().strip()
         self._ai_pending = None
-        self._set_ai_busy(True, "AI 분석 중…")
+        self._set_ai_busy(True, f"AI 분석 중… {AI_DURATION_NOTICE}")
 
         thread = QThread()
         worker = ObservationAiWorker(

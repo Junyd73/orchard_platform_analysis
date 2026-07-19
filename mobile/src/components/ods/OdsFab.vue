@@ -32,7 +32,7 @@ const emit = defineEmits<{
 .ods-fab {
   position: fixed;
   right: max(var(--ods-space-16), env(safe-area-inset-right));
-  bottom: calc(64px + var(--ods-space-16) + env(safe-area-inset-bottom));
+  bottom: calc(64px + var(--ods-space-24) + env(safe-area-inset-bottom));
   z-index: 40;
   width: var(--ods-fab-size);
   height: var(--ods-fab-size);

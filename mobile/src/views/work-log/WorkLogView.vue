@@ -3,13 +3,16 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { fetchWorkLogDaily, fetchWorkLogMonthly } from '@/api/workLogs'
+import {
+  fetchWorkLogDaily,
+  fetchWorkLogMonthly,
+  fetchWorkLogWeather,
+} from '@/api/workLogs'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsFab from '@/components/ods/OdsFab.vue'
 import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
-import WorkLogFilterSheet from '@/views/work-log/components/WorkLogFilterSheet.vue'
 import WorkLogHero from '@/views/work-log/components/WorkLogHero.vue'
 import WorkLogMonthCalendar from '@/views/work-log/components/WorkLogMonthCalendar.vue'
 import WorkLogMonthChart from '@/views/work-log/components/WorkLogMonthChart.vue'
@@ -17,9 +20,9 @@ import WorkLogMonthSummary from '@/views/work-log/components/WorkLogMonthSummary
 import WorkLogWeatherCard from '@/views/work-log/components/WorkLogWeatherCard.vue'
 import {
   defaultWorkFilters,
+  hasWorkLogWeather,
   isFutureDate,
   MSG_DETAIL_PENDING,
-  MSG_HOURLY_FORECAST_PENDING,
   MSG_LOAD_MONTH_FAILED,
   shiftMonth,
   todayIso,
@@ -45,26 +48,36 @@ const month = ref(now.getMonth() + 1)
 const loading = ref(true)
 const weatherLoading = ref(false)
 const bootstrapping = ref(true)
+
+function applyYearMonthFromQuery() {
+  const qy = Number(route.query.year)
+  const qm = Number(route.query.month)
+  if (Number.isFinite(qy) && qy >= 2000 && qy <= 2100) year.value = qy
+  if (Number.isFinite(qm) && qm >= 1 && qm <= 12) month.value = qm
+}
+
+applyYearMonthFromQuery()
 const toastMessage = ref('')
 const loadFailed = ref(false)
 const summary = ref<SummaryDto | null>(null)
 const days = ref<Record<string, WorkLogDayCell>>({})
+/** 표시 월이 바뀌어도 Hero '오늘' KPI는 유지 */
+const todayCellCache = ref<WorkLogDayCell | null>(null)
 const todayMaster = ref<WorkLogMasterDto | null>(null)
-const filterOpen = ref(false)
 const filters = ref(defaultWorkFilters())
+const selectedDt = ref(todayIso())
 
 const today = todayIso()
 
-const todayCell = computed(() => days.value[today] || null)
+const todayCell = computed(() => days.value[today] || todayCellCache.value)
 const todayWorkCount = computed(() => Number(todayCell.value?.work_count || 0))
 const todayResourceCount = computed(() => Number(todayCell.value?.resource_count || 0))
+const todayLaborHourSum = computed(() => Number(todayCell.value?.labor_hour_sum || 0))
 const todayExpenseSum = computed(() => {
   const c = todayCell.value
   if (!c) return 0
   return Number(c.expense_sum || 0) + Number(c.labor_sum || 0)
 })
-const todayInProgressCount = computed((): number | null => null)
-const todayPlannedCount = computed((): number | null => null)
 
 const canGoNext = computed(() => {
   const t = new Date()
@@ -73,10 +86,20 @@ const canGoNext = computed(() => {
   return year.value < cy || (year.value === cy && month.value < cm)
 })
 
+const canGoNextYear = computed(() => {
+  const cy = new Date().getFullYear()
+  return year.value < cy
+})
+
 const showMonthSkeleton = computed(() => bootstrapping.value)
 const showWeatherSkeleton = computed(
   () => bootstrapping.value || (weatherLoading.value && !todayMaster.value),
 )
+
+function rememberTodayCell(map: Record<string, WorkLogDayCell>) {
+  const cell = map[today]
+  if (cell) todayCellCache.value = cell
+}
 
 async function loadMonth() {
   loading.value = true
@@ -85,6 +108,7 @@ async function loadMonth() {
     const res = await fetchWorkLogMonthly(farmCd.value, year.value, month.value)
     summary.value = res.summary
     days.value = res.days || {}
+    rememberTodayCell(days.value)
   } catch (err) {
     summary.value = null
     days.value = {}
@@ -97,11 +121,37 @@ async function loadMonth() {
   }
 }
 
+/** 표시 월이 오늘이 아닐 때도 Hero KPI용 오늘 셀을 확보 */
+async function ensureTodayCellCache() {
+  if (todayCellCache.value || days.value[today]) return
+  const t = new Date()
+  try {
+    const res = await fetchWorkLogMonthly(
+      farmCd.value,
+      t.getFullYear(),
+      t.getMonth() + 1,
+    )
+    rememberTodayCell(res.days || {})
+  } catch {
+    // Hero는 0으로 두고 월간 조회 실패 토스트는 loadMonth에서 처리
+  }
+}
+
 async function loadTodayWeather() {
   weatherLoading.value = true
   try {
     const daily = await fetchWorkLogDaily(farmCd.value, today)
-    todayMaster.value = daily.master
+    let master = daily.master
+    // DB(마스터·캐시)에 없으면 PC와 동일하게 외부 API 자동 조회
+    if (!hasWorkLogWeather(master) && !isFutureDate(today)) {
+      try {
+        const fetched = await fetchWorkLogWeather(farmCd.value, today)
+        if (fetched.master) master = fetched.master
+      } catch {
+        // 자동 조회 실패 시 조용히 DB 결과만 유지
+      }
+    }
+    todayMaster.value = master
   } catch {
     todayMaster.value = null
   } finally {
@@ -131,10 +181,25 @@ function goNext() {
   month.value = next.month
 }
 
+function goPrevYear() {
+  year.value -= 1
+}
+
+function goNextYear() {
+  if (!canGoNextYear.value) return
+  const cy = new Date().getFullYear()
+  const cm = new Date().getMonth() + 1
+  year.value += 1
+  if (year.value === cy && month.value > cm) {
+    month.value = cm
+  }
+}
+
 function goTodayMonth() {
   const t = new Date()
   year.value = t.getFullYear()
   month.value = t.getMonth() + 1
+  selectedDt.value = today
 }
 
 function onSelectDay(workDt: string) {
@@ -142,6 +207,7 @@ function onSelectDay(workDt: string) {
     showToast('영농일지는 오늘까지만 작성할 수 있습니다.')
     return
   }
+  selectedDt.value = workDt
   void router.push({ name: 'work-log-daily', params: { workDt } })
 }
 
@@ -150,11 +216,8 @@ function onBlocked(msg: string) {
 }
 
 function onFabRegister() {
+  selectedDt.value = today
   void router.push({ name: 'work-log-daily', params: { workDt: today } })
-}
-
-function onForecast() {
-  showToast(MSG_HOURLY_FORECAST_PENDING)
 }
 
 function onSummaryDetail() {
@@ -163,10 +226,6 @@ function onSummaryDetail() {
 
 function onToggleFilter(key: WorkFilterKey) {
   filters.value = { ...filters.value, [key]: !filters.value[key] }
-}
-
-function onResetFilters() {
-  filters.value = defaultWorkFilters()
 }
 
 function showToast(msg: string) {
@@ -181,15 +240,22 @@ watch([year, month], () => {
 })
 
 onMounted(async () => {
+  applyYearMonthFromQuery()
   if (!farm.value) {
     await store.refreshAll()
   }
-  await Promise.all([loadMonth(), loadTodayWeather()])
+  await Promise.all([loadMonth(), loadTodayWeather(), ensureTodayCellCache()])
   bootstrapping.value = false
   const toast = String(route.query.toast || '').trim()
   if (toast) {
     showToast(toast)
-    void router.replace({ name: 'work-log' })
+    void router.replace({
+      name: 'work-log',
+      query: {
+        ...(route.query.year ? { year: String(route.query.year) } : {}),
+        ...(route.query.month ? { month: String(route.query.month) } : {}),
+      },
+    })
   }
 })
 </script>
@@ -197,30 +263,29 @@ onMounted(async () => {
 <template>
   <div class="page">
     <main class="content">
+      <!-- ODS v1.1.1: AppBar는 content 안 첫 자식 (좌우 page-padding 정렬) -->
       <OdsAppBar />
 
-      <div class="hero-stack">
-        <OdsSkeleton v-if="showMonthSkeleton" variant="hero" />
+      <div class="top">
+        <OdsSkeleton v-if="showMonthSkeleton" variant="hero" class="top__skel" />
         <WorkLogHero
           v-else
           mode="monthly"
           :farm-name="farm?.farm_nm || undefined"
           :today-work-count="todayWorkCount"
-          :today-in-progress-count="todayInProgressCount"
-          :today-planned-count="todayPlannedCount"
           :today-resource-count="todayResourceCount"
+          :today-labor-hour-sum="todayLaborHourSum"
           :today-expense-sum="todayExpenseSum"
         />
 
-        <div class="hero-stack__weather">
-          <OdsSkeleton v-if="showWeatherSkeleton" variant="card" height="112px" />
+        <div class="top__weather">
+          <OdsSkeleton v-if="showWeatherSkeleton" variant="card" height="68px" />
           <WorkLogWeatherCard
             v-else
             :master="todayMaster"
             :weather-nm-fallback="todayCell?.weather_nm"
             :weather-cd-fallback="todayCell?.weather_cd"
             :loading="weatherLoading"
-            @forecast="onForecast"
           />
         </div>
       </div>
@@ -237,15 +302,19 @@ onMounted(async () => {
           :month="month"
           :days="days"
           :filters="filters"
-          :can-go-next="canGoNext"
+          :selected-dt="selectedDt"
           :loading="loading"
-          :show-empty="loadFailed || Object.keys(days).length === 0"
+          :show-empty="
+            !loading && (loadFailed || Object.keys(days).length === 0)
+          "
           @select="onSelectDay"
           @blocked="onBlocked"
-          @open-filter="filterOpen = true"
+          @toggle-filter="onToggleFilter"
           @go-today="goTodayMonth"
           @prev-month="goPrev"
           @next-month="goNext"
+          @prev-year="goPrevYear"
+          @next-year="goNextYear"
         />
 
         <WorkLogMonthSummary
@@ -264,14 +333,6 @@ onMounted(async () => {
       <img :src="iconPlus" alt="" />
     </OdsFab>
 
-    <WorkLogFilterSheet
-      :open="filterOpen"
-      :filters="filters"
-      @close="filterOpen = false"
-      @toggle="onToggleFilter"
-      @reset="onResetFilters"
-    />
-
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
     <OdsBottomNav />
   </div>
@@ -280,26 +341,35 @@ onMounted(async () => {
 <style scoped>
 .page {
   min-height: 100dvh;
-  background: var(--ods-color-bg-muted);
+  /* 시안4: 페이지·AppBar 영역은 흰색 바탕 */
+  background: var(--ods-color-bg);
   padding-bottom: calc(140px + env(safe-area-inset-bottom));
 }
+
 .content {
   max-width: 480px;
   margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-24);
+  padding: 0 var(--ods-page-padding-x) var(--ods-space-20);
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-16);
 }
-.hero-stack {
+
+.top {
   position: relative;
-  padding-bottom: var(--ods-space-40);
+  display: flex;
+  flex-direction: column;
 }
-.hero-stack__weather {
+.top__skel {
+  border-radius: var(--ods-radius-card-lg);
+  min-height: 180px;
+}
+.top__weather {
   position: relative;
   z-index: 2;
-  margin-top: calc(var(--ods-space-40) * -1);
+  margin-top: var(--ods-space-12);
 }
+
 .toast {
   position: fixed;
   left: 50%;

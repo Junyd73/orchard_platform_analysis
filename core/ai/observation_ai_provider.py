@@ -12,7 +12,7 @@ from typing import Any
 class ObservationAiRequest:
     images: list[dict] = field(default_factory=list)  # data_url 만 (경로·농장정보 금지)
     crop_hint: str = ""
-    extra_note: str = ""
+    extra_note: str = ""  # 관찰일·절기·기상 등 내부 맥락 (프롬프트 전용)
 
 
 @dataclass

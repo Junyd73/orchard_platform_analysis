@@ -11,7 +11,7 @@ class ObservationAiAnalyzeRequest(BaseModel):
 
     photo_ids: list[str] | None = Field(
         default=None,
-        description="분석 대상 photo_id (미지정 시 정렬순 최대 3장)",
+        description="분석 대상 photo_id (미지정 시 정렬순 최대 5장)",
     )
     crop_hint: str = Field(default="", description="작물 힌트(선택)")
     consent: bool = Field(

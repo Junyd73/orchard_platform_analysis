@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import {
+  onBeforeRouteLeave,
+  useRoute,
+  useRouter,
+  type RouteLocationNormalized,
+} from 'vue-router'
 import { storeToRefs } from 'pinia'
 
 import { fetchCommonCodes } from '@/api/commonCodes'
+import { ApiClientError } from '@/api/client'
 import { fetchFarmSites } from '@/api/farms'
 import {
   cancelWorkLogPesticide,
@@ -28,18 +34,25 @@ import WorkLogDailyWorkForm, {
 } from '@/views/work-log/components/WorkLogDailyWorkForm.vue'
 import iconTrash from '@/assets/ods/scr004/icon-trash.svg'
 import {
+  buildDailySummaryCards,
   createEmptyWorkForm,
-  DAILY_SHELL_SUMMARY,
   DAILY_TAB_WORK,
   hasWorkLogWeather,
   isFutureDate,
   mapWorkItemToTimeline,
+  sortWorksByStartTime,
+  BTN_UNSAVED_LEAVE_DISCARD,
+  BTN_UNSAVED_LEAVE_SAVE,
+  BTN_UNSAVED_LEAVE_STAY,
   MSG_DETAIL_PENDING,
   MSG_DRAFT_OK,
+  MSG_COPY_DATE_INVALID,
+  MSG_COPY_OK,
   MSG_FUTURE_WORK_LOG,
   MSG_LOAD_DAILY_FAILED,
   MSG_SAVE_FAILED,
   MSG_SAVE_OK,
+  MSG_UNSAVED_LEAVE_CONFIRM,
   MSG_WORK_CONTENT_REQUIRED,
   todayIso,
   WORK_STATUS_PARENT_CD,
@@ -47,6 +60,7 @@ import {
   type DailyShellExpenseRow,
   type DailyShellLaborRow,
   type DailyShellPesticideRow,
+  type DailyShellSummaryCard,
   type DailyTimelineItem,
   type DailyWorkFormModel,
   type DailyWorkTabKey,
@@ -81,6 +95,9 @@ const sourceWorks = ref<WorkLogWorkItem[]>([])
 const workItems = ref<DailyTimelineItem[]>([])
 const selectedId = ref<string | null>(null)
 const isEditing = ref(true)
+const isCopyMode = ref(false)
+/** 복사 대상 작업일 (YYYY-MM-DD) */
+const copyTargetDt = ref('')
 const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
 
 const laborRows = ref<DailyShellLaborRow[]>([])
@@ -97,6 +114,12 @@ const workOptions = ref<DailyPickOption[]>([])
 const siteOptions = ref<DailyPickOption[]>([])
 const statusOptions = ref<DailyPickOption[]>([])
 
+/** 미저장 이탈 가드 */
+const cleanSnapshot = ref('')
+const leaveGuardBypass = ref(false)
+const leaveConfirmOpen = ref(false)
+let pendingLeaveTo: RouteLocationNormalized | null = null
+
 const hasWorks = computed(() => workItems.value.length > 0)
 const showForm = computed(() => isEditing.value || !hasWorks.value)
 
@@ -104,8 +127,63 @@ const selectedItem = computed(
   () => workItems.value.find((it) => it.id === selectedId.value) || null,
 )
 
+function serializeEditableState(): string {
+  return JSON.stringify({
+    form: showForm.value ? formModel.value : null,
+    copy: isCopyMode.value ? copyTargetDt.value : null,
+    labor: laborRows.value,
+    expense: expenseRows.value,
+    pest: pesticideRows.value,
+    remR: removedResIds.value,
+    remE: removedExpIds.value,
+    replace: pesticideReplaceUseId.value,
+  })
+}
+
+function captureCleanState() {
+  cleanSnapshot.value = serializeEditableState()
+}
+
+function hasUnsavedRegisteredData(): boolean {
+  if (!cleanSnapshot.value) return false
+  return serializeEditableState() !== cleanSnapshot.value
+}
+
+function closeLeaveConfirm() {
+  leaveConfirmOpen.value = false
+  pendingLeaveTo = null
+}
+
+function proceedPendingLeave() {
+  const to = pendingLeaveTo
+  leaveConfirmOpen.value = false
+  pendingLeaveTo = null
+  if (!to) return
+  leaveGuardBypass.value = true
+  void router.push(to.fullPath || to)
+}
+
+async function onLeaveConfirmSave() {
+  const to = pendingLeaveTo
+  leaveConfirmOpen.value = false
+  pendingLeaveTo = null
+  const ok = await onSave('final', {
+    navigateTo: to || undefined,
+  })
+  // 실패 시 다이얼로그를 다시 열지 않음(토스트가 가려짐). 화면 유지.
+  if (!ok) return
+}
+
+function onLeaveConfirmDiscard() {
+  proceedPendingLeave()
+}
+
+function onLeaveConfirmStay() {
+  closeLeaveConfirm()
+}
+
 function applyWorksFromApi(works: WorkLogWorkItem[]) {
-  sourceWorks.value = [...(works || [])]
+  sourceWorks.value = sortWorksByStartTime(works || [])
   const items = sourceWorks.value.map((w, i) => mapWorkItemToTimeline(w, i))
   workItems.value = items
   if (items.length > 0) {
@@ -196,15 +274,36 @@ let cachedResources: WorkLogResourceDto[] = []
 let cachedExpenses: WorkLogExpenseDto[] = []
 let cachedPesticides: WorkLogPesticideDocDto[] = []
 
+const summaryCards = ref<DailyShellSummaryCard[]>([])
+
+function refreshSummaryCards() {
+  summaryCards.value = buildDailySummaryCards({
+    resources: cachedResources,
+    expenses: cachedExpenses,
+    pesticides: cachedPesticides,
+  })
+}
+
+function clearCopyMode() {
+  isCopyMode.value = false
+  copyTargetDt.value = ''
+}
+
 function onSelectTimeline(id: string) {
   selectedId.value = id
   activeTab.value = DAILY_TAB_WORK
   isEditing.value = false
+  clearCopyMode()
+  removedResIds.value = []
+  removedExpIds.value = []
   loadSideForWork(id, cachedResources, cachedExpenses, cachedPesticides)
+  captureCleanState()
 }
 
 function onAddWork() {
+  selectedId.value = null
   isEditing.value = true
+  clearCopyMode()
   activeTab.value = DAILY_TAB_WORK
   formModel.value = createEmptyWorkForm()
   laborRows.value = []
@@ -212,6 +311,26 @@ function onAddWork() {
   pesticideRows.value = []
   pesticideAppliedYn.value = 'N'
   pesticideUseId.value = null
+  pesticideReplaceUseId.value = null
+  removedResIds.value = []
+  removedExpIds.value = []
+  captureCleanState()
+}
+
+function onRemoveLaborRes(resId: number) {
+  const id = Number(resId)
+  if (!(id > 0)) return
+  if (!removedResIds.value.includes(id)) {
+    removedResIds.value = [...removedResIds.value, id]
+  }
+}
+
+function onRemoveExpenseExp(expId: number) {
+  const id = Number(expId)
+  if (!(id > 0)) return
+  if (!removedExpIds.value.includes(id)) {
+    removedExpIds.value = [...removedExpIds.value, id]
+  }
 }
 
 function onEditSelected() {
@@ -220,6 +339,7 @@ function onEditSelected() {
     onPending()
     return
   }
+  clearCopyMode()
   formModel.value = {
     workId: w.work_id,
     workMidCd: String(w.work_mid_cd || ''),
@@ -234,6 +354,42 @@ function onEditSelected() {
   }
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
+  captureCleanState()
+}
+
+/** 작업 기본정보만 복사 · 인력/경비/농약/사진 제외 · 작업일 변경 가능 */
+function onCopySelected() {
+  const w = sourceWorks.value.find((it) => it.work_id === selectedId.value)
+  if (!w) {
+    onPending()
+    return
+  }
+  formModel.value = {
+    workId: null,
+    workMidCd: String(w.work_mid_cd || ''),
+    workContent: String(w.work_mid_nm || ''),
+    workLocId: String(w.work_loc_id || ''),
+    siteNm: String(w.work_loc_nm || ''),
+    startTime: String(w.start_tm || '08:00').slice(0, 5),
+    endTime: String(w.end_tm || '09:00').slice(0, 5),
+    statusCd: String(w.status_cd || ''),
+    statusNm: String(w.status_nm || ''),
+    rmk: String(w.rmk || ''),
+  }
+  laborRows.value = []
+  expenseRows.value = []
+  pesticideRows.value = []
+  pesticideAppliedYn.value = 'N'
+  pesticideUseId.value = null
+  pesticideReplaceUseId.value = null
+  removedResIds.value = []
+  removedExpIds.value = []
+  selectedId.value = null
+  isCopyMode.value = true
+  copyTargetDt.value = todayIso()
+  isEditing.value = true
+  activeTab.value = DAILY_TAB_WORK
+  captureCleanState()
 }
 
 function showToast(msg: string) {
@@ -256,6 +412,18 @@ function goBack() {
   }
   void router.push({ name: 'work-log', query: q })
 }
+
+onBeforeRouteLeave((to) => {
+  if (leaveGuardBypass.value) {
+    leaveGuardBypass.value = false
+    return true
+  }
+  if (saving.value) return false
+  if (!hasUnsavedRegisteredData()) return true
+  pendingLeaveTo = to
+  leaveConfirmOpen.value = true
+  return false
+})
 
 function goToday() {
   const t = todayIso()
@@ -315,6 +483,11 @@ async function loadDaily() {
     workItems.value = []
     selectedId.value = null
     isEditing.value = true
+    cachedResources = []
+    cachedExpenses = []
+    cachedPesticides = []
+    refreshSummaryCards()
+    captureCleanState()
     return
   }
   dailyLoading.value = true
@@ -325,21 +498,29 @@ async function loadDaily() {
     cachedExpenses = daily.expenses || []
     cachedPesticides = daily.pesticides || []
     applyWorksFromApi(daily.works || [])
+    removedResIds.value = []
+    removedExpIds.value = []
     loadSideForWork(
       selectedId.value,
       cachedResources,
       cachedExpenses,
       cachedPesticides,
     )
+    refreshSummaryCards()
   } catch {
     master.value = null
     sourceWorks.value = []
     workItems.value = []
     selectedId.value = null
     isEditing.value = true
+    cachedResources = []
+    cachedExpenses = []
+    cachedPesticides = []
+    refreshSummaryCards()
     showToast(MSG_LOAD_DAILY_FAILED)
   } finally {
     dailyLoading.value = false
+    captureCleanState()
   }
 }
 
@@ -389,6 +570,35 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
   return valid
 }
 
+/** 서버 채번(YYYYMMDD-SEQ)과 맞추기 — 인력/경비/농약 연결 대상 */
+function resolveTargetWorkId(
+  payload: WorkLogWorkUpsertItem[],
+): string | null {
+  if (selectedId.value) return String(selectedId.value)
+  if (formModel.value.workId) return String(formModel.value.workId)
+  // 신규 폼(미채번): body.works 열거 인덱스와 동일한 임시 ID
+  if (showForm.value) {
+    const idx = payload.findIndex((w) => !w.work_id)
+    if (idx >= 0) {
+      const ymd = workDt.value.replace(/-/g, '')
+      if (/^\d{8}$/.test(ymd)) {
+        return `${ymd}-${String(idx + 1).padStart(2, '0')}`
+      }
+    }
+  }
+  const first = payload[0]?.work_id
+  return first ? String(first) : null
+}
+
+function sameWorkId(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (a == null && b == null) return true
+  if (a == null || b == null) return false
+  return String(a) === String(b)
+}
+
 async function persistMasterIfNeeded() {
   const m = master.value
   if (!m || !hasWorkLogWeather(m)) return
@@ -408,14 +618,20 @@ async function persistMasterIfNeeded() {
   })
 }
 
-/** 임시저장: 작업만 · 저장하기: 통합(Ledger+농약 확정) */
-async function onSave(mode: 'draft' | 'final') {
+/** 임시저장: 작업만 · 저장하기: 통합(Ledger+농약 확정) · 복사: 기본정보만 */
+async function onSave(
+  mode: 'draft' | 'final',
+  opts?: { navigateTo?: RouteLocationNormalized },
+): Promise<boolean> {
+  if (isCopyMode.value) {
+    return saveCopiedWork(mode, opts)
+  }
   if (isFuture.value) {
     showToast(MSG_FUTURE_WORK_LOG)
-    return
+    return false
   }
   const payload = buildWorksPayload()
-  if (!payload) return
+  if (!payload) return false
   saving.value = true
   try {
     if (mode === 'draft') {
@@ -423,14 +639,14 @@ async function onSave(mode: 'draft' | 'final') {
       await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
       await loadDaily()
       showToast(MSG_DRAFT_OK)
-      return
+      return true
     }
 
-    const laborWorkId =
-      selectedId.value ||
-      formModel.value.workId ||
-      payload[0]?.work_id ||
-      null
+    const laborWorkId = resolveTargetWorkId(payload)
+    const isTargetWork = (w: WorkLogWorkUpsertItem) =>
+      sameWorkId(w.work_id, laborWorkId) ||
+      (!!laborWorkId && !w.work_id && showForm.value)
+
     const integrated: WorkLogIntegratedSavePayload = {
       master: master.value
         ? {
@@ -448,30 +664,32 @@ async function onSave(mode: 'draft' | 'final') {
             work_rmk: master.value.work_rmk,
           }
         : null,
-      works: payload.map((w) => ({
-        ...w,
-        work_mid_nm:
-          workOptions.value.find((o) => o.value === w.work_mid_cd)?.label ||
-          null,
-        replace_pesticide_use_id:
-          w.work_id === laborWorkId || (!w.work_id && showForm.value)
+      works: payload.map((w) => {
+        const attachSide = isTargetWork(w)
+        return {
+          ...w,
+          // 신규 행에 서버와 동일한 work_id를 미리 넣어 SELECTED_WORK 검증·농약 연결 일치
+          work_id: w.work_id || (attachSide ? laborWorkId : w.work_id),
+          work_mid_nm:
+            workOptions.value.find((o) => o.value === w.work_mid_cd)?.label ||
+            null,
+          replace_pesticide_use_id: attachSide
             ? pesticideReplaceUseId.value
             : null,
-        pesticide_lines:
-          (w.work_id === laborWorkId || (!w.work_id && showForm.value)
+          pesticide_lines: attachSide
             ? pesticideRows.value
-            : []
-          )
-            .filter((p) => Number(p.itemId) > 0 && Number(p.useQty) > 0)
-            .map((p) => ({
-              item_id: Number(p.itemId),
-              use_qty: Number(p.useQty || 0),
-              item_nm_snapshot: p.itemNm || null,
-              spec_nm_snapshot: p.spec || null,
-              purpose_nm: p.purpose || null,
-              line_rmk: p.rmk || null,
-            })),
-      })),
+                .filter((p) => Number(p.itemId) > 0 && Number(p.useQty) > 0)
+                .map((p) => ({
+                  item_id: Number(p.itemId),
+                  use_qty: Number(p.useQty || 0),
+                  item_nm_snapshot: p.itemNm || null,
+                  spec_nm_snapshot: p.spec || null,
+                  purpose_nm: p.purpose || null,
+                  line_rmk: p.rmk || null,
+                }))
+            : [],
+        }
+      }),
       labor_work_id: laborWorkId,
       expense_work_id: laborWorkId,
       labor_rows: laborRows.value
@@ -507,9 +725,98 @@ async function onSave(mode: 'draft' | 'final') {
     pesticideReplaceUseId.value = null
     await loadDaily()
     showToast(MSG_SAVE_OK)
-    window.setTimeout(() => goBack(), 600)
-  } catch {
-    showToast(MSG_SAVE_FAILED)
+    if (opts?.navigateTo) {
+      leaveGuardBypass.value = true
+      void router.push(opts.navigateTo.fullPath || opts.navigateTo)
+    } else {
+      leaveGuardBypass.value = true
+      window.setTimeout(() => goBack(), 600)
+    }
+    return true
+  } catch (err) {
+    const msg =
+      err instanceof ApiClientError && err.message
+        ? err.message
+        : MSG_SAVE_FAILED
+    showToast(msg)
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
+function buildCopyDraftItem(): WorkLogWorkUpsertItem | null {
+  if (!formModel.value.workMidCd) {
+    showToast(MSG_WORK_CONTENT_REQUIRED)
+    return null
+  }
+  return {
+    work_id: null,
+    work_mid_cd: formModel.value.workMidCd,
+    work_loc_id: formModel.value.workLocId || null,
+    rmk: formModel.value.rmk || null,
+    start_tm: formModel.value.startTime || null,
+    end_tm: formModel.value.endTime || null,
+    status_cd: formModel.value.statusCd || null,
+  }
+}
+
+/** 복사 저장: 기본정보만 · 대상일 기존 작업 유지 후 신규 추가 */
+async function saveCopiedWork(
+  mode: 'draft' | 'final',
+  opts?: { navigateTo?: RouteLocationNormalized },
+): Promise<boolean> {
+  const targetDt = String(copyTargetDt.value || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDt)) {
+    showToast(MSG_COPY_DATE_INVALID)
+    return false
+  }
+  if (isFutureDate(targetDt)) {
+    showToast(MSG_FUTURE_WORK_LOG)
+    return false
+  }
+  const draft = buildCopyDraftItem()
+  if (!draft) return false
+
+  saving.value = true
+  try {
+    if (targetDt === workDt.value) {
+      const payload = buildWorksPayload()
+      if (!payload) return false
+      await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
+      clearCopyMode()
+      await loadDaily()
+      showToast(mode === 'draft' ? MSG_DRAFT_OK : MSG_COPY_OK)
+      if (opts?.navigateTo) {
+        leaveGuardBypass.value = true
+        void router.push(opts.navigateTo.fullPath || opts.navigateTo)
+      }
+      return true
+    }
+
+    const daily = await fetchWorkLogDaily(farmCd.value, targetDt)
+    const works = (daily.works || []).map(toUpsertItem)
+    works.push(draft)
+    await saveWorkLogWorks(farmCd.value, targetDt, { works })
+    clearCopyMode()
+    showToast(mode === 'draft' ? MSG_DRAFT_OK : MSG_COPY_OK)
+    leaveGuardBypass.value = true
+    if (opts?.navigateTo) {
+      void router.push(opts.navigateTo.fullPath || opts.navigateTo)
+    } else {
+      await router.push({
+        name: 'work-log-daily',
+        params: { workDt: targetDt },
+      })
+    }
+    return true
+  } catch (err) {
+    const msg =
+      err instanceof ApiClientError && err.message
+        ? err.message
+        : MSG_SAVE_FAILED
+    showToast(msg)
+    return false
   } finally {
     saving.value = false
   }
@@ -540,9 +847,18 @@ function onEditPesticide() {
     onPending()
     return
   }
+  // 수정 진입만 — API/재고/DB 변경 없음(저장 시에만 replace)
   pesticideReplaceUseId.value = pesticideUseId.value
   showToast('수정 모드: 저장 시 기존 사용이 교체됩니다.')
 }
+
+defineExpose({
+  onEditPesticide,
+  onCancelPesticide,
+  pesticideReplaceUseId,
+  pesticideUseId,
+  pesticideAppliedYn,
+})
 
 async function onDeleteSelected() {
   if (!selectedId.value) {
@@ -562,6 +878,7 @@ async function onDeleteSelected() {
 }
 
 watch(workDt, () => {
+  clearCopyMode()
   void loadDaily()
 })
 
@@ -598,15 +915,20 @@ onMounted(async () => {
         v-model:labor-rows="laborRows"
         v-model:expense-rows="expenseRows"
         v-model:pesticide-rows="pesticideRows"
+        v-model:copy-work-dt="copyTargetDt"
+        :copy-mode="isCopyMode"
         :work-options="workOptions"
         :site-options="siteOptions"
         :status-options="statusOptions"
         :work-dt="workDt"
+        :farm-cd="farmCd"
         :stock-applied-yn="pesticideAppliedYn"
         :editing-replace="!!pesticideReplaceUseId"
         @pending="onPending"
         @cancel-pesticide="onCancelPesticide"
         @edit-pesticide="onEditPesticide"
+        @remove-labor-res="onRemoveLaborRes"
+        @remove-expense-exp="onRemoveExpenseExp"
       />
       <WorkLogDailyWorkCard
         v-else-if="selectedItem"
@@ -616,23 +938,26 @@ onMounted(async () => {
         v-model:pesticide-rows="pesticideRows"
         :item="selectedItem"
         :work-dt="workDt"
+        :farm-cd="farmCd"
         :stock-applied-yn="pesticideAppliedYn"
         :editing-replace="!!pesticideReplaceUseId"
         @edit="onEditSelected"
-        @copy="onPending"
+        @copy="onCopySelected"
         @pending="onPending"
         @cancel-pesticide="onCancelPesticide"
         @edit-pesticide="onEditPesticide"
+        @remove-labor-res="onRemoveLaborRes"
+        @remove-expense-exp="onRemoveExpenseExp"
       />
 
       <WorkLogDailySummary
-        :cards="DAILY_SHELL_SUMMARY"
+        :cards="summaryCards"
         :empty="!hasWorks"
       />
 
       <WorkLogDailyExtras
         :work-dt="workDt"
-        :show-examples="hasWorks"
+        :farm-cd="farmCd"
       />
     </main>
 
@@ -689,6 +1014,51 @@ onMounted(async () => {
     </div>
 
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
+
+    <div
+      v-if="leaveConfirmOpen"
+      class="leave-confirm"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="MSG_UNSAVED_LEAVE_CONFIRM"
+    >
+      <button
+        type="button"
+        class="leave-confirm__backdrop"
+        aria-label="닫기"
+        @click="onLeaveConfirmStay"
+      />
+      <div class="leave-confirm__card">
+        <p class="leave-confirm__msg">{{ MSG_UNSAVED_LEAVE_CONFIRM }}</p>
+        <div class="leave-confirm__actions">
+          <button
+            type="button"
+            class="leave-confirm__btn leave-confirm__btn--primary"
+            :disabled="saving"
+            @click.stop="onLeaveConfirmSave"
+          >
+            {{ BTN_UNSAVED_LEAVE_SAVE }}
+          </button>
+          <button
+            type="button"
+            class="leave-confirm__btn leave-confirm__btn--secondary"
+            :disabled="saving"
+            @click.stop="onLeaveConfirmDiscard"
+          >
+            {{ BTN_UNSAVED_LEAVE_DISCARD }}
+          </button>
+          <button
+            type="button"
+            class="leave-confirm__btn leave-confirm__btn--ghost"
+            :disabled="saving"
+            @click.stop="onLeaveConfirmStay"
+          >
+            {{ BTN_UNSAVED_LEAVE_STAY }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <OdsBottomNav />
   </div>
 </template>
@@ -762,7 +1132,7 @@ onMounted(async () => {
   left: 50%;
   bottom: calc(150px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  z-index: 70;
+  z-index: 90;
   max-width: min(420px, calc(100vw - 32px));
   margin: 0;
   padding: var(--ods-space-12) var(--ods-space-16);
@@ -773,5 +1143,77 @@ onMounted(async () => {
   font-weight: 600;
   text-align: center;
   box-shadow: var(--ods-shadow-card);
+}
+
+.leave-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ods-space-16);
+}
+.leave-confirm__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
+  cursor: pointer;
+}
+.leave-confirm__card {
+  position: relative;
+  z-index: 1;
+  width: min(360px, 100%);
+  padding: var(--ods-space-20) var(--ods-space-16);
+  border-radius: var(--ods-radius-card, 16px);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-16);
+}
+.leave-confirm__msg {
+  margin: 0;
+  font: var(--ods-font-body-1);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  text-align: center;
+  line-height: 1.45;
+}
+.leave-confirm__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+.leave-confirm__btn {
+  width: 100%;
+  min-height: 48px;
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  cursor: pointer;
+}
+.leave-confirm__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.leave-confirm__btn--primary {
+  border: 0;
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
+}
+.leave-confirm__btn--secondary {
+  border: 1.5px solid var(--ods-color-primary);
+  background: var(--ods-color-white);
+  color: var(--ods-color-primary);
+}
+.leave-confirm__btn--ghost {
+  border: 0;
+  background: transparent;
+  color: var(--ods-color-gray-600, #6b7280);
+  font-weight: 600;
 }
 </style>

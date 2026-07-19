@@ -12,15 +12,22 @@ import type { WorkLogMasterDto } from '@/types/workLog'
 
 const props = defineProps<{
   master: WorkLogMasterDto | null
+  /** 월간: 캘린더 셀 기상 보완 */
+  weatherNmFallback?: string | null
+  weatherCdFallback?: string | null
   loading?: boolean
 }>()
 
+const weatherCd = computed(
+  () => props.master?.weather_cd || props.weatherCdFallback || null,
+)
 const weatherNm = computed(() =>
-  displayWeatherNm(props.master?.weather_cd, props.master?.weather_nm),
+  displayWeatherNm(
+    props.master?.weather_cd || props.weatherCdFallback,
+    props.master?.weather_nm || props.weatherNmFallback,
+  ),
 )
-const iconSrc = computed(() =>
-  weatherIconSrc(props.master?.weather_cd, weatherNm.value),
-)
+const iconSrc = computed(() => weatherIconSrc(weatherCd.value, weatherNm.value))
 
 function fmtTemp(value: number | null | undefined): string {
   if (value == null) return '—'

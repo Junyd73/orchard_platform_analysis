@@ -108,6 +108,8 @@ class ObservationSmartSprayGuideApiService:
                 if _s(it.get("last_used_date"))
                 else None
             ),
+            spec_nm=_s(it.get("spec_nm")),
+            dilution_unit=_s(it.get("dilution_unit")),
             dilution=_s(it.get("dilution")),
             phi=_s(it.get("phi")),
             max_use_count=_s(it.get("max_use_count")),

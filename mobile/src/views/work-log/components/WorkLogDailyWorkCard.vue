@@ -17,6 +17,7 @@ import {
   DAILY_TAB_WORK,
   DAILY_WORK_TABS,
   formatDailyTimeRange,
+  isPesticideWork,
   MSG_FERTILIZER_PENDING,
   type DailyShellExpenseRow,
   type DailyShellLaborRow,
@@ -28,6 +29,7 @@ import {
 const props = defineProps<{
   item: DailyTimelineItem
   workDt?: string
+  farmCd: string
   stockAppliedYn?: string
   editingReplace?: boolean
 }>()
@@ -45,9 +47,14 @@ const emit = defineEmits<{
   pending: []
   cancelPesticide: []
   editPesticide: []
+  removeLaborRes: [resId: number]
+  removeExpenseExp: [expId: number]
 }>()
 
 const timeRange = computed(() => formatDailyTimeRange(props.item))
+const isPestWork = computed(() =>
+  isPesticideWork(props.item.workMidCd || '', props.item.title),
+)
 
 function selectTab(key: DailyWorkTabKey) {
   activeTab.value = key
@@ -74,10 +81,16 @@ function onPending() {
           </span>
         </div>
       </div>
-      <button type="button" class="card__edit" @click="emit('edit')">
-        <img :src="iconEdit" alt="" />
-        수정
-      </button>
+      <div class="card__actions">
+        <button type="button" class="card__copy" @click="emit('copy')">
+          <img :src="iconCopy" alt="" />
+          작업 복사
+        </button>
+        <button type="button" class="card__edit" @click="emit('edit')">
+          <img :src="iconEdit" alt="" />
+          수정
+        </button>
+      </div>
     </header>
 
     <div class="card__tabs" role="tablist" aria-label="작업 상세 탭">
@@ -120,28 +133,28 @@ function onPending() {
             <dd>{{ item.rmk || '—' }}</dd>
           </div>
         </dl>
-        <div class="card__foot">
-          <button type="button" class="card__copy" @click="emit('copy')">
-            <img :src="iconCopy" alt="" />
-            작업 복사
-          </button>
-        </div>
       </template>
 
       <WorkLogDailyLaborPanel
         v-else-if="activeTab === DAILY_TAB_LABOR"
         v-model="laborRows"
+        :farm-cd="farmCd"
         @pending="onPending"
+        @remove-saved="(id) => emit('removeLaborRes', id)"
       />
       <WorkLogDailyExpensePanel
         v-else-if="activeTab === DAILY_TAB_EXPENSE"
         v-model="expenseRows"
         :work-dt="workDt"
+        :farm-cd="farmCd"
         @pending="onPending"
+        @remove-saved="(id) => emit('removeExpenseExp', id)"
       />
       <WorkLogDailyPesticidePanel
         v-else-if="activeTab === DAILY_TAB_PESTICIDE"
         v-model="pesticideRows"
+        :farm-cd="farmCd"
+        :is-pesticide-work="isPestWork"
         :stock-applied-yn="stockAppliedYn"
         :editing-replace="editingReplace"
         @pending="onPending"
@@ -229,16 +242,24 @@ function onPending() {
   opacity: 0.75;
 }
 
-.card__edit {
+.card__actions {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+}
+
+.card__edit {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   margin: 0;
   padding: 8px 12px;
-  border: 1px solid var(--ods-color-border);
+  border: none;
   border-radius: var(--ods-radius-button);
-  background: var(--ods-color-white);
+  background: transparent;
   font: var(--ods-font-body-2);
   font-weight: 700;
   color: var(--ods-color-primary);
@@ -251,12 +272,44 @@ function onPending() {
   height: 14px;
 }
 
+.card__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--ods-radius-button);
+  background: transparent;
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-primary);
+  cursor: pointer;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.card__copy img {
+  width: 14px;
+  height: 14px;
+}
+
 .card__tabs {
   display: flex;
   gap: 0;
   width: 100%;
-  overflow-x: visible;
+  overflow-x: hidden;
   border-bottom: 1px solid var(--ods-color-border);
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .card__tabs::-webkit-scrollbar {
@@ -335,31 +388,5 @@ function onPending() {
   color: var(--ods-color-text-secondary);
   background: var(--ods-color-bg-muted);
   border-radius: var(--ods-radius-button);
-}
-
-.card__foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--ods-space-8);
-}
-
-.card__copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0;
-  padding: 8px 12px;
-  border: none;
-  background: transparent;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-primary);
-  cursor: pointer;
-  min-height: 36px;
-}
-
-.card__copy img {
-  width: 14px;
-  height: 14px;
 }
 </style>

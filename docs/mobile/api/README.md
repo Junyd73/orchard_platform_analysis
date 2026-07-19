@@ -1,5 +1,7 @@
 # Mobile API Notes
 
+> 문서 버전: **v1.2.2** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
+
 ## 사용 중
 
 | 메서드 | 경로 | 용도 |
@@ -75,7 +77,7 @@
 - 과실: `target_type_cd = OB010200` (관찰대상 열매, PC `OBS_TARGET_FRUIT_CD`)
 - AI 대기: `UPPER(TRIM(COALESCE(ai_status,'NONE'))) IN (NONE, PENDING, FAILED, REVIEW_REQUIRED)`
 
-### 영농일지 MVP (SCR-010 / SCR-011)
+### 영농일지 (SCR-010 / SCR-011) — ODS v1.2.2
 
 | 메서드 | 경로 | 용도 |
 |--------|------|------|
@@ -84,12 +86,18 @@
 | PUT | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/master` | 기상·이슈 UPSERT |
 | PUT | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/works` | 작업행 일괄 저장 |
 | DELETE | `/api/v1/farms/{farm_cd}/work-logs/works/{work_id}` | 작업 삭제 |
+| POST | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/weather/fetch` | 날씨 조회(캐시·외부 API). 마스터 자동 저장 없음 |
 
 - `work_dt` · 미래일 저장 불가 (오늘 이하)
 - `work_id` = `YYYYMMDD-NN` (PC와 동일)
-- MVP: 인력·경비·전표·농약 미포함. 자식 행이 있으면 작업 삭제 거부
+- **월간 집계 (1차):**
+  - `resource_count`: 일/월 **고유** `emp_cd` (동일인 다작업=1명)
+  - `labor_hour_sum`: `man_hour` 합산
+  - `pesticide_count` / `fertilizer_count`: 작업 mid `WK010200` / `WK010800` 건수
+- **일간 MVP:** 인력·경비·전표 CRUD 미포함. 자식 행이 있으면 작업 삭제 거부
 
 ## 향후 (미구현)
 
-GPS 고도화·영농일지 Phase 2(인력/경비/날씨가져오기) 등은 후속. 모바일 번들에 API 키 금지.  
-관찰 완료·AI·PSIS·과실 추적 API는 Project A에서 사용 중(위 표·절 참고).
+GPS 고도화·영농일지 Phase 2(일간 인력/경비 CRUD·전표·시간별 예보) 등은 후속. 모바일 번들에 API 키 금지.  
+관찰 완료·AI·PSIS·과실 추적 API는 Project A에서 사용 중(위 표·절 참고).  
+날씨 자동조회(`weather/fetch`)는 SCR-010/011에서 **구현됨**.

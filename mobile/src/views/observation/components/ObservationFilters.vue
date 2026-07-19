@@ -8,6 +8,8 @@ const keyword = defineModel<string>('keyword', { default: '' })
 const sort = defineModel<'obs_dt_desc' | 'obs_dt_asc'>('sort', {
   default: 'obs_dt_desc',
 })
+const dateFrom = defineModel<string>('dateFrom', { default: '' })
+const dateTo = defineModel<string>('dateTo', { default: '' })
 
 defineProps<{
   sites: SiteOption[]
@@ -16,15 +18,20 @@ defineProps<{
 
 const emit = defineEmits<{
   apply: []
+  'quick-range': [days: number]
 }>()
 
 function onSearch() {
   emit('apply')
 }
+
+function onQuick(days: number) {
+  emit('quick-range', days)
+}
 </script>
 
 <template>
-  <section class="filters" aria-label="목록 필터">
+  <section class="filters" aria-label="관찰 조회 필터">
     <div class="filters__row">
       <label class="field field--half">
         <span class="field__label">필지</span>
@@ -54,6 +61,48 @@ function onSearch() {
       </label>
     </div>
 
+    <div class="filters__dates">
+      <label class="field field--grow">
+        <span class="field__label">기간</span>
+        <div class="dates">
+          <input
+            v-model="dateFrom"
+            class="select select--date"
+            type="date"
+            :disabled="searching"
+            @change="onSearch"
+          >
+          <span class="dates__tilde">~</span>
+          <input
+            v-model="dateTo"
+            class="select select--date"
+            type="date"
+            :disabled="searching"
+            @change="onSearch"
+          >
+        </div>
+      </label>
+    </div>
+
+    <div class="quick" role="group" aria-label="빠른 기간">
+      <button
+        type="button"
+        class="quick__btn"
+        :disabled="searching"
+        @click="onQuick(3)"
+      >
+        최근 3일
+      </button>
+      <button
+        type="button"
+        class="quick__btn"
+        :disabled="searching"
+        @click="onQuick(7)"
+      >
+        최근 1주
+      </button>
+    </div>
+
     <div class="search-row">
       <OdsInput
         v-model="keyword"
@@ -77,7 +126,7 @@ function onSearch() {
 
 <style scoped>
 .filters {
-  margin: var(--ods-space-12) 0 var(--ods-space-16);
+  margin: 0;
   padding: var(--ods-space-12);
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-border);
@@ -85,17 +134,24 @@ function onSearch() {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-12);
+  box-shadow: var(--ods-shadow-card);
 }
 .filters__row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--ods-space-8);
 }
+.filters__dates {
+  display: flex;
+}
 .field {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-4);
   min-width: 0;
+}
+.field--grow {
+  flex: 1;
 }
 .field__label {
   font: var(--ods-font-caption);
@@ -109,6 +165,40 @@ function onSearch() {
   font: var(--ods-font-body-2);
   background: var(--ods-color-white);
   color: var(--ods-color-text);
+}
+.select--date {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--ods-space-8);
+}
+.dates {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+}
+.dates__tilde {
+  flex-shrink: 0;
+  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-caption);
+}
+.quick {
+  display: flex;
+  gap: var(--ods-space-8);
+}
+.quick__btn {
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-badge);
+  background: var(--ods-color-bg-muted);
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  color: var(--ods-color-text);
+  cursor: pointer;
+}
+.quick__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .search-row {
   display: grid;
@@ -132,6 +222,7 @@ function onSearch() {
   color: var(--ods-color-white);
   font: var(--ods-font-body-1);
   font-weight: 600;
+  cursor: pointer;
 }
 .search-btn:disabled {
   background: var(--ods-color-gray-300);

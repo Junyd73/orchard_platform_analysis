@@ -274,3 +274,26 @@ class WorkLogWeatherFetchResponse(BaseModel):
     elapsed: float = 0.0
     message: str = "날씨 조회가 완료되었습니다."
     master: WorkLogMasterDto | None = None
+
+
+# --- SCR-011 입력 피커 마스터 (PC 콤보와 동일 소스) ---
+
+
+class WorkLogPartnerOption(BaseModel):
+    pt_id: str
+    pt_nm: str
+    base_price: float | None = None
+    worker_type_cd: str | None = None
+
+
+class WorkLogAccountCodeOption(BaseModel):
+    acct_cd: str
+    acct_nm: str
+    acct_level: int | None = None
+
+
+class WorkLogPesticideItemOption(BaseModel):
+    item_id: int
+    item_nm: str
+    spec_nm: str | None = None
+    qty_piece: int = 0

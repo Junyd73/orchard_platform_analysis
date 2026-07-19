@@ -2,7 +2,7 @@
 """관찰 AI 분석 Application Service — UI(PyQt)·REST 공통 유스케이스.
 
 ObservationAiWorker / FastAPI 가 동일하게 호출한다.
-OpenAI Provider·ObservationAiService·Stage3 저장 방식은 변경하지 않는다.
+분석 시 관찰일·작물·생육·절기·기상 컨텍스트를 내부에서 조립해 Provider에 전달한다.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from core.ai.observation_ai_context import build_observation_ai_context
 from core.ai.observation_ai_schema import PROMPT_VERSION
 from core.ai.observation_ai_service import ObservationAiService
 from core.observation_ai_constants import (
@@ -107,10 +108,18 @@ class ObservationAiApplicationService:
             analyzing_set = True
 
             _progress("사진 안전 처리·AI 분석 중…")
+            ctx = build_observation_ai_context(
+                db,
+                farm_cd=farm,
+                obs_id=oid,
+                crop_hint=str(crop_hint or ""),
+            )
+            resolved_crop = str(ctx.get("crop_hint") or crop_hint or "").strip()
             svc = ObservationAiService(provider=self._provider)
             resp = svc.analyze_photo_paths(
                 list(photo_paths or []),
-                crop_hint=str(crop_hint or ""),
+                crop_hint=resolved_crop,
+                extra_note=str(ctx.get("prompt_text") or ""),
             )
             if not resp.ok:
                 err_code, err_msg = sanitize_stored_error(

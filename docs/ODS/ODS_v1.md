@@ -1,9 +1,10 @@
 # Orchard Design System (ODS) v1.2
 
 - 공식 명칭: **Orchard Design System (ODS)**
-- 문서: `ODS_v1.md` (Active: **v1.2**, 포함: v1.1 · v1.1.1 · v1.2)
+- 문서: `ODS_v1.md` (Active: **v1.2.2**, 포함: v1.1 · v1.1.1 · v1.2 · v1.2.1 · v1.2.2)
 - 상태: **Active**
 - 기준일: 2026-07-18
+- 버전 SSOT: `mobile/docs/VERSIONS.md`
 - 시각·토큰 원본: `ODS_v1.0.pdf` (**PDF는 수정하지 않음**)
 - 화면 Addendum:
   - `ODS_v1.0.1_SCR-004_Addendum.md` (상세 승인)
@@ -17,6 +18,8 @@
 | v1.1 | 2026-07-17 | Sticky AppBar Glass→Surface · 공통 AppBar · Floating Bottom Action |
 | **v1.1.1** | 2026-07-18 | 공통 셸 정렬(AppBar in `.content`) · BottomNav in `MobileLayout` · 관찰일자 오늘 이하 · HEIC 변환 메모 |
 | **v1.2** | 2026-07-18 | 과실 추적(1차/2차+) · Wizard 4단계 · N차 사진 · cascade 삭제 · 슬라이드 뷰어 |
+| **v1.2.1** | 2026-07-18 | SCR-010 영농일지 월간 시안4 확정 (흰 페이지 · 계절 Hero · KPI 가로) |
+| **v1.2.2** | 2026-07-18 | SCR-010 월간 **1차 마감**: 고유 인원+`man_hour` 표시 · 기상 자동조회 · Hero「오늘」KPI(표시 월과 무관) · 농약/비료 건수 |
 
 ---
 
@@ -70,6 +73,7 @@ AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한
 
 - AppBar는 페이지 `.content`(또는 `MobileLayout`의 `.content`) **안** 첫 자식으로 둔다.
 - 가로 full-bleed: `margin-inline: calc(-1 * var(--ods-page-padding-x))` 로 content 패딩을 상쇄한다.
+- **아이콘 시각 정렬:** AppBar 좌·우 아이콘(22px)은 카드 좌·우 여백(`--ods-page-padding-x`)과 맞춘다. 터치영역(44px)은 안쪽으로만 확장한다.
 - `.page`/`.shell` 직속( content 밖 )에 두면 음수 마진이 어긋나므로 **금지**.
 - content 상단 패딩은 상세와 동일하게 `var(--ods-space-12)` 권장(목록·Home·MobileLayout 정합).
 
@@ -119,6 +123,36 @@ AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한
 - 우측 기능 연결 일러스트 유지
 - 관찰번호를 주 제목으로 사용 금지
 - AppBar Glass 전환과 시각적으로 이어지되, **Hero 자체 디자인은 변경하지 않음**
+
+### 5.1 SCR-010 영농일지 월간 Hero (예외 · 시안4 · v1.2.2)
+
+상세 Hero와 역할이 다르다. 화면 명세: `docs/screens/SCR-010.md` (1차 마감)
+
+| 항목 | 규칙 |
+|------|------|
+| 페이지 바탕 | **흰색** (`ods-color-bg`). AppBar+Hero 공유 Green Layer **금지** |
+| Hero 형태 | 둥근 카드 · 계절 과수원 webp · 하단만 진녹 반투명 밴드 |
+| 계절 | 봄 3–5 · 여름 6–8 · 가을 9–11 · 겨울 12–2 |
+| KPI | `[원형 아이콘] 라벨/숫자` 가로 3열 · 구분선 · **서브 문구 없음** |
+| 투입 인력 | `N명 · Nh` (동일인 다작업=1명, `man_hour` 합). **오늘** 기준 · 표시 월과 무관 |
+| 금액 | 전체 숫자(`1,250,000원`) · `만원` 축약 금지 · 세 KPI 숫자 동일 크기 |
+| 인사 | 시간대별 2줄 (`workLogConstants` `heroGreetingForHour`) |
+| Weather | Hero와 **겹침 없음** (간격 유지) · DB 없으면 자동 조회(버튼 없음) |
+| 시안 | `docs/ODS/assets/영농일지-월간시안4.png` |
+
+### 5.2 SCR-001 생육관찰 메인 Hero 일러스트 다양화 (확정 · 2026-07-19)
+
+레이아웃은 영농일지와 동일 골격을 유지하고, **사진·AI 포인트·계절 톤·날씨 사진만** 바꾼다.  
+상세: `docs/ODS/ODS_v1.3_SCR-001_Hero_Illustration.md`
+
+| 항목 | 규칙 |
+|------|------|
+| 레이아웃 | **고정** (날짜 · 카피 · AI 안내 · 우측 이미지 · 하단 KPI) |
+| 계절 | 4종 (연두/진녹/골드/블루그레이) |
+| AI 테마 | 6종 (잎·과실·병해충·새순·꽃·봉지) — **우측 이미지만** |
+| 날씨 | 4종 (맑음·흐림·비·안개) — **사진만** |
+| KPI | **5칸** 고정 · 영농일지와 동일 높이 |
+| 조합 | \(4 \times 6 \times 4 = 96\) |
 
 ## 6. Card / Token
 
@@ -193,7 +227,9 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 |------|------|
 | ODS v1.1 ~ v1.1.1 | Home, 관찰 목록·상세·등록/수정·사진, 영농일지·주문 (공통 셸) |
 | ODS v1.2 | 과실 생육관찰(SCR-003) · 상세 과실 분기(SCR-004) · 열매 측정 · 추적 |
-| 영농일지 MVP | SCR-010 월간 · SCR-011 일간 (기상·이슈·작업) |
+| ODS v1.2.1 | SCR-010 영농일지 월간 (시안4 Hero 예외) |
+| **ODS v1.2.2** | **SCR-010 월간 1차 마감** (인원·시간·기상 자동·집계 freeze) |
+| 영농일지 | SCR-010 월간(Approved · 1차) · SCR-011 일간 (**UI 확정** · 기능 구현 중) |
 
 등록·사진·열매 Wizard도 공통 AppBar + Floating Bottom Action을 따른다.
 
@@ -203,6 +239,8 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 |------|------|
 | 공통 아이콘 | `mobile/src/assets/ods/common/` |
 | SCR-004 자산 | `mobile/src/assets/ods/scr004/` |
+| SCR-010 Hero | `mobile/src/assets/images/work-log/hero-*.png` |
+| SCR-010 시안 | `mobile/docs/ODS/assets/영농일지-월간시안4.png` |
 | ODS Token | `mobile/src/design-system/tokens.css` |
 | ODS Components | `mobile/src/components/ods/` |
 | 시각 원본 PDF | `mobile/docs/ODS/ODS_v1.0.pdf` |

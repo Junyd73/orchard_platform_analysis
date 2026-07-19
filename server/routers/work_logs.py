@@ -7,13 +7,16 @@ from fastapi import APIRouter, Depends, Header, Query
 
 from app.api.dependencies import get_work_log_service
 from app.schemas.work_log import (
+    WorkLogAccountCodeOption,
     WorkLogDailyResponse,
     WorkLogIntegratedSaveRequest,
     WorkLogMasterUpsertRequest,
     WorkLogMonthlyResponse,
+    WorkLogPartnerOption,
     WorkLogPesticideCancelAllRequest,
     WorkLogPesticideCancelRequest,
     WorkLogPesticideCancelResponse,
+    WorkLogPesticideItemOption,
     WorkLogPesticideReplaceRequest,
     WorkLogSaveResponse,
     WorkLogWeatherFetchRequest,
@@ -32,6 +35,38 @@ def _user_header(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ) -> str | None:
     return x_user_id
+
+
+@router.get("/masters/partners", response_model=list[WorkLogPartnerOption])
+def list_work_log_partners(
+    farm_cd: str,
+    service: WorkLogService = Depends(get_work_log_service),
+) -> list[WorkLogPartnerOption]:
+    """인력 직원 선택 — PC m_partner 콤보와 동일."""
+    return service.list_partners(farm_cd)
+
+
+@router.get("/masters/account-codes", response_model=list[WorkLogAccountCodeOption])
+def list_work_log_account_codes(
+    farm_cd: str,
+    prefix: str = Query(..., min_length=1, description="AS0101|EX 등"),
+    level: int | None = Query(None, ge=1, le=9),
+    service: WorkLogService = Depends(get_work_log_service),
+) -> list[WorkLogAccountCodeOption]:
+    """지급방식·지출내용 — PC m_account_code 콤보와 동일."""
+    return service.list_account_codes(farm_cd, prefix=prefix, level=level)
+
+
+@router.get(
+    "/masters/pesticide-items",
+    response_model=list[WorkLogPesticideItemOption],
+)
+def list_work_log_pesticide_items(
+    farm_cd: str,
+    service: WorkLogService = Depends(get_work_log_service),
+) -> list[WorkLogPesticideItemOption]:
+    """농약 품목 — PC list_items 와 동일."""
+    return service.list_pesticide_items(farm_cd)
 
 
 @router.get("/monthly", response_model=WorkLogMonthlyResponse)

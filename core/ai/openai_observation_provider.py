@@ -22,6 +22,7 @@ ENV_API_KEY = "OPENAI_API_KEY"
 ENV_MODEL = "ORCHARD_OPENAI_MODEL"
 ENV_TIMEOUT = "ORCHARD_AI_TIMEOUT_SEC"
 DEFAULT_MODEL = "gpt-5.6"
+# 품질 우선 기본 대기 시간(초). ORCHARD_AI_TIMEOUT_SEC 로 덮어쓸 수 있음.
 DEFAULT_TIMEOUT_SEC = 60
 
 
@@ -113,25 +114,31 @@ class OpenAIObservationProvider(ObservationAiProvider):
                 model_nm=self._model,
             )
 
+        user_text = (
+            "과수 관찰 사진을 분석해 병·해충·생리장해 후보를 JSON으로 제공하세요. "
+            "약제명·희석배수·살포방법은 절대 포함하지 마세요."
+        )
+        crop = (request.crop_hint or "").strip()
+        if crop:
+            user_text += f" 작물 힌트: {crop}."
+        note = (request.extra_note or "").strip()
+        if note:
+            user_text += "\n" + note
+
         user_parts: list[dict[str, Any]] = [
             {
                 "type": "input_text",
-                "text": (
-                    "과수 관찰 사진을 분석해 병·해충·생리장해 후보를 JSON으로 제공하세요. "
-                    "약제명·희석배수·살포방법은 절대 포함하지 마세요."
-                    + (
-                        f" 작물 힌트: {request.crop_hint}."
-                        if (request.crop_hint or "").strip()
-                        else ""
-                    )
-                ),
+                "text": user_text,
             }
         ]
         for img in images:
             url = str(img.get("data_url") or "").strip()
             if not url:
                 continue
-            user_parts.append({"type": "input_image", "image_url": url})
+            # detail=high: 품질 우선 (타임아웃 60초 기준)
+            user_parts.append(
+                {"type": "input_image", "image_url": url, "detail": "high"}
+            )
 
         client = OpenAI(api_key=self._api_key, timeout=_timeout_sec())
         try:

@@ -2,14 +2,15 @@
 
 | 문서 | 역할 |
 |------|------|
+| [VERSIONS.md](./VERSIONS.md) | **버전 SSOT** — Active ODS · SCR · 문서 버전 |
 | [DEV_SERVER.md](./DEV_SERVER.md) | 통합 개발 서버·QR·휴대폰 테스트 |
 | [../PROJECT_MASTER.md](../PROJECT_MASTER.md) | **최상위** — 작업 전 필수 |
 | [DEVELOPMENT_RULE.md](./DEVELOPMENT_RULE.md) | 공식 개발 기준·절차·보고 |
-| [ODS/ODS_v1.md](./ODS/ODS_v1.md) | **Orchard Design System (ODS) v1.2** — 활성 디자인 정책 |
+| [ODS/ODS_v1.md](./ODS/ODS_v1.md) | **Orchard Design System (ODS) v1.2.2** — 활성 디자인 정책 |
 | [ODS/ODS_v1.0.pdf](./ODS/ODS_v1.0.pdf) | ODS 시각·토큰 원본 PDF |
 | [ODS/ODS_v1.2_SCR-003_Fruit_Track.md](./ODS/ODS_v1.2_SCR-003_Fruit_Track.md) | 과실 추적·Wizard Addendum |
 | [architecture/overview.md](./architecture/overview.md) | 폴더·레이어 아키텍처 |
-| [screens/](./screens/) | SCR-001~004 화면 명세 |
+| [screens/](./screens/) | SCR-001~004 · SCR-010~011 화면 명세 |
 | [api/](./api/) | 모바일 API 계약 메모 |
 | [../design-system/](../design-system/) | ODS 토큰·컴포넌트 가이드 |
 

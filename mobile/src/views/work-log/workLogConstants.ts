@@ -13,10 +13,10 @@ import iconTabExpense from '@/assets/ods/work-log/icon-tab-expense.svg'
 import iconTabPesticide from '@/assets/ods/work-log/icon-tab-pesticide.svg'
 import iconTabFertilizer from '@/assets/ods/work-log/icon-tab-fertilizer.svg'
 import iconTabPhoto from '@/assets/ods/work-log/icon-tab-photo.svg'
-import heroSpring from '@/assets/images/work-log/hero-spring.webp'
-import heroSummer from '@/assets/images/work-log/hero-summer.webp'
-import heroAutumn from '@/assets/images/work-log/hero-autumn.webp'
-import heroWinter from '@/assets/images/work-log/hero-winter.webp'
+import heroSpring from '@/assets/images/work-log/hero-spring.png'
+import heroSummer from '@/assets/images/work-log/hero-summer.png'
+import heroAutumn from '@/assets/images/work-log/hero-autumn.png'
+import heroWinter from '@/assets/images/work-log/hero-winter.png'
 
 export const WORK_STATUS_PARENT_CD = 'WO01'
 export const WORK_TYPE_PARENT_CD = 'WK01'
@@ -29,6 +29,11 @@ export const WORK_MID_CD_FERTILIZER = 'WK010800'
 
 export const MSG_FUTURE_WORK_LOG = '영농일지는 오늘까지만 작성할 수 있습니다.'
 export const MSG_DETAIL_PENDING = '준비 중입니다.'
+export const MSG_COPY_HINT =
+  '인력·경비·농약·비료·사진은 복사되지 않습니다. 작업 기본정보만 저장됩니다.'
+export const MSG_COPY_OK = '작업이 복사되었습니다.'
+export const MSG_COPY_DATE_INVALID = '작업일을 확인해 주세요.'
+export const LABEL_COPY_WORK_DT = '작업일'
 export const MSG_LOAD_MONTH_FAILED = '월간 영농일지를 불러오지 못했습니다.'
 export const MSG_LOAD_DAILY_FAILED = '일간 영농일지를 불러오지 못했습니다.'
 export const MSG_WEATHER_FETCH_FAILED = '날씨를 가져오지 못했습니다.'
@@ -36,6 +41,12 @@ export const MSG_SAVE_OK = '저장되었습니다.'
 export const MSG_DRAFT_OK = '임시 저장되었습니다.'
 export const MSG_WORK_CONTENT_REQUIRED = '작업내용을 선택해 주세요.'
 export const MSG_SAVE_FAILED = '저장에 실패했습니다.'
+/** 일간 화면 이탈 시 미저장 등록 데이터 확인 */
+export const MSG_UNSAVED_LEAVE_CONFIRM =
+  '등록된 데이터가 있습니다. 저장하시겠습니까?'
+export const BTN_UNSAVED_LEAVE_SAVE = '저장'
+export const BTN_UNSAVED_LEAVE_DISCARD = '저장 안 함'
+export const BTN_UNSAVED_LEAVE_STAY = '취소'
 
 /** master/캐시에 표시 가능한 기상 값이 있는지 */
 export function hasWorkLogWeather(
@@ -331,11 +342,16 @@ export function isRestDay(iso: string): boolean {
 
 export type CalendarLine = { kind: CalendarLineKind; text: string }
 
-function isPesticideWork(midCd: string, midNm: string): boolean {
+/** 방제/약제살포 작업 여부 (PC is_pesticide_work와 동일 기준) */
+export function isPesticideWork(midCd: string, midNm: string): boolean {
   const cd = String(midCd || '').trim().toUpperCase()
   if (cd === WORK_MID_CD_PESTICIDE) return true
-  const nm = String(midNm || '')
-  return nm.includes('방제') || nm.includes('약제살포')
+  const nm = String(midNm || '').trim()
+  if (nm.includes('방제')) return true
+  if (nm.includes('약제살포') || (nm.includes('약제') && nm.includes('살포'))) {
+    return true
+  }
+  return false
 }
 
 function isFertilizerWork(midCd: string, midNm: string): boolean {
@@ -469,6 +485,12 @@ export const MSG_TIMELINE_EMPTY =
   '등록된 작업이 없습니다.\n새로운 작업을 기록해 주세요.'
 export const MSG_SUMMARY_EMPTY = '등록된 작업이 없어 요약할 내용이 없습니다.'
 export const MSG_OBS_EMPTY = '이 날짜에 등록된 생육관찰이 없습니다.'
+export const MSG_OBS_LOADING = '생육관찰을 불러오는 중…'
+export const MSG_OBS_PHOTO_EMPTY = '등록된 사진이 없습니다.'
+export const MSG_OBS_TITLE_EMPTY = '(제목 없음)'
+export const MSG_OBS_LOCATION_FALLBACK = '필지'
+/** 일간 생육관찰 사진 미리보기 칸 수 */
+export const DAILY_OBS_PHOTO_PREVIEW_MAX = 4
 export const MSG_WORK_FORM_TIP =
   '작업내용만 선택해도 타임라인에 추가할 수 있습니다.'
 export const MSG_FERTILIZER_PENDING =
@@ -478,11 +500,27 @@ export const MSG_PESTICIDE_HINT =
 export const MSG_LABOR_EMPTY = '등록된 인력이 없습니다.'
 export const MSG_EXPENSE_EMPTY = '등록된 경비가 없습니다.'
 export const MSG_PESTICIDE_EMPTY = '등록된 사용 농약이 없습니다.'
+/** PC와 동일: 방제/약제살포가 아닐 때 */
+export const MSG_PESTICIDE_NOT_TARGET =
+  '농약등록은 방제/약제살포 작업에서 가능합니다.'
+export const MSG_LABOR_REMOVE_CONFIRM = '등록된 인력을 삭제하시겠습니까?'
+export const MSG_LABOR_REMOVE_PAID_CONFIRM =
+  '지급된 인력입니다. 삭제 시 관련 전표가 역분개됩니다. 계속하시겠습니까?'
+export const MSG_EXPENSE_REMOVE_CONFIRM = '등록된 경비를 삭제하시겠습니까?'
+export const MSG_EXPENSE_REMOVE_PAID_CONFIRM =
+  '지불된 경비입니다. 삭제 시 관련 전표가 역분개됩니다. 계속하시겠습니까?'
 export const MSG_WORK_PHOTO_EMPTY = '작업 결과 사진이 없습니다.'
 export const MSG_WORK_PHOTO_LIMIT = `최대 ${WORK_PHOTO_MAX_COUNT}장까지 등록할 수 있습니다.`
 
 export const PLACEHOLDER_SELECT = '선택하세요'
 export const PLACEHOLDER_WORK_RMK = '비고'
+
+/** PC 지급/지불방식 계정 prefix·level */
+export const PAY_METHOD_ACCT_PREFIX = 'AS0101'
+export const PAY_METHOD_ACCT_LEVEL = 4
+/** PC 지출내용 계정 */
+export const EXPENSE_ACCT_PREFIX = 'EX'
+export const EXPENSE_ACCT_LEVEL = 4
 
 export type DailyWorkFormModel = {
   workId: string | null
@@ -607,6 +645,8 @@ export type DailyTimelineTone = 'mint' | 'forest' | 'gold' | 'violet'
 
 export type DailyTimelineItem = {
   id: string
+  /** WK01 작업 중분류 코드 */
+  workMidCd?: string
   title: string
   time: string
   endTime: string
@@ -684,100 +724,128 @@ export type DailyShellSummaryCard = {
   lines: readonly DailyShellSummaryLine[]
 }
 
-/** Shell 더미 — 후속 실집계 연동 */
-export const DAILY_SHELL_SUMMARY: readonly DailyShellSummaryCard[] = [
-  {
-    key: 'labor',
-    label: '인력',
-    icon: iconLabor,
-    tone: 'labor',
-    lines: [
-      { label: '인원', value: '5명' },
-      { label: '투입시간', value: '29h' },
-      { label: '인건비', value: '850,000원' },
-    ],
-  },
-  {
-    key: 'expense',
-    label: '경비',
-    icon: iconExpense,
-    tone: 'expense',
-    lines: [
-      { label: '건수', value: '4건' },
-      { label: '금액', value: '185,000원' },
-    ],
-  },
-  {
-    key: 'pesticide',
-    label: '농약',
-    icon: iconPesticide,
-    tone: 'pesticide',
-    lines: [
-      { label: '히어로', value: '15병' },
-      { label: '모스피란', value: '10봉지' },
-    ],
-  },
-  {
-    key: 'fertilizer',
-    label: '비료',
-    icon: iconFertilizer,
-    tone: 'fertilizer',
-    lines: [
-      { label: '요소', value: '40kg' },
-      { label: '복합비료', value: '20kg' },
-    ],
-  },
-]
+/** Shell 더미 요약은 제거 — buildDailySummaryCards 사용 */
 
-/** Shell — 생육관찰 카드 더미 (등록/수정 없음 · 자세히보기만) */
-export type DailyShellObsPhoto = {
-  id: string
-  label: string
-  tone: 'green' | 'amber' | 'sky' | 'rose'
+const DAILY_SUMMARY_PEST_MAX_LINES = 3
+const MSG_SUMMARY_NONE = '없음'
+const MSG_SUMMARY_FERTILIZER_PENDING = '준비 중'
+
+/** 일간 API resources/expenses/pesticides → 오늘 작업 요약 카드 */
+export function buildDailySummaryCards(input: {
+  resources?: readonly {
+    emp_cd?: string | null
+    man_hour?: number | null
+    daily_wage?: number | null
+  }[]
+  expenses?: readonly { total_amt?: number | null }[]
+  pesticides?: readonly {
+    lines?: readonly {
+      item_id?: number | null
+      item_nm_snapshot?: string | null
+      use_qty?: number | null
+    }[]
+  }[]
+}): DailyShellSummaryCard[] {
+  const resources = input.resources || []
+  const expenses = input.expenses || []
+  const pesticides = input.pesticides || []
+
+  const empKeys = new Set(
+    resources
+      .map((r) => String(r.emp_cd || '').trim())
+      .filter(Boolean),
+  )
+  const people = empKeys.size || resources.length
+  const hours = resources.reduce((s, r) => s + Number(r.man_hour || 0), 0)
+  const laborAmt = resources.reduce((s, r) => s + Number(r.daily_wage || 0), 0)
+
+  const expenseCnt = expenses.length
+  const expenseAmt = expenses.reduce((s, e) => s + Number(e.total_amt || 0), 0)
+
+  const pestQty = new Map<string, number>()
+  for (const doc of pesticides) {
+    for (const ln of doc.lines || []) {
+      const qty = Number(ln.use_qty || 0)
+      if (!(qty > 0)) continue
+      const nm =
+        String(ln.item_nm_snapshot || '').trim() ||
+        (ln.item_id ? `품목#${ln.item_id}` : '농약')
+      pestQty.set(nm, (pestQty.get(nm) || 0) + qty)
+    }
+  }
+  const pestEntries = [...pestQty.entries()].sort((a, b) => b[1] - a[1])
+  const pestLines: DailyShellSummaryLine[] =
+    pestEntries.length === 0
+      ? [{ label: '사용', value: MSG_SUMMARY_NONE }]
+      : pestEntries.slice(0, DAILY_SUMMARY_PEST_MAX_LINES).map(([nm, qty]) => ({
+          label: nm,
+          value: `${Math.round(qty)}`,
+        }))
+  if (pestEntries.length > DAILY_SUMMARY_PEST_MAX_LINES) {
+    pestLines.push({
+      label: '기타',
+      value: `${pestEntries.length - DAILY_SUMMARY_PEST_MAX_LINES}종`,
+    })
+  }
+
+  return [
+    {
+      key: 'labor',
+      label: '인력',
+      icon: iconLabor,
+      tone: 'labor',
+      lines: [
+        { label: '인원', value: `${people}명` },
+        { label: '투입시간', value: formatLaborHours(hours) },
+        { label: '인건비', value: formatWonWithUnit(laborAmt) },
+      ],
+    },
+    {
+      key: 'expense',
+      label: '경비',
+      icon: iconExpense,
+      tone: 'expense',
+      lines: [
+        { label: '건수', value: `${expenseCnt}건` },
+        { label: '금액', value: formatWonWithUnit(expenseAmt) },
+      ],
+    },
+    {
+      key: 'pesticide',
+      label: '농약',
+      icon: iconPesticide,
+      tone: 'pesticide',
+      lines: pestLines,
+    },
+    {
+      key: 'fertilizer',
+      label: '비료',
+      icon: iconFertilizer,
+      tone: 'fertilizer',
+      lines: [{ label: '등록', value: MSG_SUMMARY_FERTILIZER_PENDING }],
+    },
+  ]
 }
 
-export type DailyShellObsItem = {
-  id: string
-  title: string
-  meta: string
-  photos: readonly DailyShellObsPhoto[]
+/** 일간 생육관찰 목록 제목 */
+export function formatDailyObsTitle(title: string | null | undefined): string {
+  const t = String(title || '').trim()
+  return t || MSG_OBS_TITLE_EMPTY
 }
 
-export const DAILY_SHELL_OBSERVATIONS: readonly DailyShellObsItem[] = [
-  {
-    id: 'shell-obs-1',
-    title: '엽면 갈변 · 응애 의심',
-    meta: '병해충 · 1-1 과수원',
-    photos: [
-      { id: 'p1-1', label: '대표', tone: 'green' },
-      { id: 'p1-2', label: '근접', tone: 'amber' },
-      { id: 'p1-3', label: '전체', tone: 'sky' },
-      { id: 'p1-4', label: '이면', tone: 'rose' },
-    ],
-  },
-  {
-    id: 'shell-obs-2',
-    title: '과실 비대 측정 (신고)',
-    meta: '과실 · 청실필지',
-    photos: [
-      { id: 'p2-1', label: '대표', tone: 'amber' },
-      { id: 'p2-2', label: '측면', tone: 'green' },
-      { id: 'p2-3', label: '수관', tone: 'rose' },
-      { id: 'p2-4', label: '표지', tone: 'sky' },
-    ],
-  },
-  {
-    id: 'shell-obs-3',
-    title: '신초 생육 · 착과 상태',
-    meta: '생육 · 2구역',
-    photos: [
-      { id: 'p3-1', label: '대표', tone: 'sky' },
-      { id: 'p3-2', label: '신초', tone: 'green' },
-      { id: 'p3-3', label: '착과', tone: 'amber' },
-      { id: 'p3-4', label: '수세', tone: 'rose' },
-    ],
-  },
-]
+/** 일간 생육관찰 목록 메타 (대상유형 · 위치) */
+export function formatDailyObsMeta(item: {
+  target_type_nm?: string | null
+  location_text?: string | null
+  site_nm?: string | null
+}): string {
+  const typeNm = String(item.target_type_nm || '').trim() || '관찰'
+  const loc =
+    String(item.location_text || '').trim() ||
+    String(item.site_nm || '').trim() ||
+    MSG_OBS_LOCATION_FALLBACK
+  return `${typeNm} · ${loc}`
+}
 
 /** YYYY-MM-DD → 2026.07.18 (토) */
 export function formatDailyDateLabel(iso: string): string {
@@ -852,6 +920,7 @@ export function mapWorkItemToTimeline(
   }
   return {
     id: work.work_id,
+    workMidCd: midCd,
     title: midNm,
     time: start,
     endTime: end,
@@ -862,5 +931,17 @@ export function mapWorkItemToTimeline(
     location: String(work.work_loc_nm || '').trim() || '—',
     rmk: String(work.rmk || '').trim(),
   }
+}
+
+/** 타임라인·표시용: 시작시각 오름차순 (동일 시 work_id) */
+export function sortWorksByStartTime<
+  T extends { start_tm?: string | null; work_id?: string | null },
+>(works: readonly T[]): T[] {
+  return [...works].sort((a, b) => {
+    const ta = formatWorkTimeHm(a.start_tm)
+    const tb = formatWorkTimeHm(b.start_tm)
+    if (ta !== tb) return ta.localeCompare(tb)
+    return String(a.work_id || '').localeCompare(String(b.work_id || ''))
+  })
 }
 

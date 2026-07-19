@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import WorkLogDailyExpensePanel from '@/views/work-log/components/WorkLogDailyExpensePanel.vue'
 import WorkLogDailyLaborPanel from '@/views/work-log/components/WorkLogDailyLaborPanel.vue'
@@ -14,6 +14,9 @@ import {
   DAILY_TAB_PHOTO,
   DAILY_TAB_WORK,
   DAILY_WORK_TABS,
+  isPesticideWork,
+  LABEL_COPY_WORK_DT,
+  MSG_COPY_HINT,
   MSG_FERTILIZER_PENDING,
   MSG_WORK_FORM_TIP,
   PLACEHOLDER_SELECT,
@@ -40,15 +43,26 @@ const props = defineProps<{
   siteOptions: readonly DailyPickOption[]
   statusOptions: readonly DailyPickOption[]
   workDt?: string
+  farmCd: string
   stockAppliedYn?: string
   editingReplace?: boolean
+  /** 작업 복사: 기본정보만 · 작업일 변경 가능 */
+  copyMode?: boolean
 }>()
+
+const copyWorkDt = defineModel<string>('copyWorkDt', { default: '' })
 
 const emit = defineEmits<{
   pending: []
   cancelPesticide: []
   editPesticide: []
+  removeLaborRes: [resId: number]
+  removeExpenseExp: [expId: number]
 }>()
+
+const isPestWork = computed(() =>
+  isPesticideWork(modelValue.value.workMidCd, modelValue.value.workContent),
+)
 
 type PickKind = 'work' | 'site' | 'status' | null
 const pickKind = ref<PickKind>(null)
@@ -104,8 +118,13 @@ function onSelectPending() {
 </script>
 
 <template>
-  <section class="form" aria-label="작업 등록">
-    <div class="form__tabs" role="tablist" aria-label="작업 상세 탭">
+  <section class="form" :aria-label="copyMode ? '작업 복사' : '작업 등록'">
+    <div
+      v-if="!copyMode"
+      class="form__tabs"
+      role="tablist"
+      aria-label="작업 상세 탭"
+    >
       <button
         v-for="tab in DAILY_WORK_TABS"
         :key="tab.key"
@@ -120,9 +139,28 @@ function onSelectPending() {
         <span>{{ tab.label }}</span>
       </button>
     </div>
+    <header v-else class="form__copy-head">
+      <h3 class="form__copy-title">작업 복사</h3>
+      <p class="form__copy-hint" role="note">{{ MSG_COPY_HINT }}</p>
+    </header>
 
-    <div :key="activeTab" class="form__body" role="tabpanel">
-      <template v-if="activeTab === DAILY_TAB_WORK">
+    <div :key="copyMode ? 'copy' : activeTab" class="form__body" role="tabpanel">
+      <template v-if="copyMode || activeTab === DAILY_TAB_WORK">
+        <label v-if="copyMode" class="field">
+          <span class="field__label">
+            {{ LABEL_COPY_WORK_DT }}
+            <span class="field__req" aria-hidden="true">*</span>
+          </span>
+          <input
+            class="field__input"
+            type="date"
+            :value="copyWorkDt"
+            @input="
+              copyWorkDt = ($event.target as HTMLInputElement).value
+            "
+          />
+        </label>
+
         <label class="field">
           <span class="field__label">
             작업내용 <span class="field__req" aria-hidden="true">*</span>
@@ -197,23 +235,29 @@ function onSelectPending() {
           />
         </label>
 
-        <p class="form__tip" role="note">💡 {{ MSG_WORK_FORM_TIP }}</p>
+        <p v-if="!copyMode" class="form__tip" role="note">💡 {{ MSG_WORK_FORM_TIP }}</p>
       </template>
 
       <WorkLogDailyLaborPanel
         v-else-if="activeTab === DAILY_TAB_LABOR"
         v-model="laborRows"
+        :farm-cd="farmCd"
         @pending="onSelectPending"
+        @remove-saved="(id) => emit('removeLaborRes', id)"
       />
       <WorkLogDailyExpensePanel
         v-else-if="activeTab === DAILY_TAB_EXPENSE"
         v-model="expenseRows"
         :work-dt="workDt"
+        :farm-cd="farmCd"
         @pending="onSelectPending"
+        @remove-saved="(id) => emit('removeExpenseExp', id)"
       />
       <WorkLogDailyPesticidePanel
         v-else-if="activeTab === DAILY_TAB_PESTICIDE"
         v-model="pesticideRows"
+        :farm-cd="farmCd"
+        :is-pesticide-work="isPestWork"
         :stock-applied-yn="stockAppliedYn"
         :editing-replace="editingReplace"
         @pending="onSelectPending"
@@ -249,6 +293,25 @@ function onSelectPending() {
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-border);
   box-shadow: var(--ods-shadow-card);
+}
+
+.form__copy-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+}
+
+.form__copy-title {
+  margin: 0;
+  font: var(--ods-font-title-2);
+  color: var(--ods-color-text);
+}
+
+.form__copy-hint {
+  margin: 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+  line-height: 1.45;
 }
 
 .form__tabs {
@@ -296,6 +359,9 @@ function onSelectPending() {
   flex-direction: column;
   gap: var(--ods-space-12);
   min-height: 120px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .field {
