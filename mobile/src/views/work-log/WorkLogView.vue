@@ -262,8 +262,8 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <main class="content">
-      <!-- ODS v1.1.1: AppBar는 content 안 첫 자식 (좌우 page-padding 정렬) -->
+    <main class="content ods-page-content">
+      <!-- ODS: AppBar는 ods-page-content 안 첫 자식 -->
       <OdsAppBar />
 
       <div class="top">
@@ -347,12 +347,7 @@ onMounted(async () => {
 }
 
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 0 var(--ods-page-padding-x) var(--ods-space-20);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
+  /* padding/max-width/gap -> .ods-page-content (AppBar SSOT) */
 }
 
 .top {

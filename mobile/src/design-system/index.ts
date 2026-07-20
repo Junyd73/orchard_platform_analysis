@@ -1,4 +1,5 @@
-/** ODS design-system entry (tokens only for now). */
+/** ODS design-system entry */
 import './tokens.css'
+import './ods-page.css'
 
 export const ODS_VERSION = '1.0' as const

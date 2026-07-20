@@ -5,7 +5,7 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 
 <template>
   <div class="page">
-    <main class="content">
+    <main class="content ods-page-content">
       <OdsAppBar />
       <div class="body">
         <slot />
@@ -22,17 +22,12 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
   padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
 }
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-16);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
+  /* padding/max-width/gap -> .ods-page-content (AppBar SSOT) */
 }
 .body {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-16);
+  gap: var(--ods-page-content-gap);
   min-width: 0;
 }
 </style>

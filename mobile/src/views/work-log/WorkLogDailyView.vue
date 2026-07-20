@@ -892,7 +892,7 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <main class="content">
+    <main class="content ods-page-content">
       <OdsAppBar show-back @back="goBack" />
 
       <p v-if="isFuture" class="warn" role="alert">{{ MSG_FUTURE_WORK_LOG }}</p>
@@ -1071,12 +1071,7 @@ onMounted(async () => {
 }
 
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-20);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
+  /* padding/max-width/gap -> .ods-page-content (AppBar SSOT) */
 }
 
 .warn {

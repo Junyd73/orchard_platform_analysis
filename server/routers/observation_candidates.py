@@ -43,4 +43,5 @@ def confirm_observation_candidate(
         analysis_id=body.analysis_id,
         candidate_seq=body.candidate_seq,
         confirmed_name=body.confirmed_name,
+        severity_cd=body.severity_cd,
     )

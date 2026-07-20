@@ -1,6 +1,6 @@
 # Mobile API Notes
 
-> 문서 버전: **v1.2.2** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
+> 문서 버전: **v1.2.3** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
 
 ## 사용 중
 
@@ -9,11 +9,12 @@
 | GET | `/api/v1/health` | 서버 상태 |
 | GET | `/api/v1/farms/{farm_cd}` | 농장 정보 |
 | GET | `/api/v1/farms/{farm_cd}/sites` | 필지 목록 |
-| GET | `/api/v1/farms/{farm_cd}/observations/summary` | SCR-001 요약 카드 |
-| GET | `/api/v1/farms/{farm_cd}/observations` | SCR-001 관찰 목록 |
+| GET | `/api/v1/farms/{farm_cd}/observations/summary` | 요약(서버 전체 집계). **SCR-001 홈 KPI는 목록 7일 집계 사용** |
+| GET | `/api/v1/farms/{farm_cd}/observations` | SCR-001 관찰 목록 (+ `ai_pest_nm`) |
 | POST | `/api/v1/farms/{farm_cd}/observations` | SCR-002 기본정보 임시 저장 → obs_id 채번 |
 | GET | `/api/v1/farms/{farm_cd}/observations/{obs_id}` | 관찰 단건 |
 | PUT | `/api/v1/farms/{farm_cd}/observations/{obs_id}/basic` | 기본정보 수정(중복 생성 방지) |
+| POST | `/api/v1/farms/{farm_cd}/observations/{obs_id}/candidates/confirm` | AI 후보 확정 (+ `severity_cd` 필수) |
 | GET | `/api/v1/farms/{farm_cd}/observations/{obs_id}/photos` | 사진 목록 |
 | GET | `/api/v1/farms/{farm_cd}/observations/{obs_id}/photos/representative` | 대표사진(첫 번째) |
 | POST | `/api/v1/farms/{farm_cd}/observations/{obs_id}/photos` | 사진 업로드 (`multipart/form-data`, field=`files`) |
@@ -27,12 +28,20 @@
 - `obs_id`: PC와 동일 `OBS{YYYYMMDD}-{SEQ:03d}`
 - 대상: `OB010400`(병해충) / `OB010200`(과실)
 - 유형 자동: 병해충→`OY010400`, 과실→`OY010300`
-- 기본값: 심각도 `OS010100`, 처리상태 `OP010100`, AI `NONE` (신규 코드 없음)
+- **위험도 `severity_cd`:** `OS010100`~`OS010400` (선택). 생성 시 미지정→`OS010100`. 수정 시 미지정→**기존값 유지**
+- 처리상태 기본 `OP010100`, AI `NONE` (신규 코드 없음)
 - 제목·내용: 한쪽만 있으면 다른 쪽에 동일 값 보정 (PC NOT NULL 충족)
 
 ### observations 쿼리
 
 - `date_from`, `date_to`, `site_id`, `keyword`, `sort`(`obs_dt_desc`\|`obs_dt_asc`), `limit`
+- 응답 항목에 **`ai_pest_nm`**: 최신 AI 분석의 확정명(`confirmed_name`) 또는 후보 `name_ko` (없으면 null). SCR-001 AI 위험 카드 타이틀용
+
+### AI 후보 확정
+
+- Body: `analysis_id`, `candidate_seq`, `confirmed_name?`, **`severity_cd`(필수)** — 사용자가 확인한 OS01
+- master `ai_status=CONFIRMED` 와 함께 `severity_cd` 갱신
+- 재확정 시에도 severity를 다시 저장 (동일 후보라도 API 호출)
 
 ### 사진 규칙
 
@@ -76,6 +85,16 @@
   → PC 목록 요약 카드 `caution_danger`와 동일
 - 과실: `target_type_cd = OB010200` (관찰대상 열매, PC `OBS_TARGET_FRUIT_CD`)
 - AI 대기: `UPPER(TRIM(COALESCE(ai_status,'NONE'))) IN (NONE, PENDING, FAILED, REVIEW_REQUIRED)`
+- **SCR-001 홈 KPI:** summary 대신 **최근 7일 목록**을 클라이언트 집계 (`observationHomeWeek.ts`)
+
+### urgency → OS01 제안 (표시용, 확정은 사용자)
+
+| urgency | 제안 severity |
+|---------|----------------|
+| HIGH | OS010400 위험 |
+| MEDIUM | OS010300 주의 |
+| LOW | OS010200 관심 |
+| 없음 | OS010100 정상 |
 
 ### 영농일지 (SCR-010 / SCR-011) — ODS v1.2.2
 

@@ -60,5 +60,5 @@ mobile/
 
 | 영역 | 상태 |
 |------|------|
-| `features/observation` | Project A 완료 (SCR-001~004 · ODS v1.2) |
+| `features/observation` | SCR-001~004 (ODS v1.2). SCR-001 **1.3.6** Phase 2 실데이터 · OS01 위험도 등록/AI확정 |
 | `features/work-log` | **SCR-010 월간 1차 마감** (ODS v1.2.2) · SCR-011 **UI 확정** · 기능 구현 중 |

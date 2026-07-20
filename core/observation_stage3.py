@@ -702,11 +702,13 @@ def confirm_ai_candidate(
     user_id: str,
     *,
     obs_id: str | None = None,
+    severity_cd: str | None = None,
 ) -> tuple[bool, str]:
     farm = (farm_cd or "").strip()
     aid = (analysis_id or "").strip()
     uid = (user_id or "").strip()
     name = (confirmed_name or "").strip()
+    sev = (severity_cd or "").strip()
     if not farm or not aid:
         return False, "분석 정보가 없습니다."
     if not uid:
@@ -739,7 +741,7 @@ def confirm_ai_candidate(
         if cur.rowcount == 0:
             db.conn.rollback()
             return False, "확정할 후보를 찾을 수 없습니다."
-        # 관찰 AI 상태 CONFIRMED
+        # 관찰 AI 상태 CONFIRMED (+ 선택 시 위험도)
         oid = (obs_id or "").strip()
         if not oid:
             cur.execute(
@@ -753,14 +755,24 @@ def confirm_ai_candidate(
             row = cur.fetchone()
             oid = str(row[0]) if row and row[0] else ""
         if oid:
-            cur.execute(
-                """
-                UPDATE t_observation_master
-                SET ai_status = ?, mod_id = ?, mod_dt = ?
-                WHERE farm_cd = ? AND obs_id = ? AND COALESCE(use_yn,'Y')='Y'
-                """,
-                (OBS_AI_STATUS_CONFIRMED, uid, now, farm, oid),
-            )
+            if sev:
+                cur.execute(
+                    """
+                    UPDATE t_observation_master
+                    SET ai_status = ?, severity_cd = ?, mod_id = ?, mod_dt = ?
+                    WHERE farm_cd = ? AND obs_id = ? AND COALESCE(use_yn,'Y')='Y'
+                    """,
+                    (OBS_AI_STATUS_CONFIRMED, sev, uid, now, farm, oid),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE t_observation_master
+                    SET ai_status = ?, mod_id = ?, mod_dt = ?
+                    WHERE farm_cd = ? AND obs_id = ? AND COALESCE(use_yn,'Y')='Y'
+                    """,
+                    (OBS_AI_STATUS_CONFIRMED, uid, now, farm, oid),
+                )
         db.conn.commit()
         return True, "병해충 후보가 확정되었습니다."
     except Exception as e:

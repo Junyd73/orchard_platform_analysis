@@ -67,6 +67,7 @@ class ObservationCandidateConfirmApiService:
         analysis_id: str,
         candidate_seq: int,
         confirmed_name: str | None = None,
+        severity_cd: str | None = None,
     ) -> ObservationCandidateConfirmResponse:
         obs = self._ensure_farm_and_obs(farm_cd, obs_id)
         farm = str(obs.get("farm_cd") or farm_cd).strip()
@@ -83,6 +84,7 @@ class ObservationCandidateConfirmApiService:
                 analysis_id=analysis_id,
                 candidate_seq=candidate_seq,
                 confirmed_name=confirmed_name,
+                severity_cd=severity_cd,
             )
 
         ok = bool(payload.get("ok"))

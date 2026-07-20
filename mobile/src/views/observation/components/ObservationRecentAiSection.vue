@@ -1,32 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import thumb1 from '@/assets/ods/scr004/thumb-recent-ai-1.jpg'
-import thumb2 from '@/assets/ods/scr004/thumb-recent-ai-2.jpg'
-import thumb3 from '@/assets/ods/scr004/thumb-recent-ai-3.jpg'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import {
   LABEL_RECENT_AI,
   LABEL_RECENT_AI_ALL,
   MSG_RECENT_AI_EMPTY,
   MSG_RECENT_AI_LOADING,
-  RECENT_AI_SKELETON_ITEMS,
   type RecentAiCardItem,
 } from '@/views/observation/observationHomeCopy'
-
-const SKELETON_THUMBS = [thumb1, thumb2, thumb3] as const
 
 const props = withDefaults(
   defineProps<{
     items?: RecentAiCardItem[] | null
     loading?: boolean
-    /** API 전: 시안 뼈대 샘플 표시 */
-    showSkeleton?: boolean
   }>(),
   {
     items: null,
     loading: false,
-    showSkeleton: true,
   },
 )
 
@@ -35,16 +26,7 @@ const emit = defineEmits<{
   select: [id: string]
 }>()
 
-const cards = computed((): RecentAiCardItem[] => {
-  if (props.items && props.items.length > 0) return props.items
-  if (props.showSkeleton && !props.loading) {
-    return RECENT_AI_SKELETON_ITEMS.map((item, i) => ({
-      ...item,
-      thumbUrl: item.thumbUrl || SKELETON_THUMBS[i] || SKELETON_THUMBS[0],
-    }))
-  }
-  return []
-})
+const cards = computed((): RecentAiCardItem[] => props.items ?? [])
 
 const isEmpty = computed(() => !props.loading && cards.value.length === 0)
 </script>
@@ -97,7 +79,9 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
         <div class="ai-card__body">
           <div class="ai-card__row">
             <p class="ai-card__name">{{ c.title }}</p>
-            <p class="ai-card__conf">{{ c.confidencePct }}%</p>
+            <p v-if="c.confidencePct != null" class="ai-card__conf">
+              {{ c.confidencePct }}%
+            </p>
           </div>
           <p class="ai-card__target">{{ c.targetLabel }}</p>
           <p class="ai-card__time">{{ c.timeLabel }}</p>

@@ -1,0 +1,19 @@
+/**
+ * ODS page shell — AppBar 여백 공통화
+ * 사용: <main class="ods-page-content"> … <OdsAppBar /> 첫 자식 …
+ * 신규 화면도 이 클래스만 쓰면 상하좌우 AppBar 정렬이 동일하다.
+ */
+
+.ods-page-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--ods-page-content-max);
+  margin-inline: auto;
+  padding-top: var(--ods-page-content-pad-top);
+  padding-right: var(--ods-page-padding-x);
+  padding-bottom: var(--ods-page-content-pad-bottom);
+  padding-left: var(--ods-page-padding-x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-page-content-gap);
+}

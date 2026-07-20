@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { ApiClientError } from '@/api/client'
+import { fetchCommonCodes } from '@/api/commonCodes'
 import {
   confirmObservationAiCandidate,
   fetchObservationAiAnalysis,
@@ -10,6 +11,8 @@ import {
 } from '@/api/observationAi'
 import { fetchObservationPhotos } from '@/api/observationPhotos'
 import OdsButton from '@/components/ods/OdsButton.vue'
+import OdsFormField from '@/components/ods/OdsFormField.vue'
+import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
   categoryLabel,
   formatConfidence,
@@ -19,13 +22,17 @@ import {
 import {
   OBS_AI_DURATION_NOTICE,
   OBS_AI_PHOTO_MAX_COUNT,
+  OBS_SEVERITY_NORMAL_CD,
+  OBS_SEVERITY_PARENT_CD,
 } from '@/composables/constants/app'
+import { suggestSeverityFromUrgency } from '@/views/observation/severityFromUrgency'
 import {
   aiHint,
   aiLabel,
   guideUiPhaseFromStatus,
   type GuideUiPhase,
 } from '@/views/observation/scr004DetailUi'
+import type { CommonCodeItem } from '@/types/commonCode'
 import type {
   ObservationAiAnalysisResponse,
   ObservationAiCandidate,
@@ -48,8 +55,10 @@ const props = withDefaults(
     photoIds?: string[]
     /** AI 분석 crop_hint 기본값 (PC cb_crop 대응) */
     cropName?: string
+    /** master 위험도 — 확정 복원 시 urgency 제안보다 우선 */
+    masterSeverityCd?: string | null
   }>(),
-  { cropName: '배' },
+  { cropName: '배', masterSeverityCd: null },
 )
 
 const emit = defineEmits<{
@@ -60,6 +69,7 @@ const emit = defineEmits<{
       candidate_seq: number
       confirmed_name: string
       ai_status: string
+      severity_cd: string
     },
   ]
   guideUpdated: [
@@ -79,14 +89,41 @@ const statusMessage = ref('')
 const localPhotoIds = ref<string[]>([])
 const consentChecked = ref(false)
 const selectedSeq = ref<number | null>(null)
+const severityCodes = ref<CommonCodeItem[]>([])
+const severityCd = ref(OBS_SEVERITY_NORMAL_CD)
 const cropInput = ref(props.cropName || '배')
 /** 분석 중 경과 초 (버튼·상태 표시용) */
 const analyzeElapsedSec = ref(0)
+
+function resolveSeveritySuggestion(
+  urgency: string | null | undefined,
+  preferMaster: boolean,
+): string {
+  if (preferMaster) {
+    const master = String(props.masterSeverityCd || '').trim()
+    if (master) return master
+  }
+  return suggestSeverityFromUrgency(urgency)
+}
 
 /** radio value는 문자열로 올 수 있어 숫자로 정규화 */
 function onSelectCandidate(raw: number | string) {
   const n = Number(raw)
   selectedSeq.value = Number.isFinite(n) ? n : null
+  const cand = candidates.value.find((c) => c.candidate_seq === selectedSeq.value)
+  // 후보 변경 시 AI 긴급도 제안으로 갱신 (사용자가 확정 전 수정 가능)
+  severityCd.value = suggestSeverityFromUrgency(cand?.urgency)
+}
+
+async function loadSeverityCodes() {
+  try {
+    severityCodes.value = await fetchCommonCodes(
+      props.farmCd,
+      OBS_SEVERITY_PARENT_CD,
+    )
+  } catch {
+    severityCodes.value = []
+  }
 }
 
 let reqSeq = 0
@@ -150,7 +187,8 @@ const canConfirm = computed(
     selectedSeq.value != null &&
     phase.value !== 'analyzing' &&
     confirmPhase.value !== 'confirming' &&
-    candidates.value.length > 0,
+    candidates.value.length > 0 &&
+    Boolean(severityCd.value),
 )
 
 const confirmedName = computed(() => {
@@ -170,13 +208,17 @@ function syncSelectionFromAnalysis(res: ObservationAiAnalysisResponse | null) {
   const selected = list.find((c) => String(c.selected_yn || '') === 'Y')
   if (selected) {
     selectedSeq.value = selected.candidate_seq
+    // 이미 확정된 건: master 위험도 유지 (urgency로 덮어쓰지 않음)
+    severityCd.value = resolveSeveritySuggestion(selected.urgency, true)
     confirmPhase.value = 'confirmed'
     return
   }
   if (list.length === 1) {
     selectedSeq.value = list[0].candidate_seq
+    severityCd.value = suggestSeverityFromUrgency(list[0].urgency)
   } else {
     selectedSeq.value = null
+    severityCd.value = OBS_SEVERITY_NORMAL_CD
   }
   confirmPhase.value = 'idle'
 }
@@ -357,14 +399,9 @@ async function runConfirm() {
     confirmPhase.value = 'error'
     return
   }
-
-  const already =
-    String(cand.selected_yn || '') === 'Y' &&
-    String(analysis.value.ai_status || '').toUpperCase() === 'CONFIRMED'
-  if (already) {
-    confirmPhase.value = 'confirmed'
-    statusMessage.value = '이미 확정된 후보입니다.'
-    await loadSmartGuide()
+  if (!severityCd.value) {
+    confirmError.value = '위험도를 선택해 주세요.'
+    confirmPhase.value = 'error'
     return
   }
 
@@ -373,6 +410,7 @@ async function runConfirm() {
   const oid = props.obsId
   const aid = analysis.value.analysis_id
   const candSeq = selectedSeq.value
+  const chosenSeverity = severityCd.value
   confirmAbort?.abort()
   confirmAbort = new AbortController()
   confirmPhase.value = 'confirming'
@@ -388,6 +426,7 @@ async function runConfirm() {
         analysis_id: aid,
         candidate_seq: candSeq,
         confirmed_name: cand.name_ko || null,
+        severity_cd: chosenSeverity,
       },
       { signal: confirmAbort.signal },
     )
@@ -408,12 +447,15 @@ async function runConfirm() {
       candidate_seq: Number(res.candidate_seq || candSeq),
       confirmed_name: String(res.confirmed_name || cand.name_ko || ''),
       ai_status: String(res.ai_status || 'CONFIRMED'),
+      severity_cd: chosenSeverity,
     })
 
     const refreshed = await fetchObservationAiAnalysis(farm, oid, confirmAbort.signal)
     if (!alive || seq !== confirmSeq) return
     analysis.value = refreshed
     syncSelectionFromAnalysis(refreshed)
+    // 사용자가 확정한 위험도 유지 (urgency 제안으로 되돌리지 않음)
+    severityCd.value = chosenSeverity
     emit('updated', refreshed)
 
     await loadSmartGuide()
@@ -476,8 +518,16 @@ watch(
 
 onMounted(() => {
   alive = true
+  void loadSeverityCodes()
   void loadLatest()
 })
+
+watch(
+  () => props.farmCd,
+  () => {
+    void loadSeverityCodes()
+  },
+)
 
 onBeforeUnmount(() => {
   alive = false
@@ -499,6 +549,7 @@ defineExpose({
   phase,
   confirmPhase,
   selectedSeq,
+  severityCd,
 })
 </script>
 
@@ -600,6 +651,23 @@ defineExpose({
           </div>
         </label>
       </fieldset>
+
+      <OdsFormField
+        v-if="candidates.length"
+        label="위험도"
+        required
+        hint="AI 긴급도 제안값입니다. 확정 전 확인해 주세요."
+      >
+        <OdsSelect v-model="severityCd" variant="form" required>
+          <option
+            v-for="c in severityCodes"
+            :key="c.code_cd"
+            :value="c.code_cd"
+          >
+            {{ c.code_nm || c.code_cd }}
+          </option>
+        </OdsSelect>
+      </OdsFormField>
 
       <div class="actions">
         <OdsButton

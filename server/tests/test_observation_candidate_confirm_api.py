@@ -190,7 +190,7 @@ def test_confirm_candidate_rest(cand_env) -> None:
 
     r = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 1},
+        json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
         headers={"X-User-Id": "TEST"},
     )
     assert r.status_code == 200, r.text
@@ -201,12 +201,25 @@ def test_confirm_candidate_rest(cand_env) -> None:
     assert body["confirmed_by"] == "TEST"
     assert body["confirmed_at"]
 
+    settings = get_settings()
+    with get_sqlite_connection(settings.sqlite_path) as conn:
+        sev = conn.execute(
+            """
+            SELECT severity_cd FROM t_observation_master
+            WHERE farm_cd = ? AND obs_id = ?
+            """,
+            (farm, oid),
+        ).fetchone()
+    assert sev is not None
+    assert sev["severity_cd"] == "OS010400"
+
     r2 = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
         json={
             "analysis_id": aid,
             "candidate_seq": 2,
             "confirmed_name": "붉은별무늬병",
+            "severity_cd": "OS010300",
         },
         headers={"X-User-Id": "TEST"},
     )
@@ -230,7 +243,7 @@ def test_confirm_rejects_bad_analysis(cand_env) -> None:
     )
     r = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": "NO_SUCH", "candidate_seq": 1},
+        json={"analysis_id": "NO_SUCH", "candidate_seq": 1, "severity_cd": "OS010400"},
         headers={"X-User-Id": "TEST"},
     )
     assert r.status_code == 200
@@ -258,7 +271,7 @@ def test_confirm_requires_user_header(cand_env) -> None:
 
     r = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 1},
+        json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
     )
     assert r.status_code == 200
     body = r.json()
@@ -267,7 +280,7 @@ def test_confirm_requires_user_header(cand_env) -> None:
 
     r2 = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 1},
+        json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
         headers={"X-User-Id": "   "},
     )
     assert r2.status_code == 200
@@ -306,7 +319,7 @@ def test_confirm_wrong_obs_blocks(cand_env) -> None:
     try:
         r = client.post(
             f"/api/v1/farms/{farm}/observations/{other}/candidates/confirm",
-            json={"analysis_id": aid, "candidate_seq": 1},
+            json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
             headers={"X-User-Id": "TEST"},
         )
         assert r.status_code == 200

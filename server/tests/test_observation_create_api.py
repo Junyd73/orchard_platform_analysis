@@ -124,6 +124,53 @@ def test_create_and_update_basic_no_duplicate(site_id: str) -> None:
             _delete_obs(farm, oid)
 
 
+def test_create_accepts_severity_and_update_preserves(site_id: str) -> None:
+    from app.core.observation_constants import OBS_SEVERITY_DANGER_CD
+
+    farm = "OR001"
+    title = f"위험도테스트-{uuid.uuid4().hex[:8]}"
+    body = {
+        "obs_dt": "2026-07-17",
+        "target_type_cd": OBS_TARGET_PEST_CD,
+        "site_id": site_id,
+        "obs_title": title,
+        "obs_content": "내용",
+        "severity_cd": OBS_SEVERITY_DANGER_CD,
+    }
+    created_ids: list[str] = []
+    try:
+        res = client.post(
+            f"/api/v1/farms/{farm}/observations",
+            json=body,
+            headers={"X-User-Id": "TEST"},
+        )
+        assert res.status_code == 200, res.text
+        oid = res.json()["obs_id"]
+        created_ids.append(oid)
+
+        detail = client.get(f"/api/v1/farms/{farm}/observations/{oid}").json()
+        assert detail["severity_cd"] == OBS_SEVERITY_DANGER_CD
+
+        upd = client.put(
+            f"/api/v1/farms/{farm}/observations/{oid}/basic",
+            json={
+                "obs_dt": "2026-07-17",
+                "target_type_cd": OBS_TARGET_PEST_CD,
+                "site_id": site_id,
+                "obs_title": title + "-수정",
+                "obs_content": "내용2",
+            },
+            headers={"X-User-Id": "TEST"},
+        )
+        assert upd.status_code == 200
+        detail2 = client.get(f"/api/v1/farms/{farm}/observations/{oid}").json()
+        assert detail2["severity_cd"] == OBS_SEVERITY_DANGER_CD
+        assert detail2["obs_title"] == title + "-수정"
+    finally:
+        for oid in created_ids:
+            _delete_obs(farm, oid)
+
+
 def test_create_rejects_empty_text(site_id: str) -> None:
     res = client.post(
         "/api/v1/farms/OR001/observations",

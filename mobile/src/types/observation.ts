@@ -1,5 +1,7 @@
 export type ObservationSummary = {
   today_count: number
+  /** 병해충(OB010400) — KPI「병해충 관찰」 */
+  pest_count: number
   danger_count: number
   fruit_count: number
   ai_pending_count: number
@@ -30,6 +32,8 @@ export type ObservationListItem = {
   thumb_photo_id?: string | null
   observation_status?: string
   record_status?: string
+  /** AI 확정/후보 병해충명 */
+  ai_pest_nm?: string | null
 }
 
 export type ObservationDraftItem = {
@@ -152,6 +156,8 @@ export type ObservationCandidateConfirmRequest = {
   analysis_id: string
   candidate_seq: number
   confirmed_name?: string | null
+  /** 사용자가 확인한 위험도 OS010100~OS010400 */
+  severity_cd: string
 }
 
 export type ObservationCandidateConfirmResponse = {
@@ -295,6 +301,8 @@ export type ObservationBasicSavePayload = {
   tree_no?: string | null
   branch_no?: string | null
   sample_no?: string | null
+  /** OS010100~OS010400 */
+  severity_cd?: string | null
 }
 
 export type ObservationSaveResponse = {

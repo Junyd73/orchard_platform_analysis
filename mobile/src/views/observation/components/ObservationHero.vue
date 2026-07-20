@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import iconCalendar from '@/assets/ods/scr004/icon-kpi-calendar.svg'
-import iconFruit from '@/assets/ods/scr004/icon-kpi-fruit.svg'
-import iconRobot from '@/assets/ods/scr004/icon-kpi-robot.svg'
-import iconWarn from '@/assets/ods/scr004/icon-kpi-warn.svg'
+import iconFruit from '@/assets/ods/common/icon-kpi-fruit.svg'
+import iconPest from '@/assets/ods/common/icon-kpi-pest.svg'
+import iconRobot from '@/assets/ods/common/icon-kpi-robot.svg'
+import iconWarn from '@/assets/ods/common/icon-kpi-warn.svg'
 import { OBSERVATION_HERO_ITEMS } from '@/views/observation/observationHeroCatalog'
 import { selectDailyObservationHero } from '@/views/observation/selectDailyObservationHero'
 import { todayIso, WEEKDAY_LABELS } from '@/views/work-log/workLogConstants'
@@ -18,8 +18,10 @@ const props = defineProps<{
   dateIso?: string
 }>()
 
+export type ObservationHeroKpiKey = 'pest' | 'fruit' | 'ai' | 'danger'
+
 const emit = defineEmits<{
-  select: [key: 'today' | 'danger' | 'ai' | 'fruit']
+  select: [key: ObservationHeroKpiKey]
 }>()
 
 const imgFailed = ref(false)
@@ -51,10 +53,9 @@ const titleLines = computed(() =>
   dailyHero.value.title.split('\n').map((s) => s.trim()).filter(Boolean),
 )
 
-type KpiKey = 'today' | 'danger' | 'ai' | 'fruit'
-type KpiTone = 'today' | 'danger' | 'ai' | 'fruit'
+type KpiTone = ObservationHeroKpiKey
 
-/** STEP 1: 승인 시안 KPI 4칸 유지 (5칸은 후속) */
+/** KPI 4칸: 병해충 → 과실 → AI → 위험 */
 const cards = computed(() => {
   const s = props.summary
   const loading = props.loading
@@ -65,35 +66,35 @@ const cards = computed(() => {
   }
   return [
     {
-      key: 'today' as KpiKey,
-      label: '오늘 관찰',
-      icon: iconCalendar,
-      value: fmt(s?.today_count),
-      tone: 'today' as KpiTone,
-      chevron: false,
-    },
-    {
-      key: 'danger' as KpiKey,
-      label: '위험 관찰',
-      icon: iconWarn,
-      value: fmt(s?.danger_count),
-      tone: 'danger' as KpiTone,
+      key: 'pest' as const,
+      label: '병해충 관찰',
+      icon: iconPest,
+      value: fmt(s?.pest_count),
+      tone: 'pest' as KpiTone,
       chevron: true,
     },
     {
-      key: 'ai' as KpiKey,
-      label: 'AI 대기',
+      key: 'fruit' as const,
+      label: '과실 관찰',
+      icon: iconFruit,
+      value: fmt(s?.fruit_count),
+      tone: 'fruit' as KpiTone,
+      chevron: true,
+    },
+    {
+      key: 'ai' as const,
+      label: 'AI 분석',
       icon: iconRobot,
       value: fmt(s?.ai_pending_count),
       tone: 'ai' as KpiTone,
       chevron: true,
     },
     {
-      key: 'fruit' as KpiKey,
-      label: '과실 관찰',
-      icon: iconFruit,
-      value: fmt(s?.fruit_count),
-      tone: 'fruit' as KpiTone,
+      key: 'danger' as const,
+      label: '위험 분석',
+      icon: iconWarn,
+      value: fmt(s?.danger_count),
+      tone: 'danger' as KpiTone,
       chevron: true,
     },
   ]
@@ -132,7 +133,7 @@ function onImgError() {
         요약 정보를 아직 불러오지 못했습니다.
       </p>
 
-      <div class="hero__kpi" aria-label="오늘 요약">
+      <div class="hero__kpi" aria-label="최근 7일 요약">
         <button
           v-for="c in cards"
           :key="c.key"
@@ -157,10 +158,10 @@ function onImgError() {
 </template>
 
 <style scoped>
-/* 시안 A: 히어로 하단 플랫 KPI(구분선) · 승인 레이아웃 유지 */
+/* SCR-010 월간 Hero와 동일 높이(180/188) · KPI4 플랫 행 */
 .hero {
   position: relative;
-  min-height: 160px;
+  height: 180px;
   border-radius: var(--ods-radius-card-lg);
   overflow: hidden;
   color: var(--ods-color-white);
@@ -176,6 +177,7 @@ function onImgError() {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* 시안: 우측 인물·과실, 좌측 카피 여백 */
   object-position: 72% center;
   filter: contrast(1.04) saturate(1.02);
 }
@@ -186,24 +188,25 @@ function onImgError() {
     linear-gradient(
       180deg,
       transparent 0%,
-      transparent 28%,
-      color-mix(in srgb, var(--ods-color-primary) 22%, transparent) 52%,
+      transparent 46%,
+      color-mix(in srgb, var(--ods-color-primary) 35%, transparent) 68%,
       color-mix(in srgb, black 48%, var(--ods-color-primary)) 100%
     ),
     linear-gradient(
       100deg,
-      color-mix(in srgb, var(--ods-color-primary) 42%, transparent) 0%,
-      color-mix(in srgb, var(--ods-color-primary) 16%, transparent) 40%,
-      transparent 64%
+      color-mix(in srgb, var(--ods-color-primary) 38%, transparent) 0%,
+      color-mix(in srgb, var(--ods-color-primary) 14%, transparent) 38%,
+      transparent 62%
     );
 }
 .hero__body {
   position: relative;
   z-index: 1;
-  min-height: 160px;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  padding: var(--ods-space-16) var(--ods-space-12) 10px var(--ods-space-16);
+  /* KPI 4칸 라벨 확보: 좌우 패딩 축소 */
+  padding: var(--ods-space-24) 8px 10px 10px;
   box-sizing: border-box;
 }
 .hero__date {
@@ -233,13 +236,16 @@ function onImgError() {
     0 2px 10px rgba(0, 0, 0, 0.35);
 }
 .hero__hint {
-  margin: var(--ods-space-8) 0 0;
+  margin: 4px 0 0;
   font: var(--ods-font-caption);
+  font-size: 10px;
   color: rgba(255, 255, 255, 0.85);
 }
 .hero__kpi {
   margin-top: auto;
-  padding-top: var(--ods-space-10);
+  padding-top: var(--ods-space-8);
+  margin-left: -2px;
+  margin-right: -2px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: stretch;
@@ -248,10 +254,10 @@ function onImgError() {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
   min-width: 0;
-  padding: 2px 6px;
+  padding: 2px 2px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -261,19 +267,20 @@ function onImgError() {
 }
 .kpi + .kpi {
   border-left: 1px solid rgba(255, 255, 255, 0.35);
+  padding-left: 4px;
 }
 .kpi__ico-wrap {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.96);
 }
 .kpi__ico {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: block;
 }
 .kpi__text {
@@ -281,15 +288,16 @@ function onImgError() {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 1;
 }
 .kpi__label {
   font-size: 10px;
   font-weight: 600;
   line-height: 1.2;
+  letter-spacing: -0.04em;
   color: rgba(255, 255, 255, 0.88);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
 }
 .kpi__value {
   font-size: 13px;
@@ -319,15 +327,17 @@ function onImgError() {
   }
 }
 @media (min-width: 390px) {
-  .hero,
-  .hero__body {
-    min-height: 168px;
+  .hero {
+    height: 188px;
   }
   .hero__msg {
     font-size: 19px;
   }
   .kpi__value {
     font-size: 14px;
+  }
+  .kpi__label {
+    font-size: 10px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

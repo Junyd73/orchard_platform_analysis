@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import iconAi from '@/assets/ods/scr004/icon-ai.svg'
-import iconCalendar from '@/assets/ods/scr004/icon-calendar.svg'
-import iconLeaf from '@/assets/ods/scr004/icon-leaf.svg'
-import iconMeta from '@/assets/ods/scr004/icon-meta.svg'
+import iconFruit from '@/assets/ods/common/icon-kpi-fruit.svg'
+import iconPest from '@/assets/ods/common/icon-kpi-pest.svg'
+import iconRobot from '@/assets/ods/common/icon-kpi-robot.svg'
+import iconWarn from '@/assets/ods/common/icon-kpi-warn.svg'
+import type { ObservationHeroKpiKey } from '@/views/observation/components/ObservationHero.vue'
 import type { ObservationSummary } from '@/types/observation'
 
 const props = defineProps<{
@@ -11,43 +12,41 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [key: 'today' | 'danger' | 'ai' | 'fruit']
+  select: [key: ObservationHeroKpiKey]
 }>()
 
-type KpiKey = 'today' | 'danger' | 'ai' | 'fruit'
-
 const cards: {
-  key: KpiKey
+  key: ObservationHeroKpiKey
   label: string
   icon: string
   tone?: 'danger' | 'ai'
   count: () => string
 }[] = [
   {
-    key: 'today',
-    label: '오늘 관찰',
-    icon: iconCalendar,
-    count: () => formatCount(props.summary?.today_count),
-  },
-  {
-    key: 'danger',
-    label: '위험 관찰',
-    icon: iconMeta,
-    tone: 'danger',
-    count: () => formatCount(props.summary?.danger_count),
-  },
-  {
-    key: 'ai',
-    label: 'AI 대기',
-    icon: iconAi,
-    tone: 'ai',
-    count: () => formatCount(props.summary?.ai_pending_count),
+    key: 'pest',
+    label: '병해충 관찰',
+    icon: iconPest,
+    count: () => formatCount(props.summary?.pest_count),
   },
   {
     key: 'fruit',
     label: '과실 관찰',
-    icon: iconLeaf,
+    icon: iconFruit,
     count: () => formatCount(props.summary?.fruit_count),
+  },
+  {
+    key: 'ai',
+    label: 'AI 분석',
+    icon: iconRobot,
+    tone: 'ai',
+    count: () => formatCount(props.summary?.ai_pending_count),
+  },
+  {
+    key: 'danger',
+    label: '위험 분석',
+    icon: iconWarn,
+    tone: 'danger',
+    count: () => formatCount(props.summary?.danger_count),
   },
 ]
 

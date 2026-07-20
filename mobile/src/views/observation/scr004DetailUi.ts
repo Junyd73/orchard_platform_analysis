@@ -12,6 +12,7 @@ export type ObservationAiResult = {
 export function severityTone(cd: string): 'ok' | 'caution' | 'danger' | 'neutral' {
   if (cd === 'OS010400') return 'danger'
   if (cd === 'OS010300') return 'caution'
+  if (cd === 'OS010200') return 'caution'
   if (cd === 'OS010100') return 'ok'
   return 'neutral'
 }

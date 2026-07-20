@@ -10,12 +10,16 @@ class ObservationSummary(BaseModel):
     """SCR-001 요약 카드 (COMPLETED+ACTIVE만)."""
 
     today_count: int = Field(ge=0, description="오늘 관찰 건수")
+    pest_count: int = Field(
+        ge=0,
+        description="병해충(OB010400) 건수",
+    )
     danger_count: int = Field(
         ge=0,
         description="주의·위험(OS010300/OS010400) ∧ 미완료 — PC caution_danger",
     )
     fruit_count: int = Field(ge=0, description="과실/열매(OB010200) 건수")
-    ai_pending_count: int = Field(ge=0, description="AI 대기 건수")
+    ai_pending_count: int = Field(ge=0, description="AI 대기·분석 건수")
     as_of_date: str = Field(description="집계 기준일 YYYY-MM-DD")
 
 
@@ -45,6 +49,8 @@ class ObservationListItem(BaseModel):
     thumb_photo_id: str | None = None
     observation_status: str = "COMPLETED"
     record_status: str = "ACTIVE"
+    # AI 확정/후보 병해충명 (없으면 null)
+    ai_pest_nm: str | None = None
 
 
 class ObservationDraftItem(BaseModel):
@@ -84,6 +90,10 @@ class ObservationBasicCreateRequest(BaseModel):
     tree_no: str | None = None
     branch_no: str | None = None
     sample_no: str | None = None
+    severity_cd: str | None = Field(
+        default=None,
+        description="위험도 OS010100~OS010400 (미지정 시 정상)",
+    )
 
 
 class ObservationBasicUpdateRequest(BaseModel):
@@ -94,7 +104,10 @@ class ObservationBasicUpdateRequest(BaseModel):
     site_id: str = Field(..., min_length=1)
     obs_title: str | None = None
     obs_content: str | None = None
-
+    severity_cd: str | None = Field(
+        default=None,
+        description="위험도 OS010100~OS010400 (미지정 시 기존값 유지)",
+    )
 
 class ObservationSoftDeleteRequest(BaseModel):
     delete_reason: str | None = None

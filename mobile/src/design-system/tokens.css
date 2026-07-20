@@ -64,6 +64,20 @@
   --ods-page-padding-x: var(--ods-space-16);
   --ods-card-padding: var(--ods-space-16);
 
+  /*
+   * Page shell (OdsAppBar 포함 화면 공통)
+   * — AppBar 상·하·좌·우 여백 SSOT. 화면별 .content padding 임의 금지.
+   * — main.ods-page-content > OdsAppBar(첫 자식)
+   */
+  --ods-page-content-pad-top: 0px;
+  --ods-page-content-pad-bottom: var(--ods-space-16);
+  --ods-page-content-gap: var(--ods-space-16);
+  --ods-page-content-max: 480px;
+
+  /* AppBar 세로 크롬: 상단 패딩 = 다음 블록(Hero 등)과의 간격 */
+  --ods-appbar-pad-y: var(--ods-space-4);
+  --ods-appbar-content-gap: var(--ods-appbar-pad-y);
+
   /* Control sizes */
   --ods-control-height: 52px;
   --ods-touch-min: 44px;

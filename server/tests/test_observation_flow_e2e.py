@@ -318,7 +318,7 @@ def test_e2e_happy_path(e2e_env) -> None:
     # 6) 첫 후보 확정
     conf = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 1},
+        json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
         headers={"X-User-Id": user},
     )
     assert conf.status_code == 200, conf.text
@@ -330,6 +330,15 @@ def test_e2e_happy_path(e2e_env) -> None:
 
     settings = get_settings()
     with get_sqlite_connection(settings.sqlite_path) as conn:
+        sev = conn.execute(
+            """
+            SELECT severity_cd FROM t_observation_master
+            WHERE farm_cd = ? AND obs_id = ?
+            """,
+            (farm, oid),
+        ).fetchone()
+        assert sev is not None
+        assert sev["severity_cd"] == "OS010400"
         rows = conn.execute(
             """
             SELECT candidate_seq, selected_yn FROM t_observation_ai_candidate
@@ -441,12 +450,12 @@ def test_e2e_candidate_reconfirm(e2e_env) -> None:
 
     client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 1},
+        json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
         headers={"X-User-Id": user},
     )
     r2 = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 2},
+        json={"analysis_id": aid, "candidate_seq": 2, "severity_cd": "OS010400"},
         headers={"X-User-Id": user},
     )
     assert r2.status_code == 200
@@ -531,7 +540,7 @@ def test_e2e_missing_user_header(e2e_env) -> None:
     # 후보 확정 헤더 누락 — 분석 없이 호출해도 실패·DB 무변경
     conf = client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": "NOPE", "candidate_seq": 1},
+        json={"analysis_id": "NOPE", "candidate_seq": 1, "severity_cd": "OS010400"},
     )
     assert conf.status_code in (200, 400)
     body = conf.json()
@@ -657,7 +666,7 @@ def test_e2e_psis_failure(e2e_env) -> None:
     aid = ar.json()["analysis_id"]
     client.post(
         f"/api/v1/farms/{farm}/observations/{oid}/candidates/confirm",
-        json={"analysis_id": aid, "candidate_seq": 1},
+        json={"analysis_id": aid, "candidate_seq": 1, "severity_cd": "OS010400"},
         headers={"X-User-Id": user},
     )
 

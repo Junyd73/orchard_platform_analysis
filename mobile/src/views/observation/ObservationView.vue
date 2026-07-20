@@ -6,7 +6,6 @@ import { storeToRefs } from 'pinia'
 import { fetchFarmSites } from '@/api/farms'
 import {
   fetchObservationDrafts,
-  fetchObservationSummary,
   fetchObservations,
 } from '@/api/observations'
 import { ApiClientError } from '@/api/client'
@@ -16,8 +15,27 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import ObservationAiRiskSection from '@/views/observation/components/ObservationAiRiskSection.vue'
 import ObservationFilters from '@/views/observation/components/ObservationFilters.vue'
 import ObservationHero from '@/views/observation/components/ObservationHero.vue'
+import type { ObservationHeroKpiKey } from '@/views/observation/components/ObservationHero.vue'
 import ObservationListCard from '@/views/observation/components/ObservationListCard.vue'
 import ObservationRecentAiSection from '@/views/observation/components/ObservationRecentAiSection.vue'
+import ObservationWeekCalendar from '@/views/observation/components/ObservationWeekCalendar.vue'
+import {
+  aggregateObsCalendar,
+  formatObsListRangeLabel,
+  pastRangeStart,
+  rangeFromStart,
+  shiftIsoDays,
+  type ObsCalDayCounts,
+} from '@/views/observation/observationCalendar'
+import {
+  HOME_WEEK_LIMIT,
+  homeWeekRange,
+  isDefaultHomeWeekRange,
+  LABEL_HOME_WEEK_LIST,
+  mapHomeRecentAiItems,
+  mapHomeRiskItems,
+  summarizeHomeWeek,
+} from '@/views/observation/observationHomeWeek'
 import { todayIso } from '@/views/work-log/workLogConstants'
 import { clearObsDraft } from '@/composables/obsDraft'
 import { useAppStore } from '@/composables/stores/app'
@@ -38,62 +56,68 @@ const route = useRoute()
 const { farmCd, farm } = storeToRefs(store)
 
 const loading = ref(true)
-const summaryLoading = ref(true)
+const homeWeekLoading = ref(true)
 const errorMessage = ref('')
 const toastMessage = ref('')
-const summary = ref<ObservationSummary | null>(null)
+const homeWeekSummary = ref<ObservationSummary | null>(null)
+const homeWeekItems = ref<ObservationListItem[]>([])
 const items = ref<ObservationListItem[]>([])
 const drafts = ref<ObservationDraftItem[]>([])
 const sites = ref<FarmSiteSummary[]>([])
 const listAnchor = ref<HTMLElement | null>(null)
-const lookupHead = ref<HTMLElement | null>(null)
 const showFabChoice = ref(false)
+
+const calRangeStart = ref(pastRangeStart(todayIso()))
+const calSelectedDt = ref(todayIso())
+const calDays = ref<Record<string, ObsCalDayCounts>>({})
+const calLoading = ref(false)
+/** 관찰상세조회 — 조건(필터) 카드만 토글, 기본 감춤. 목록은 항상 표시 */
+const filterOpen = ref(false)
 
 const siteId = ref('')
 const keyword = ref('')
 const sort = ref<'obs_dt_desc' | 'obs_dt_asc'>('obs_dt_desc')
-const dateFrom = ref('')
-const dateTo = ref('')
+/** 기본·「최근」= 오늘 포함 과거 7일 */
+const dateFrom = ref(pastRangeStart(todayIso()))
+const dateTo = ref(todayIso())
 
 const appliedKeyword = ref('')
 const appliedSiteId = ref('')
-const appliedDateFrom = ref('')
-const appliedDateTo = ref('')
+const appliedDateFrom = ref(dateFrom.value)
+const appliedDateTo = ref(dateTo.value)
 
-const hasFilter = computed(
+const hasExtraFilter = computed(
   () =>
-    Boolean(appliedKeyword.value.trim()) ||
-    Boolean(appliedSiteId.value) ||
-    Boolean(appliedDateFrom.value) ||
-    Boolean(appliedDateTo.value),
+    Boolean(appliedKeyword.value.trim()) || Boolean(appliedSiteId.value),
+)
+
+const riskItems = computed(() =>
+  mapHomeRiskItems(homeWeekItems.value, todayIso()),
+)
+const recentAiItems = computed(() =>
+  mapHomeRecentAiItems(homeWeekItems.value, todayIso()),
 )
 
 const resultStatus = computed(() => {
   if (loading.value) {
-    return hasFilter.value || keyword.value.trim() || siteId.value
+    return hasExtraFilter.value || keyword.value.trim() || siteId.value
       ? '검색 중…'
       : '목록 불러오는 중…'
   }
   if (errorMessage.value) return ''
-  if (hasFilter.value && items.value.length === 0) {
-    return MSG_LIST_EMPTY_FILTER
+  const from = appliedDateFrom.value || pastRangeStart(todayIso())
+  const to = appliedDateTo.value || todayIso()
+  const weekTitle = isDefaultHomeWeekRange(from, to, todayIso())
+    ? LABEL_HOME_WEEK_LIST
+    : formatObsListRangeLabel(from, to)
+  if (!items.value.length) {
+    return hasExtraFilter.value ? MSG_LIST_EMPTY_FILTER : MSG_LIST_EMPTY
   }
-  if (!items.value.length) return MSG_LIST_EMPTY
-  if (hasFilter.value) {
-    const kw = appliedKeyword.value ? `「${appliedKeyword.value}」 ` : ''
-    return `${kw}검색 결과 ${items.value.length}건`
+  if (hasExtraFilter.value && appliedKeyword.value) {
+    return `「${appliedKeyword.value}」 ${weekTitle}`
   }
-  return `최근 관찰 ${items.value.length}건`
+  return weekTitle
 })
-
-function shiftIsoDays(iso: string, delta: number): string {
-  const d = new Date(`${iso}T12:00:00`)
-  d.setDate(d.getDate() + delta)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
 
 async function loadSites() {
   try {
@@ -103,18 +127,32 @@ async function loadSites() {
   }
 }
 
-async function loadSummary() {
-  summaryLoading.value = true
+async function loadHomeWeek() {
+  homeWeekLoading.value = true
   try {
-    summary.value = await fetchObservationSummary(farmCd.value)
+    const { from, to } = homeWeekRange(todayIso())
+    const rows = await fetchObservations(farmCd.value, {
+      date_from: from,
+      date_to: to,
+      sort: 'obs_dt_desc',
+      limit: HOME_WEEK_LIMIT,
+    })
+    homeWeekItems.value = rows
+    homeWeekSummary.value = summarizeHomeWeek(rows, todayIso())
+    if (calRangeStart.value === from) {
+      calDays.value = aggregateObsCalendar(rows)
+    }
   } catch (err) {
-    summary.value = null
+    homeWeekItems.value = []
+    homeWeekSummary.value = null
     if (!errorMessage.value) {
       errorMessage.value =
-        err instanceof ApiClientError ? err.message : '요약을 불러오지 못했습니다.'
+        err instanceof ApiClientError
+          ? err.message
+          : '최근 7일 요약을 불러오지 못했습니다.'
     }
   } finally {
-    summaryLoading.value = false
+    homeWeekLoading.value = false
   }
 }
 
@@ -126,19 +164,43 @@ async function loadDrafts() {
   }
 }
 
+async function loadCalendar() {
+  const { from, to } = rangeFromStart(calRangeStart.value)
+  const home = homeWeekRange(todayIso())
+  if (from === home.from && to === home.to && homeWeekItems.value.length) {
+    calDays.value = aggregateObsCalendar(homeWeekItems.value)
+    return
+  }
+  calLoading.value = true
+  try {
+    const rows = await fetchObservations(farmCd.value, {
+      date_from: from,
+      date_to: to,
+      sort: 'obs_dt_desc',
+      limit: HOME_WEEK_LIMIT,
+    })
+    calDays.value = aggregateObsCalendar(rows)
+  } catch {
+    calDays.value = {}
+  } finally {
+    calLoading.value = false
+  }
+}
+
 async function loadList(opts?: { scrollToList?: boolean }) {
   loading.value = true
   errorMessage.value = ''
   const kw = keyword.value.trim()
   const sid = siteId.value
-  const from = dateFrom.value.trim()
-  const to = dateTo.value.trim()
+  const today = todayIso()
+  const from = dateFrom.value.trim() || pastRangeStart(today)
+  const to = dateTo.value.trim() || today
   try {
     items.value = await fetchObservations(farmCd.value, {
       site_id: sid || undefined,
       keyword: kw || undefined,
-      date_from: from || undefined,
-      date_to: to || undefined,
+      date_from: from,
+      date_to: to,
       sort: sort.value,
       limit: 50,
     })
@@ -160,7 +222,31 @@ async function loadList(opts?: { scrollToList?: boolean }) {
 }
 
 async function refreshAll() {
-  await Promise.all([loadSummary(), loadList(), loadDrafts()])
+  await Promise.all([loadHomeWeek(), loadList(), loadDrafts()])
+  await loadCalendar()
+}
+
+function onCalSelect(iso: string) {
+  calSelectedDt.value = iso
+  dateFrom.value = iso
+  dateTo.value = iso
+  void loadList({ scrollToList: true })
+}
+
+function onCalPrevRange() {
+  calRangeStart.value = shiftIsoDays(calRangeStart.value, -7)
+  void loadCalendar()
+}
+
+function onCalNextRange() {
+  const next = shiftIsoDays(calRangeStart.value, 7)
+  const maxStart = pastRangeStart(todayIso())
+  calRangeStart.value = next > maxStart ? maxStart : next
+  void loadCalendar()
+}
+
+function onToggleFilter() {
+  filterOpen.value = !filterOpen.value
 }
 
 function goNewBlank() {
@@ -174,6 +260,15 @@ function goResume(obsId: string) {
   void router.push({
     name: 'observation-new',
     query: { obs_id: obsId },
+  })
+}
+
+function goDetail(obsId: string) {
+  const id = String(obsId || '').trim()
+  if (!id) return
+  void router.push({
+    name: 'observation-detail',
+    params: { obsId: id },
   })
 }
 
@@ -192,16 +287,15 @@ function onQuickRange(days: number) {
   void loadList({ scrollToList: true })
 }
 
-async function onKpiSelect(key: 'today' | 'danger' | 'ai' | 'fruit') {
-  if (key === 'today') {
-    const t = todayIso()
-    dateFrom.value = t
-    dateTo.value = t
-    await loadList({ scrollToList: true })
-    return
-  }
-  await nextTick()
-  lookupHead.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+async function onKpiSelect(_key: ObservationHeroKpiKey) {
+  const { from, to } = homeWeekRange(todayIso())
+  dateFrom.value = from
+  dateTo.value = to
+  await loadList({ scrollToList: true })
+}
+
+function onOpenRecentAiAll() {
+  void onKpiSelect('ai')
 }
 
 onMounted(async () => {
@@ -223,29 +317,46 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <main class="content">
+    <main class="content ods-page-content">
       <OdsAppBar />
 
       <ObservationHero
         :farm-name="farm?.farm_nm || undefined"
-        :summary="summary"
-        :loading="summaryLoading"
+        :summary="homeWeekSummary"
+        :loading="homeWeekLoading"
         @select="onKpiSelect"
       />
 
       <ObservationAiRiskSection
-        :loading="summaryLoading"
-        @open="onKpiSelect('danger')"
+        :items="riskItems"
+        :loading="homeWeekLoading"
+        @open="goDetail"
       />
 
       <ObservationRecentAiSection
-        :loading="summaryLoading"
-        @open-all="onKpiSelect('ai')"
+        :items="recentAiItems"
+        :loading="homeWeekLoading"
+        @open-all="onOpenRecentAiAll"
+        @select="goDetail"
       />
 
-      <section ref="lookupHead" class="lookup" aria-label="관찰 조회">
-        <h2 class="section-title">관찰 조회</h2>
+      <ObservationWeekCalendar
+        :range-start="calRangeStart"
+        :selected-dt="calSelectedDt"
+        :days="calDays"
+        :loading="calLoading"
+        :detail-open="filterOpen"
+        @select="onCalSelect"
+        @prev-range="onCalPrevRange"
+        @next-range="onCalNextRange"
+        @toggle-detail="onToggleFilter"
+      />
 
+      <div
+        v-show="filterOpen"
+        id="obs-lookup-panel"
+        class="lookup-filters"
+      >
         <ObservationFilters
           v-model:site-id="siteId"
           v-model:keyword="keyword"
@@ -257,7 +368,9 @@ onMounted(async () => {
           @apply="() => loadList({ scrollToList: true })"
           @quick-range="onQuickRange"
         />
+      </div>
 
+      <section class="lookup" aria-label="관찰내역">
         <div ref="listAnchor" class="list-anchor">
           <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
           <p
@@ -290,7 +403,7 @@ onMounted(async () => {
       :aria-label="MSG_FAB_NEW"
       @click="onFabClick"
     >
-      <img class="fab__ico" :src="iconCamera" alt="" />
+      <img class="fab__ico" :src="iconCamera" alt="" >
       {{ MSG_FAB_NEW }}
     </button>
 
@@ -340,34 +453,40 @@ onMounted(async () => {
   padding-bottom: calc(140px + env(safe-area-inset-bottom));
 }
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-16);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
+  /* padding/max-width/gap -> .ods-page-content (AppBar SSOT) */
 }
 .lookup {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-12);
 }
-.section-title {
-  margin: 0;
-  font: var(--ods-font-headline);
-  color: var(--ods-color-text);
+.lookup-filters {
+  min-width: 0;
+  /* sticky AppBar 아래로 맞춰 scrollIntoView 가림 방지 */
+  scroll-margin-top: calc(
+    env(safe-area-inset-top, 0px) + 56px + var(--ods-space-8)
+  );
 }
 .list-anchor {
   margin-top: 0;
+  scroll-margin-top: calc(
+    env(safe-area-inset-top, 0px) + 56px + var(--ods-space-8)
+  );
 }
 .status {
-  margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text-secondary);
+  margin: 0 0 var(--ods-space-12);
+  font: var(--ods-font-headline);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: var(--ods-color-text);
 }
 .status--loading {
-  color: var(--ods-color-ai);
+  font: var(--ods-font-body-2);
   font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ods-color-ai);
 }
 .error {
   margin: 0 0 var(--ods-space-8);

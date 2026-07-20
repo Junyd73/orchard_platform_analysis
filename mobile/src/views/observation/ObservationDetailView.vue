@@ -246,10 +246,18 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
 function onAiConfirmed(payload: {
   ai_status: string
   confirmed_name: string
+  severity_cd?: string
 }) {
-  if (detail.value) {
-    detail.value = { ...detail.value, ai_status: payload.ai_status || 'CONFIRMED' }
+  if (!detail.value) return
+  detail.value = {
+    ...detail.value,
+    ai_status: payload.ai_status || 'CONFIRMED',
+    ...(payload.severity_cd
+      ? { severity_cd: payload.severity_cd }
+      : {}),
   }
+  // 목록·배지용 severity_nm 등 최신값 반영
+  void load()
 }
 
 function onGuideUpdated(payload: {
@@ -494,6 +502,7 @@ watch(showDeleteDlg, async (open) => {
             :farm-cd="farmCd"
             :obs-id="obsId"
             :photo-ids="photoIds"
+            :master-severity-cd="detail?.severity_cd"
             crop-name="배"
             @updated="onAiUpdated"
             @confirmed="onAiConfirmed"

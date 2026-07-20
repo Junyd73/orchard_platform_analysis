@@ -21,6 +21,13 @@ export const OBS_AI_DURATION_NOTICE =
 export const OBS_TARGET_PEST_CD = 'OB010400'
 export const OBS_TARGET_FRUIT_CD = 'OB010200'
 
+/** PC m_common_code OS01 — 위험도(심각도) */
+export const OBS_SEVERITY_PARENT_CD = 'OS01'
+export const OBS_SEVERITY_NORMAL_CD = 'OS010100'
+export const OBS_SEVERITY_WATCH_CD = 'OS010200'
+export const OBS_SEVERITY_CAUTION_CD = 'OS010300'
+export const OBS_SEVERITY_DANGER_CD = 'OS010400'
+
 /** PC Stage2 열매측정 공통코드 대분류 */
 export const OBS_FRUIT_SHAPE_PARENT_CD = 'FS01'
 export const OBS_FRUIT_COLOR_PARENT_CD = 'FC01'

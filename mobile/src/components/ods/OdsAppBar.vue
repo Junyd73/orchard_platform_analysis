@@ -141,9 +141,15 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 50;
-  /* 부모 page padding을 상쇄해 Surface가 가로 full-bleed */
+  /* 부모 page padding을 상쇄해 Surface가 가로 full-bleed
+     (부모는 .ods-page-content — --ods-page-padding-x SSOT) */
   margin-inline: calc(-1 * var(--ods-page-padding-x));
-  margin-bottom: calc(var(--ods-space-8) * -1 * (1 - var(--ods-appbar-p)));
+  /* 스크롤 전: page gap을 상쇄해 AppBar↔다음(Hero) = --ods-appbar-content-gap
+     (= --ods-appbar-pad-y, 상단 패딩과 동일) */
+  margin-bottom: calc(
+    (var(--ods-page-content-gap) - var(--ods-appbar-content-gap)) * -1 *
+      (1 - var(--ods-appbar-p))
+  );
   padding-top: env(safe-area-inset-top, 0px);
   /* Glass 투명도 고정 (스크롤 전·후 동일). Elevation·Border만 progress로 보강 */
   background: rgba(255, 255, 255, 0.22);
@@ -178,7 +184,7 @@ onUnmounted(() => {
   min-height: 48px;
   /* 아이콘(22px)이 카드 좌·우 여백(--ods-page-padding-x)과 시각 정렬되도록
      터치영역(44px) 보정: (44-22)/2 = 11px 바깥으로 당김 */
-  padding: var(--ods-space-4)
+  padding: var(--ods-appbar-pad-y)
     calc(var(--ods-page-padding-x) - ((var(--ods-touch-min) - 22px) / 2));
 }
 

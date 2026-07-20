@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
+import { fetchCommonCodes } from '@/api/commonCodes'
 import { fetchFarmSites } from '@/api/farms'
 import { fetchObservationTrack } from '@/api/observationFruit'
 import {
@@ -19,12 +20,15 @@ import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSegmented from '@/components/ods/OdsSegmented.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
+  OBS_SEVERITY_NORMAL_CD,
+  OBS_SEVERITY_PARENT_CD,
   OBS_TARGET_FRUIT_CD,
   OBS_TARGET_PEST_CD,
 } from '@/composables/constants/app'
 import { formatDateKo, todayLocalIso } from '@/shared/formatDateKo'
 import { clearObsDraft, writeObsDraft } from '@/composables/obsDraft'
 import { useAppStore } from '@/composables/stores/app'
+import type { CommonCodeItem } from '@/types/commonCode'
 import type { FarmSiteSummary } from '@/types/farm'
 
 const route = useRoute()
@@ -33,11 +37,13 @@ const store = useAppStore()
 const { farmCd, farm } = storeToRefs(store)
 
 const sites = ref<FarmSiteSummary[]>([])
+const severityCodes = ref<CommonCodeItem[]>([])
 const obsId = ref('')
 const obsDt = ref(todayLocalIso())
 /** 신규 진입 시 미선택('') — 병해충/과실 필수 선택 */
 const targetTypeCd = ref('')
 const siteId = ref('')
+const severityCd = ref(OBS_SEVERITY_NORMAL_CD)
 const obsTitle = ref('')
 const obsContent = ref('')
 /** 후속 관찰: 직전 obs_id */
@@ -71,7 +77,7 @@ const canSubmit = computed(() => {
   if (isFollowUpObs.value) {
     return Boolean(siteId.value && targetTypeCd.value && obsTitle.value.trim())
   }
-  if (!siteId.value || !targetTypeCd.value) return false
+  if (!siteId.value || !targetTypeCd.value || !severityCd.value) return false
   return Boolean(obsTitle.value.trim())
 })
 
@@ -92,6 +98,7 @@ function resetBlankForm() {
   obsDt.value = todayLocalIso()
   targetTypeCd.value = ''
   siteId.value = sites.value.length === 1 ? sites.value[0].site_id : ''
+  severityCd.value = OBS_SEVERITY_NORMAL_CD
   obsTitle.value = ''
   obsContent.value = ''
   parentObsId.value = ''
@@ -146,6 +153,24 @@ async function loadSites() {
   }
 }
 
+async function loadSeverityCodes() {
+  try {
+    severityCodes.value = await fetchCommonCodes(
+      farmCd.value,
+      OBS_SEVERITY_PARENT_CD,
+    )
+  } catch {
+    severityCodes.value = []
+  }
+  if (
+    severityCd.value &&
+    severityCodes.value.length &&
+    !severityCodes.value.some((c) => c.code_cd === severityCd.value)
+  ) {
+    severityCd.value = OBS_SEVERITY_NORMAL_CD
+  }
+}
+
 async function restoreIfNeeded() {
   const id = resolveInitialObsId()
   const parentId = resolveParentObsId()
@@ -161,6 +186,7 @@ async function restoreIfNeeded() {
             ? OBS_TARGET_PEST_CD
             : OBS_TARGET_FRUIT_CD
       siteId.value = parent.site_id || ''
+      severityCd.value = parent.severity_cd || OBS_SEVERITY_NORMAL_CD
       zoneNm.value = parent.zone_nm || ''
       rowNo.value = parent.row_no || ''
       treeNo.value = parent.tree_no || ''
@@ -195,6 +221,7 @@ async function restoreIfNeeded() {
           ? OBS_TARGET_PEST_CD
           : ''
     siteId.value = detail.site_id || ''
+    severityCd.value = detail.severity_cd || OBS_SEVERITY_NORMAL_CD
     zoneNm.value = detail.zone_nm || ''
     rowNo.value = detail.row_no || ''
     treeNo.value = detail.tree_no || ''
@@ -268,7 +295,11 @@ async function onNext() {
   if (!canSubmit.value) {
     errorMessage.value = isFollowUpObs.value
       ? '필수 항목을 확인해 주세요. (관찰일자·관찰 내용)'
-      : '필수 항목을 확인해 주세요. (관찰일자·대상·필지·제목·관찰 내용)'
+      : '필수 항목을 확인해 주세요. (관찰일자·대상·필지·위험도·제목·관찰 내용)'
+    return
+  }
+  if (!severityCd.value) {
+    errorMessage.value = '위험도를 선택해 주세요.'
     return
   }
   if (obsDt.value > todayLocalIso()) {
@@ -281,6 +312,7 @@ async function onNext() {
     obs_dt: obsDt.value,
     target_type_cd: targetTypeCd.value,
     site_id: siteId.value,
+    severity_cd: severityCd.value,
     obs_title: obsTitle.value.trim() || null,
     obs_content: obsContent.value.trim() || null,
     parent_obs_id: parentObsId.value || null,
@@ -324,6 +356,7 @@ onMounted(async () => {
     await store.refreshAll()
   }
   await loadSites()
+  await loadSeverityCodes()
   await restoreIfNeeded()
   if (!obsId.value && !siteId.value && sites.value.length === 1) {
     siteId.value = sites.value[0].site_id
@@ -435,6 +468,18 @@ watch(
               <option value="" disabled>필지 선택</option>
               <option v-for="s in sites" :key="s.site_id" :value="s.site_id">
                 {{ s.site_nm || s.site_id }}
+              </option>
+            </OdsSelect>
+          </OdsFormField>
+
+          <OdsFormField label="위험도" required>
+            <OdsSelect v-model="severityCd" variant="form" required>
+              <option
+                v-for="c in severityCodes"
+                :key="c.code_cd"
+                :value="c.code_cd"
+              >
+                {{ c.code_nm || c.code_cd }}
               </option>
             </OdsSelect>
           </OdsFormField>

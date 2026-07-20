@@ -1,7 +1,7 @@
 # 모바일 관찰일지 설계 (Step-09)
 
-> 조사 기준일: 2026-07-16  
-> 범위: **조사·설계만** (기능/DB/API/사진 저장 구현 없음)  
+> 조사 기준일: 2026-07-16 · 위험도·홈 실데이터 정책 보강: **2026-07-20**  
+> 범위: 초기는 조사·설계. **구현·UI는 ODS / SCR 우선** (`mobile/docs/VERSIONS.md`)  
 > 원천: PyQt 관찰일지 Stage1~3 + SQLite (`ensure_observation_*` 스키마)
 
 본 문서는 **초기 설계 문서**이다. 구현·UI 정책은 **ODS / SCR이 우선**한다.
@@ -203,6 +203,17 @@ AI 후보 확정(ObservationCandidateConfirmApplicationService
 REST: `POST /api/v1/farms/{farm_cd}/observations/{obs_id}/candidates/confirm`
 
 방제 AI 추천(`pesticide_ai_recommend_*`)과는 **코드·DB 미연결**.
+
+### 1.7.1 위험도(severity) · AI 확정 정책 (모바일 2026-07-20)
+
+| 단계 | 정책 |
+|------|------|
+| 등록(SCR-002) | 사용자가 OS01(`severity_cd`) 선택. 미지정 시 `OS010100` |
+| AI 확정(SCR-004) | confirm body에 **`severity_cd` 필수**. urgency→OS01은 **제안만**. 확정 시 master `severity_cd`를 사용자 값으로 덮어씀 |
+| 재확정 | 동일 후보여도 API 호출해 severity 재저장 |
+| 목록/홈 | `ai_pest_nm`(확정명·후보명) · 분석상태+위험도 이중 배지 · SCR-001 KPI는 **최근 7일 목록 집계** |
+
+상세: `mobile/docs/api/README.md` · `screens/SCR-001.md` · `SCR-002.md` · `SCR-004.md`
 
 ### 1.8 현재 저장 항목 요약
 

@@ -14,6 +14,7 @@ from app.core.observation_constants import (
     MOBILE_BASIC_TARGET_CDS,
     OBS_AI_STATUS_NONE,
     OBS_PROGRESS_WATCHING_CD,
+    OBS_SEVERITY_CDS,
     OBS_SEVERITY_NORMAL_CD,
     TARGET_DEFAULT_OBS_TYPE,
 )
@@ -134,8 +135,29 @@ class ObservationService:
         )
         return detail.model_copy(update={"can_delete": allowed})
 
+    def _resolve_severity_cd(
+        self,
+        raw: str | None,
+        *,
+        default: str,
+        required: bool = False,
+    ) -> str:
+        cd = str(raw or "").strip()
+        if not cd:
+            if required:
+                raise BusinessRuleError("위험도를 선택해 주세요.")
+            return default
+        if cd not in OBS_SEVERITY_CDS:
+            raise BusinessRuleError(
+                "위험도는 정상·관심·주의·위험 중 하나여야 합니다."
+            )
+        return cd
+
     def _normalize_basic(
-        self, body: ObservationBasicCreateRequest | ObservationBasicUpdateRequest
+        self,
+        body: ObservationBasicCreateRequest | ObservationBasicUpdateRequest,
+        *,
+        existing_severity_cd: str | None = None,
     ) -> dict:
         obs_dt = str(body.obs_dt or "").strip()
         if not _DATE_RE.match(obs_dt):
@@ -161,13 +183,26 @@ class ObservationService:
         if not content:
             content = title
 
+        if existing_severity_cd is not None:
+            # update: 미지정 시 기존값 유지
+            severity = self._resolve_severity_cd(
+                body.severity_cd,
+                default=str(existing_severity_cd or "").strip()
+                or OBS_SEVERITY_NORMAL_CD,
+            )
+        else:
+            severity = self._resolve_severity_cd(
+                body.severity_cd,
+                default=OBS_SEVERITY_NORMAL_CD,
+            )
+
         obs_type = TARGET_DEFAULT_OBS_TYPE[target]
         return {
             "obs_dt": obs_dt,
             "target_type_cd": target,
             "obs_type_cd": obs_type,
             "site_id": site_id,
-            "severity_cd": OBS_SEVERITY_NORMAL_CD,
+            "severity_cd": severity,
             "progress_status_cd": OBS_PROGRESS_WATCHING_CD,
             "obs_title": title,
             "obs_content": content,
@@ -313,7 +348,9 @@ class ObservationService:
         if exist.observation_status not in (OBS_STATUS_DRAFT, OBS_STATUS_COMPLETED):
             raise BusinessRuleError("수정할 수 없는 상태입니다.")
         uid = self._user_id(user_id)
-        row = self._normalize_basic(body)
+        row = self._normalize_basic(
+            body, existing_severity_cd=exist.severity_cd
+        )
         if not self._repo.site_exists(farm, row["site_id"]):
             raise BusinessRuleError("선택한 필지를 찾을 수 없습니다.")
         ok = self._repo.update_observation_basic(farm, oid, row, uid)

@@ -71,11 +71,15 @@ AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한
 
 ### 배치 (v1.1.1)
 
-- AppBar는 페이지 `.content`(또는 `MobileLayout`의 `.content`) **안** 첫 자식으로 둔다.
+- AppBar는 페이지 `.ods-page-content`(또는 동등한 content) **안** 첫 자식으로 둔다.
 - 가로 full-bleed: `margin-inline: calc(-1 * var(--ods-page-padding-x))` 로 content 패딩을 상쇄한다.
 - **아이콘 시각 정렬:** AppBar 좌·우 아이콘(22px)은 카드 좌·우 여백(`--ods-page-padding-x`)과 맞춘다. 터치영역(44px)은 안쪽으로만 확장한다.
 - `.page`/`.shell` 직속( content 밖 )에 두면 음수 마진이 어긋나므로 **금지**.
-- content 상단 패딩은 상세와 동일하게 `var(--ods-space-12)` 권장(목록·Home·MobileLayout 정합).
+- **AppBar 상하좌우 여백 SSOT:** `main.ods-page-content` + 토큰
+  (`--ods-page-content-pad-top: 0`, `--ods-page-padding-x`, `--ods-page-content-pad-bottom`).
+  화면별 `.content { padding: … }`로 AppBar 주변 여백을 덮어쓰지 **않는다**.
+- **AppBar 상단 패딩 = Hero(다음 블록) 간격:** `--ods-appbar-pad-y` = `--ods-appbar-content-gap`.
+  스크롤 전 `OdsAppBar`가 page `gap`을 음수 마진으로 상쇄해 동일 간격을 만든다.
 
 ### Surface 정책 (v1.1)
 
@@ -151,7 +155,7 @@ AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한
 | 계절 | 4종 (연두/진녹/골드/블루그레이) |
 | AI 테마 | 6종 (잎·과실·병해충·새순·꽃·봉지) — **우측 이미지만** |
 | 날씨 | 4종 (맑음·흐림·비·안개) — **사진만** |
-| KPI | **5칸** 고정 · 영농일지와 동일 높이 |
+| KPI | **4칸** 고정 · 영농일지와 동일 높이 |
 | 조합 | \(4 \times 6 \times 4 = 96\) |
 
 ## 6. Card / Token

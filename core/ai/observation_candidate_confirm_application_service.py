@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """관찰 AI 후보 확정 Application Service — UI·REST 공통.
 
-Stage3 confirm_ai_candidate 저장 규칙을 변경하지 않고 검증·payload 만 담당한다.
+Stage3 confirm_ai_candidate 저장 + (선택) severity_cd 반영.
 """
 
 from __future__ import annotations
@@ -20,6 +20,10 @@ from core.observation_stage3 import (
     list_ai_candidates,
 )
 
+_SEVERITY_OK = frozenset(
+    {"OS010100", "OS010200", "OS010300", "OS010400"}
+)
+
 
 class ObservationCandidateConfirmApplicationService:
     """후보 확정 유스케이스 (검증 → Stage3 확정 → 공통 payload)."""
@@ -34,12 +38,14 @@ class ObservationCandidateConfirmApplicationService:
         analysis_id: str,
         candidate_seq: int,
         confirmed_name: str | None = None,
+        severity_cd: str | None = None,
         request_id: int = 0,
     ) -> dict[str, Any]:
         farm = str(farm_cd or "").strip()
         oid = str(obs_id or "").strip()
         uid = str(user_id or "").strip()
         aid = str(analysis_id or "").strip()
+        sev = str(severity_cd or "").strip()
         req_id = int(request_id)
 
         fail = {
@@ -51,6 +57,7 @@ class ObservationCandidateConfirmApplicationService:
             "confirmed_by": None,
             "confirmed_at": None,
             "ai_status": None,
+            "severity_cd": None,
             "error_code": "AI_CONFIRM_PARAM",
             "error_message": safe_user_message("AI_CONFIRM_PARAM"),
         }
@@ -117,6 +124,13 @@ class ObservationCandidateConfirmApplicationService:
                     "error_message": "확정 병해충명을 입력해 주세요.",
                 }
 
+            # REST(모바일)는 severity 전달. PC 등 미전달 시 master severity 유지.
+            if sev and sev not in _SEVERITY_OK:
+                return {
+                    **fail,
+                    "error_message": "위험도는 정상·관심·주의·위험 중 하나여야 합니다.",
+                }
+
             ok, msg = confirm_ai_candidate(
                 db,
                 farm,
@@ -125,6 +139,7 @@ class ObservationCandidateConfirmApplicationService:
                 name,
                 uid,
                 obs_id=oid,
+                severity_cd=sev or None,
             )
             if not ok:
                 code = "AI_CONFIRM_NOT_FOUND"
@@ -153,6 +168,8 @@ class ObservationCandidateConfirmApplicationService:
                 "confirmed_by": conf.get("confirmed_by") or uid,
                 "confirmed_at": conf.get("confirmed_at"),
                 "ai_status": str(after.get("ai_status") or "CONFIRMED"),
+                "severity_cd": str(after.get("severity_cd") or sev or "").strip()
+                or None,
                 "error_code": "",
                 "error_message": str(msg or "병해충 후보가 확정되었습니다."),
             }

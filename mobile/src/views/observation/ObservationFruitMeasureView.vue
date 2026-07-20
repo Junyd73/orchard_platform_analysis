@@ -218,7 +218,7 @@ watch(obsId, () => {
 
 <template>
   <div class="page">
-    <main class="content">
+    <main class="content ods-page-content">
       <OdsAppBar show-back @back="goBack" />
 
       <header class="top">
@@ -285,9 +285,7 @@ watch(obsId, () => {
   padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
 }
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--ods-space-16) var(--ods-page-padding-x) var(--ods-space-24);
+  /* padding/max-width -> .ods-page-content (AppBar SSOT) */
 }
 .top {
   margin-top: var(--ods-space-8);

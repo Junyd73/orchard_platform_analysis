@@ -13,6 +13,11 @@ class ObservationCandidateConfirmRequest(BaseModel):
         default=None,
         description="미지정 시 후보 name_ko 사용",
     )
+    severity_cd: str = Field(
+        ...,
+        min_length=1,
+        description="사용자가 확인한 위험도 OS010100~OS010400",
+    )
 
 
 class ObservationCandidateConfirmResponse(BaseModel):
