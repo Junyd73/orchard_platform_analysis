@@ -30,6 +30,14 @@ type CorpRow = {
   qty_change_vs_prev?: number
 }
 
+type FlowCell = { date: string; price: number | null }
+type FlowRow = {
+  corp_name: string
+  values: FlowCell[]
+  today_price?: number | null
+  pct_vs_prev?: number | null
+}
+
 type WeatherSummary = {
   temp_min?: number
   temp_max?: number
@@ -66,12 +74,83 @@ function formatNum(v: unknown, digits = 0): string {
   })
 }
 
+function formatDateLabel(iso: string, isLast: boolean): string {
+  const s = String(iso || '').trim()
+  const md = s.length >= 10 ? s.slice(5, 10) : s
+  return isLast ? `${md}(당일)` : md
+}
+
+function formatPct(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct)) return ''
+  const sign = pct > 0 ? '+' : ''
+  return `(${sign}${pct.toFixed(1)}%)`
+}
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
   return v as Record<string, unknown>
 }
 
+function parseFlowRows(raw: unknown): FlowRow[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((row) => {
+      const r = asRecord(row)
+      if (!r) return null
+      const valuesRaw = Array.isArray(r.values) ? r.values : []
+      const values: FlowCell[] = valuesRaw.map((cell) => {
+        const c = asRecord(cell)
+        const price = c?.price == null ? null : Number(c.price)
+        return {
+          date: String(c?.date || ''),
+          price: price != null && Number.isFinite(price) && price > 0 ? price : null,
+        }
+      })
+      return {
+        corp_name: String(r.corp_name || '—'),
+        values,
+        today_price: r.today_price == null ? null : Number(r.today_price),
+        pct_vs_prev: r.pct_vs_prev == null ? null : Number(r.pct_vs_prev),
+      }
+    })
+    .filter((x): x is FlowRow => x != null)
+}
+
+const isSignalView = computed(() => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  if (!payload) return false
+  if (String(payload.view || '') === 'signal') return true
+  const market = asRecord(payload.market)
+  const flow = asRecord(market?.flow)
+  return Boolean(flow?.max_flow || flow?.avg_flow)
+})
+
+const flowDates = computed((): string[] => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const market = asRecord(payload?.market)
+  const flow = asRecord(market?.flow)
+  const dates = flow?.dates
+  if (Array.isArray(dates) && dates.length) return dates.map((d) => String(d))
+  const first = maxFlowRows.value[0] || avgFlowRows.value[0]
+  return (first?.values || []).map((v) => v.date)
+})
+
+const maxFlowRows = computed((): FlowRow[] => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const market = asRecord(payload?.market)
+  const flow = asRecord(market?.flow)
+  return parseFlowRows(flow?.max_flow)
+})
+
+const avgFlowRows = computed((): FlowRow[] => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const market = asRecord(payload?.market)
+  const flow = asRecord(market?.flow)
+  return parseFlowRows(flow?.avg_flow)
+})
+
 const corpRows = computed((): CorpRow[] => {
+  if (isSignalView.value) return []
   const payload = props.item?.payload as NotificationPayload | null | undefined
   if (!payload) return []
   const market = asRecord(payload.market)
@@ -162,11 +241,103 @@ function onNavigate() {
 
         <div class="ntf-sheet__body">
           <h2 class="ntf-sheet__title">{{ item.title }}</h2>
-          <p class="ntf-sheet__text">
+          <p class="ntf-sheet__text" :class="{ 'ntf-sheet__text--pre': isSignalView }">
             {{ item.body || '상세 본문이 없습니다.' }}
           </p>
 
-          <section v-if="corpRows.length" class="ntf-sheet__block" aria-label="가락 시세">
+          <template v-if="isSignalView">
+            <section
+              v-if="maxFlowRows.length"
+              class="ntf-sheet__block"
+              aria-label="최고가 흐름"
+            >
+              <h3 class="ntf-sheet__block-title">도매법인별 최고가 흐름표 (최근 5영업일)</h3>
+              <div class="ntf-sheet__table-wrap">
+                <table class="ntf-sheet__table">
+                  <thead>
+                    <tr>
+                      <th scope="col">법인명</th>
+                      <th
+                        v-for="(d, idx) in flowDates"
+                        :key="`max-h-${d}`"
+                        scope="col"
+                      >
+                        {{ formatDateLabel(d, idx === flowDates.length - 1) }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in maxFlowRows" :key="`max-${row.corp_name}`">
+                      <td>{{ row.corp_name }}</td>
+                      <td
+                        v-for="(cell, idx) in row.values"
+                        :key="`max-${row.corp_name}-${cell.date}`"
+                        class="num"
+                        :class="{
+                          today: idx === row.values.length - 1,
+                          up: idx === row.values.length - 1 && (row.pct_vs_prev || 0) > 0,
+                          down: idx === row.values.length - 1 && (row.pct_vs_prev || 0) < 0,
+                        }"
+                      >
+                        {{ formatNum(cell.price) }}
+                        <span
+                          v-if="idx === row.values.length - 1 && row.pct_vs_prev != null"
+                          class="chg"
+                        >{{ formatPct(row.pct_vs_prev) }}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section
+              v-if="avgFlowRows.length"
+              class="ntf-sheet__block"
+              aria-label="평균가 흐름"
+            >
+              <h3 class="ntf-sheet__block-title">도매법인별 평균가 흐름표 (최근 5영업일)</h3>
+              <div class="ntf-sheet__table-wrap">
+                <table class="ntf-sheet__table">
+                  <thead>
+                    <tr>
+                      <th scope="col">법인명</th>
+                      <th
+                        v-for="(d, idx) in flowDates"
+                        :key="`avg-h-${d}`"
+                        scope="col"
+                      >
+                        {{ formatDateLabel(d, idx === flowDates.length - 1) }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in avgFlowRows" :key="`avg-${row.corp_name}`">
+                      <td>{{ row.corp_name }}</td>
+                      <td
+                        v-for="(cell, idx) in row.values"
+                        :key="`avg-${row.corp_name}-${cell.date}`"
+                        class="num"
+                        :class="{
+                          today: idx === row.values.length - 1,
+                          up: idx === row.values.length - 1 && (row.pct_vs_prev || 0) > 0,
+                          down: idx === row.values.length - 1 && (row.pct_vs_prev || 0) < 0,
+                        }"
+                      >
+                        {{ formatNum(cell.price) }}
+                        <span
+                          v-if="idx === row.values.length - 1 && row.pct_vs_prev != null"
+                          class="chg"
+                        >{{ formatPct(row.pct_vs_prev) }}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </template>
+
+          <section v-else-if="corpRows.length" class="ntf-sheet__block" aria-label="가락 시세">
             <h3 class="ntf-sheet__block-title">도매법인별 출하 현황</h3>
             <div class="ntf-sheet__table-wrap">
               <table class="ntf-sheet__table">
@@ -341,6 +512,10 @@ function onNavigate() {
   word-break: break-word;
 }
 
+.ntf-sheet__text--pre {
+  white-space: pre-line;
+}
+
 .ntf-sheet__block {
   display: flex;
   flex-direction: column;
@@ -389,6 +564,24 @@ function onNavigate() {
 .ntf-sheet__table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.ntf-sheet__table .num.today {
+  font-weight: 700;
+}
+
+.ntf-sheet__table .num.up {
+  color: #e53935;
+}
+
+.ntf-sheet__table .num.down {
+  color: #1e88e5;
+}
+
+.ntf-sheet__table .chg {
+  display: block;
+  font: var(--ods-font-caption);
+  font-weight: 600;
 }
 
 .ntf-sheet__table--weather th {

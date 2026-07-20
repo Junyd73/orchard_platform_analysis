@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SCR-012 시세 시그널 예시 — 5영업일 흐름표</title>
+  <style>
+    :root {
+      --ods-color-primary: #2e7d32;
+      --ods-color-gray-900: #212121;
+      --ods-color-gray-700: #616161;
+      --ods-color-gray-500: #9e9e9e;
+      --ods-color-gray-100: #f5f5f5;
+      --ods-color-white: #ffffff;
+      --ods-color-ai: #4f7fb8;
+      --up: #e53935;
+      --down: #1e88e5;
+      --ods-font: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--ods-font);
+      background: #d7d7d7;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px;
+    }
+    .wrap { width: 390px; }
+    .hint {
+      margin: 0 0 12px;
+      text-align: center;
+      font-size: 12px;
+      color: #555;
+      line-height: 1.45;
+    }
+    .phone {
+      width: 390px;
+      height: 844px;
+      background: var(--ods-color-gray-100);
+      border-radius: 28px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.18);
+      position: relative;
+      overflow: hidden;
+    }
+    .dim {
+      position: absolute;
+      inset: 0;
+      background: rgba(33,33,33,.4);
+    }
+    .sheet {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      max-height: 86%;
+      background: var(--ods-color-white);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -8px 24px rgba(33,33,33,.14);
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 16px;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid var(--ods-color-gray-100);
+      flex: 0 0 auto;
+    }
+    .head-main { display: flex; align-items: center; gap: 8px; }
+    .badge {
+      display: inline-flex; align-items: center;
+      min-height: 24px; padding: 0 8px; border-radius: 999px;
+      background: #e3f2fd; color: var(--ods-color-ai);
+      font-size: 11px; font-weight: 600;
+    }
+    .time { font-size: 11px; color: var(--ods-color-gray-700); }
+    .x {
+      width: 44px; height: 44px; border: 0; border-radius: 12px;
+      background: var(--ods-color-gray-100); font-size: 22px; cursor: pointer;
+    }
+    .body { padding: 16px; overflow: auto; flex: 1; }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 18px; font-weight: 700; line-height: 1.35;
+      color: var(--ods-color-gray-900);
+    }
+    .summary {
+      margin: 0 0 16px;
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--ods-color-gray-100);
+      font-size: 14px; line-height: 1.55;
+      color: var(--ods-color-gray-900);
+    }
+    .note {
+      margin: 8px 0 0;
+      font-size: 11px; color: var(--ods-color-gray-500);
+    }
+    .block { margin-bottom: 16px; }
+    .block-title {
+      margin: 0 0 8px;
+      font-size: 15px; font-weight: 600;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--ods-color-gray-100);
+      border-radius: 12px;
+      background: var(--ods-color-gray-100);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      min-width: 480px;
+    }
+    th, td {
+      padding: 8px 8px;
+      border-bottom: 1px solid #eee;
+      white-space: nowrap;
+      text-align: left;
+    }
+    thead th {
+      background: #fff;
+      color: var(--ods-color-gray-700);
+      font-weight: 600;
+    }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .today { font-weight: 700; }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .chg { display: block; font-size: 11px; font-weight: 600; }
+    .foot { padding: 12px 16px 0; flex: 0 0 auto; }
+    .btn {
+      width: 100%; height: 52px; border: 0; border-radius: 12px;
+      background: var(--ods-color-primary); color: #fff;
+      font-size: 16px; font-weight: 700; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="hint">
+      시세 시그널 예시<br>
+      본문: 출하여건 · 가격정보 · 추세만<br>
+      표 2개: 최고가 흐름 / 평균가 흐름 (최근 5영업일)<br>
+      당일 칸: 금액 + 증감% (상승 빨강 · 하락 파랑)
+    </p>
+    <div class="phone">
+      <div class="dim"></div>
+      <section class="sheet" role="dialog" aria-label="시세 시그널">
+        <header class="head">
+          <div class="head-main">
+            <span class="badge">가락 시세</span>
+            <time class="time">07-20 22:00</time>
+          </div>
+          <button type="button" class="x" aria-label="닫기">×</button>
+        </header>
+        <div class="body">
+          <h1>[시세 시그널] 신고배 추세 상승</h1>
+          <div class="summary">
+            <div><b>출하여건:</b> 유리 <span style="color:#616161">(7일평균 대비 +19.3%)</span></div>
+            <div><b>가격정보:</b> 당일 평균 63,848원 · 7일 평균 53,522원</div>
+            <div><b>추세:</b> 상승</div>
+            <p class="note">※ 시세는 앞으로 오르거나 내릴 수 있으니 참고용입니다.</p>
+          </div>
+
+          <section class="block">
+            <h2 class="block-title">도매법인별 최고가 흐름표 (최근 5영업일)</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>법인명</th>
+                    <th>07-14</th>
+                    <th>07-15</th>
+                    <th>07-16</th>
+                    <th>07-17</th>
+                    <th>07-20(당일)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>㈜중앙청과</td>
+                    <td class="num">152,000</td>
+                    <td class="num">160,000</td>
+                    <td class="num">168,000</td>
+                    <td class="num">170,000</td>
+                    <td class="num today up">185,000<span class="chg">(+8.8%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>동화청과㈜</td>
+                    <td class="num">120,000</td>
+                    <td class="num">128,000</td>
+                    <td class="num">135,000</td>
+                    <td class="num">142,000</td>
+                    <td class="num today up">150,000<span class="chg">(+5.6%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>서울청과㈜</td>
+                    <td class="num">125,000</td>
+                    <td class="num">130,000</td>
+                    <td class="num">138,000</td>
+                    <td class="num">142,000</td>
+                    <td class="num today down">131,000<span class="chg">(-7.7%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>한국청과㈜</td>
+                    <td class="num">118,000</td>
+                    <td class="num">122,000</td>
+                    <td class="num">130,000</td>
+                    <td class="num">132,000</td>
+                    <td class="num today up">140,000<span class="chg">(+6.1%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>농협가락(공)</td>
+                    <td class="num">115,000</td>
+                    <td class="num">120,000</td>
+                    <td class="num">126,000</td>
+                    <td class="num">130,000</td>
+                    <td class="num today down">128,000<span class="chg">(-1.5%)</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="block">
+            <h2 class="block-title">도매법인별 평균가 흐름표 (최근 5영업일)</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>법인명</th>
+                    <th>07-14</th>
+                    <th>07-15</th>
+                    <th>07-16</th>
+                    <th>07-17</th>
+                    <th>07-20(당일)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>㈜중앙청과</td>
+                    <td class="num">58,200</td>
+                    <td class="num">61,000</td>
+                    <td class="num">64,500</td>
+                    <td class="num">67,800</td>
+                    <td class="num today up">72,385<span class="chg">(+6.8%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>동화청과㈜</td>
+                    <td class="num">31,200</td>
+                    <td class="num">32,400</td>
+                    <td class="num">33,100</td>
+                    <td class="num">34,200</td>
+                    <td class="num today up">35,055<span class="chg">(+2.5%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>서울청과㈜</td>
+                    <td class="num">52,100</td>
+                    <td class="num">54,800</td>
+                    <td class="num">57,200</td>
+                    <td class="num">60,400</td>
+                    <td class="num today up">63,971<span class="chg">(+5.9%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>한국청과㈜</td>
+                    <td class="num">44,000</td>
+                    <td class="num">45,200</td>
+                    <td class="num">46,800</td>
+                    <td class="num">48,100</td>
+                    <td class="num today up">49,848<span class="chg">(+3.6%)</span></td>
+                  </tr>
+                  <tr>
+                    <td>농협가락(공)</td>
+                    <td class="num">50,200</td>
+                    <td class="num">51,800</td>
+                    <td class="num">54,000</td>
+                    <td class="num">56,500</td>
+                    <td class="num today up">58,200<span class="chg">(+3.0%)</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+        <footer class="foot">
+          <button type="button" class="btn">확인</button>
+        </footer>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

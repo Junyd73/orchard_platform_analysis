@@ -26,7 +26,11 @@ from core.notification_schema import (  # noqa: E402
     NOTI_TYPE_WEATHER_CD,
     ensure_notification_schema,
 )
-from app.agents.market_agent import build_corp_packets, run_market_agent  # noqa: E402
+from app.agents.market_agent import (  # noqa: E402
+    build_corp_flow_tables,
+    build_corp_packets,
+    run_market_agent,
+)
 from app.agents.notification_writer import try_create_notification  # noqa: E402
 from app.agents.weather_agent import run_weather_agent  # noqa: E402
 
@@ -282,6 +286,31 @@ class NotificationAgentTests(unittest.TestCase):
         self.assertIn("90", body)  # 법인 합계 qty_kg
         self.assertIn("150,000", body)
         self.assertNotIn("서울청과:", body)  # 법인별 나열 제거
+
+    def test_corp_flow_tables_five_business_days(self) -> None:
+        from datetime import date
+
+        def fetch(d: str):
+            # 날짜별 가격만 다르게
+            base = int(d.replace("-", "")[-2:]) * 1000
+            return [
+                {
+                    "variety_name": "신고",
+                    "spec_name": "15kg",
+                    "corp_name": "동화청과",
+                    "quantity": 4,
+                    "auction_price": 100000 + base,
+                    "origin_name": "화성시",
+                }
+            ]
+
+        flow = build_corp_flow_tables(fetch, date(2026, 7, 20), business_days=5)
+        self.assertEqual(len(flow["dates"]), 5)
+        self.assertTrue(flow["max_flow"])
+        row = flow["max_flow"][0]
+        self.assertEqual(row["corp_name"], "동화청과")
+        self.assertEqual(len(row["values"]), 5)
+        self.assertIsNotNone(row["pct_vs_prev"])
 
     def test_market_api_failure_skips(self) -> None:
         def boom(_d: str):
