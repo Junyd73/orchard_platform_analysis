@@ -202,32 +202,35 @@ class NotificationAgentTests(unittest.TestCase):
                 "spec_name": "15kg",
                 "corp_name": "서울청과",
                 "quantity": 10,
-                "avg_price": 40000,
-                "max_price": 45000,
+                "auction_price": 40000,
             },
             {
                 "variety_name": "신고",
                 "spec_name": "7.5kg",
                 "corp_name": "한국청과",
                 "quantity": 5,
-                "avg_price": 22000,
-                "max_price": 25000,
+                "auction_price": 22000,
             },
             {
                 "variety_name": "신고",
                 "spec_name": "15kg",
                 "corp_name": "동화청과",
                 "quantity": 8,
-                "avg_price": 41000,
-                "max_price": 43000,
+                "auction_price": 150000,
+            },
+            {
+                "variety_name": "신고",
+                "spec_name": "15kg",
+                "corp_name": "동화청과",
+                "quantity": 2,
+                "auction_price": 40000,
             },
             {
                 "variety_name": "신고",
                 "spec_name": "15kg",
                 "corp_name": "중앙청과",
                 "quantity": 3,
-                "avg_price": 39000,
-                "max_price": 42000,
+                "auction_price": 39000,
             },
         ]
         prev = [
@@ -236,8 +239,7 @@ class NotificationAgentTests(unittest.TestCase):
                 "spec_name": "15kg",
                 "corp_name": "서울청과",
                 "quantity": 4,
-                "avg_price": 38000,
-                "max_price": 40000,
+                "auction_price": 38000,
             }
         ]
         packet = build_corp_packets(rows, prev_rows=prev)
@@ -246,9 +248,13 @@ class NotificationAgentTests(unittest.TestCase):
         by_name = {c["corp_name"]: c for c in packet["corps"]}
         self.assertIn("서울청과", by_name)
         self.assertEqual(by_name["서울청과"]["box_qty"], 10)
-        self.assertEqual(by_name["서울청과"]["max_price"], 45000)
+        self.assertEqual(by_name["서울청과"]["max_price"], 40000)
         self.assertEqual(by_name["서울청과"]["avg_price"], 40000)
         self.assertEqual(by_name["서울청과"]["qty_change_vs_prev"], 6)
+        self.assertEqual(by_name["동화청과"]["max_price"], 150000)
+        self.assertEqual(by_name["동화청과"]["box_qty"], 10)
+        # 수량가중: (150000*8 + 40000*2) / 10 = 128000
+        self.assertEqual(by_name["동화청과"]["avg_price"], 128000)
         for key in ("box_qty", "max_price", "avg_price"):
             self.assertIn(key, by_name["한국청과"])
 
