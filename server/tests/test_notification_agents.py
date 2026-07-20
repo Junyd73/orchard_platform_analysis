@@ -230,6 +230,14 @@ class NotificationAgentTests(unittest.TestCase):
             {
                 "variety_name": "신고",
                 "spec_name": "15kg",
+                "corp_name": "농협가락(공)",
+                "quantity": 10,
+                "auction_price": 50000,
+                "origin_name": "이천시",
+            },
+            {
+                "variety_name": "신고",
+                "spec_name": "15kg",
                 "corp_name": "중앙청과",
                 "quantity": 3,
                 "auction_price": 39000,
@@ -249,6 +257,7 @@ class NotificationAgentTests(unittest.TestCase):
         self.assertEqual(set(packet["specs"]), {"15kg", "7.5kg"})
         by_name = {c["corp_name"]: c for c in packet["corps"]}
         self.assertIn("서울청과", by_name)
+        self.assertIn("농협가락(공)", by_name)
         self.assertEqual(by_name["서울청과"]["box_qty"], 10)
         self.assertEqual(by_name["서울청과"]["max_price"], 40000)
         self.assertEqual(by_name["서울청과"]["avg_price"], 40000)
@@ -264,6 +273,15 @@ class NotificationAgentTests(unittest.TestCase):
         self.assertEqual(by_name["동화청과"]["qty_kg"], 90.0)
         for key in ("box_qty", "qty_kg", "max_price", "avg_price", "max_price_origin"):
             self.assertIn(key, by_name["한국청과"])
+
+        from app.agents.market_agent import _body_from_packet
+
+        body = _body_from_packet(packet)
+        self.assertIn("동화청과", body)
+        self.assertIn("화성시", body)
+        self.assertIn("60", body)
+        self.assertIn("150,000", body)
+        self.assertNotIn("서울청과:", body)  # 법인별 나열 제거
 
     def test_market_api_failure_skips(self) -> None:
         def boom(_d: str):
