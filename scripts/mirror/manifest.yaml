@@ -118,6 +118,15 @@ include:
   - src: docs/GEMINI_COLLAB_PROMPT.md
     dest: docs/design/GEMINI_COLLAB_PROMPT.md
 
+  - src: docs/NTF-001_notification_system_design.md
+    dest: docs/design/NTF-001_notification_system_design.md
+
+  - src: core/notification_schema.py
+    dest: core/notification_schema.py
+
+  - src: mobile/src/api-mirror/notifications.ts
+    dest: mobile/src/api/notifications.ts
+
   # --- PC: 관찰 AI 분석 (키·.env 제외, 환경변수명만 참조) ---
   - src: core/ai/**
     dest: core/ai/**

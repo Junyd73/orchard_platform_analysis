@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import HomeView from '@/views/home/HomeView.vue'
+import NotificationView from '@/views/notification/NotificationView.vue'
 import ObservationDetailView from '@/views/observation/ObservationDetailView.vue'
 import ObservationFruitMeasureView from '@/views/observation/ObservationFruitMeasureView.vue'
 import ObservationNewView from '@/views/observation/ObservationNewView.vue'
@@ -46,6 +47,11 @@ const router = createRouter({
       path: '/work-log/:workDt',
       name: 'work-log-daily',
       component: WorkLogDailyView,
+    },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: NotificationView,
     },
     { path: '/orders', name: 'orders', component: OrderView },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView },

@@ -80,7 +80,7 @@ Analysis (orchard_platform_analysis)
 |---------------|--------------|
 | `docs/ODS/` | `mobile/docs/ODS/` |
 | `docs/mobile/` | `mobile/docs/screens/`, `architecture/`, `api/` |
-| `docs/design/` | `docs/mobile_observation_design.md`, `docs/ODS_LOCATION.md`, `docs/GEMINI_COLLAB_PROMPT.md` |
+| `docs/design/` | `docs/mobile_observation_design.md`, `docs/ODS_LOCATION.md`, `docs/GEMINI_COLLAB_PROMPT.md`, `docs/NTF-001_notification_system_design.md` |
 | `docs/architecture/` | `mobile/docs/architecture/`, `server/docs/` (화이트리스트) |
 
 ### 3.5 Scripts (`scripts/`)

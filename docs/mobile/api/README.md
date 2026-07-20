@@ -1,6 +1,6 @@
 # Mobile API Notes
 
-> 문서 버전: **v1.2.3** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
+> 문서 버전: **v1.2.4** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
 
 ## 사용 중
 
@@ -22,6 +22,18 @@
 | DELETE | `/api/v1/farms/{farm_cd}/observations/{obs_id}/photos/{photo_id}` | 사진 삭제(soft) |
 | GET | `.../photos/{photo_id}/thumbnail` | 썸네일 파일 |
 | GET | `.../photos/{photo_id}/original` | 원본 파일 |
+| GET | `/api/v1/farms/{farm_cd}/notifications` | SCR-012 알림 목록 |
+| GET | `/api/v1/farms/{farm_cd}/notifications/summary` | 미읽음·긴급 건수 (AppBar 배지) |
+| PUT | `/api/v1/farms/{farm_cd}/notifications/{noti_id}/read` | 단건 읽음 |
+| PUT | `/api/v1/farms/{farm_cd}/notifications/read-all` | 전체 읽음 |
+
+### 알림 (NTF-001 Phase1)
+
+- 스키마: `t_notification` + `t_notification_read` (`core/notification_schema.py`)
+- 헤더: `X-User-Id` (없으면 서버 `MOBILE_USER`)
+- 응답: `noti_id`, `noti_type_cd/nm`, `priority_cd/nm`, `title`, `body`, `payload`, `event_at`, `read_yn`
+- 딥링크: `payload.route` = `observation-detail` | `observation-list` | `work-log-daily`
+- Phase1 비범위: Push, Agent, dismiss, Chip Filter
 
 ### 기본정보 임시 저장 (등록 완료 아님)
 

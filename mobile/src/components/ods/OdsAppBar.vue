@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
+import { fetchNotificationSummary } from '@/api/notifications'
 import iconBack from '@/assets/ods/common/icon-back.svg'
 import iconBell from '@/assets/ods/common/icon-bell.svg'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
@@ -26,9 +28,11 @@ const emit = defineEmits<{
   settings: []
 }>()
 
+const router = useRouter()
 const store = useAppStore()
 const { farm, farmCd } = storeToRefs(store)
 const toast = ref('')
+const unreadCount = ref(0)
 /** 0(Glass) ~ 1(Surface) */
 const progress = ref(0)
 
@@ -39,6 +43,12 @@ const farmName = () => farm.value?.farm_nm || farmCd.value
 const barStyle = computed(() => ({
   '--ods-appbar-p': String(progress.value),
 }))
+
+const unreadBadge = computed(() => {
+  const n = unreadCount.value
+  if (n <= 0) return ''
+  return n > 99 ? '99+' : String(n)
+})
 
 function readScrollY(): number {
   return window.scrollY || document.documentElement.scrollTop || 0
@@ -67,9 +77,20 @@ function showSoon(label: string) {
   }, 1600)
 }
 
+async function refreshUnread() {
+  const farm = farmCd.value
+  if (!farm) return
+  try {
+    const s = await fetchNotificationSummary(farm)
+    unreadCount.value = Number(s.unread_count || 0)
+  } catch {
+    /* 배지 실패는 무시 */
+  }
+}
+
 function onNotification() {
   emit('notification')
-  showSoon('알림')
+  void router.push({ name: 'notifications' })
 }
 
 function onSettings() {
@@ -80,6 +101,7 @@ function onSettings() {
 onMounted(() => {
   updateProgress()
   window.addEventListener('scroll', onScroll, { passive: true })
+  void refreshUnread()
 })
 
 onUnmounted(() => {
@@ -119,6 +141,7 @@ onUnmounted(() => {
           @click="onNotification"
         >
           <img :src="iconBell" alt="" aria-hidden="true">
+          <span v-if="unreadBadge" class="ods-appbar__badge">{{ unreadBadge }}</span>
         </button>
         <button
           type="button"
@@ -250,6 +273,7 @@ onUnmounted(() => {
 }
 
 .ods-appbar__icon-btn {
+  position: relative;
   width: var(--ods-touch-min);
   height: var(--ods-touch-min);
   border: none;
@@ -267,6 +291,22 @@ onUnmounted(() => {
   width: 22px;
   height: 22px;
   display: block;
+}
+
+.ods-appbar__badge {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ods-color-danger);
+  color: var(--ods-color-white);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
 
 .ods-appbar__toast {

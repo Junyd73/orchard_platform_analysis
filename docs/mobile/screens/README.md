@@ -10,7 +10,7 @@
 | SCR-002 | 병해충 생육관찰 | Approved + 위험도(OS01) | [SCR-002.md](./SCR-002.md) |
 | SCR-003 | 과실 생육관찰 · 추적 | Approved (v1.2) | [SCR-003.md](./SCR-003.md) |
 | SCR-004 | 생육관찰 상세 | Approved + AI 확정 시 위험도 | [SCR-004.md](./SCR-004.md) |
-| SCR-012 | 알림 | **Draft · NTF-001** | [SCR-012.md](./SCR-012.md) |
+| SCR-012 | 알림 | **In progress · Phase 1** | [SCR-012.md](./SCR-012.md) |
 | SCR-010 | 영농일지 월간 | **Approved · 1차 마감 (v1.2.2)** | [SCR-010.md](./SCR-010.md) |
 | SCR-011 | 영농일지 일간 | **Approved · UI 확정** · 기능 구현 중 | [SCR-011.md](./SCR-011.md) |
 

@@ -1,18 +1,27 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
+import { fetchNotificationSummary } from '@/api/notifications'
 import iconBell from '@/assets/ods/common/icon-bell.svg'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import iconSettings from '@/assets/ods/common/icon-settings.svg'
 import { useAppStore } from '@/composables/stores/app'
 
 /** SCR-010 전용: 시안3 녹색 상단바 (전역 OdsAppBar 대체) */
+const router = useRouter()
 const store = useAppStore()
 const { farm, farmCd } = storeToRefs(store)
 const toast = ref('')
+const unreadCount = ref(0)
 
 const farmName = computed(() => farm.value?.farm_nm || farmCd.value)
+const unreadBadge = computed(() => {
+  const n = unreadCount.value
+  if (n <= 0) return ''
+  return n > 99 ? '99+' : String(n)
+})
 
 function showSoon(label: string) {
   toast.value = `${label} 준비 중`
@@ -20,6 +29,25 @@ function showSoon(label: string) {
     if (toast.value.startsWith(label)) toast.value = ''
   }, 1600)
 }
+
+async function refreshUnread() {
+  const farm = farmCd.value
+  if (!farm) return
+  try {
+    const s = await fetchNotificationSummary(farm)
+    unreadCount.value = Number(s.unread_count || 0)
+  } catch {
+    /* ignore */
+  }
+}
+
+function goNotifications() {
+  void router.push({ name: 'notifications' })
+}
+
+onMounted(() => {
+  void refreshUnread()
+})
 </script>
 
 <template>
@@ -30,8 +58,9 @@ function showSoon(label: string) {
         <img class="wl-bar__chev" :src="iconChevronDown" alt="" aria-hidden="true" />
       </button>
       <div class="wl-bar__right">
-        <button type="button" class="wl-bar__icon" aria-label="알림" @click="showSoon('알림')">
+        <button type="button" class="wl-bar__icon" aria-label="알림" @click="goNotifications">
           <img :src="iconBell" alt="" aria-hidden="true" />
+          <span v-if="unreadBadge" class="wl-bar__badge">{{ unreadBadge }}</span>
         </button>
         <button type="button" class="wl-bar__icon" aria-label="환경설정" @click="showSoon('환경설정')">
           <img :src="iconSettings" alt="" aria-hidden="true" />
@@ -109,6 +138,21 @@ function showSoon(label: string) {
   width: 22px;
   height: 22px;
   filter: brightness(0) invert(1);
+}
+.wl-bar__badge {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ods-color-danger);
+  color: var(--ods-color-white);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
 .wl-bar__toast {
   position: fixed;
