@@ -260,7 +260,9 @@ class NotificationAgentTests(unittest.TestCase):
         self.assertEqual(by_name["동화청과"]["max_price_origin"], "화성시")
         self.assertEqual(by_name["동화청과"]["max_price_box_qty"], 4)
         self.assertEqual(by_name["동화청과"]["max_price_kg"], 60.0)
-        for key in ("box_qty", "max_price", "avg_price", "max_price_origin", "max_price_kg"):
+        # 법인 합계 kg: 4*15 + 2*15 = 90
+        self.assertEqual(by_name["동화청과"]["qty_kg"], 90.0)
+        for key in ("box_qty", "qty_kg", "max_price", "avg_price", "max_price_origin"):
             self.assertIn(key, by_name["한국청과"])
 
     def test_market_api_failure_skips(self) -> None:

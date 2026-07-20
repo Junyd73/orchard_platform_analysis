@@ -21,6 +21,7 @@ const emit = defineEmits<{
 type CorpRow = {
   corp_name: string
   box_qty: number
+  qty_kg?: number
   max_price: number
   avg_price: number
   max_price_origin?: string
@@ -83,6 +84,7 @@ const corpRows = computed((): CorpRow[] => {
       return {
         corp_name: String(r.corp_name || '—'),
         box_qty: Number(r.box_qty) || 0,
+        qty_kg: r.qty_kg == null ? undefined : Number(r.qty_kg),
         max_price: Number(r.max_price) || 0,
         avg_price: Number(r.avg_price) || 0,
         max_price_origin: String(r.max_price_origin || '').trim() || '—',
@@ -170,11 +172,11 @@ function onNavigate() {
               <table class="ntf-sheet__table">
                 <thead>
                   <tr>
-                    <th scope="col">도매법인</th>
-                    <th scope="col">출하량(box)</th>
-                    <th scope="col">최고가</th>
-                    <th scope="col">최고가 출하지</th>
+                    <th scope="col">법인명</th>
+                    <th scope="col">출하량(박스)</th>
                     <th scope="col">출하량(kg)</th>
+                    <th scope="col">출하지</th>
+                    <th scope="col">최고가</th>
                     <th scope="col">평균가</th>
                   </tr>
                 </thead>
@@ -182,9 +184,9 @@ function onNavigate() {
                   <tr v-for="row in corpRows" :key="row.corp_name">
                     <td>{{ row.corp_name }}</td>
                     <td class="num">{{ formatNum(row.box_qty) }}</td>
-                    <td class="num">{{ formatNum(row.max_price) }}</td>
+                    <td class="num">{{ formatNum(row.qty_kg ?? row.max_price_kg, 1) }}</td>
                     <td>{{ row.max_price_origin || '—' }}</td>
-                    <td class="num">{{ formatNum(row.max_price_kg, 1) }}</td>
+                    <td class="num">{{ formatNum(row.max_price) }}</td>
                     <td class="num">{{ formatNum(row.avg_price) }}</td>
                   </tr>
                 </tbody>
