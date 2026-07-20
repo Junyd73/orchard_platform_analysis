@@ -23,6 +23,9 @@ type CorpRow = {
   box_qty: number
   max_price: number
   avg_price: number
+  max_price_origin?: string
+  max_price_box_qty?: number
+  max_price_kg?: number
   qty_change_vs_prev?: number
 }
 
@@ -82,6 +85,10 @@ const corpRows = computed((): CorpRow[] => {
         box_qty: Number(r.box_qty) || 0,
         max_price: Number(r.max_price) || 0,
         avg_price: Number(r.avg_price) || 0,
+        max_price_origin: String(r.max_price_origin || '').trim() || '—',
+        max_price_box_qty:
+          r.max_price_box_qty == null ? undefined : Number(r.max_price_box_qty),
+        max_price_kg: r.max_price_kg == null ? undefined : Number(r.max_price_kg),
         qty_change_vs_prev:
           r.qty_change_vs_prev == null ? undefined : Number(r.qty_change_vs_prev),
       }
@@ -166,6 +173,8 @@ function onNavigate() {
                     <th scope="col">도매법인</th>
                     <th scope="col">출하량(box)</th>
                     <th scope="col">최고가</th>
+                    <th scope="col">최고가 출하지</th>
+                    <th scope="col">출하량(kg)</th>
                     <th scope="col">평균가</th>
                   </tr>
                 </thead>
@@ -174,6 +183,8 @@ function onNavigate() {
                     <td>{{ row.corp_name }}</td>
                     <td class="num">{{ formatNum(row.box_qty) }}</td>
                     <td class="num">{{ formatNum(row.max_price) }}</td>
+                    <td>{{ row.max_price_origin || '—' }}</td>
+                    <td class="num">{{ formatNum(row.max_price_kg, 1) }}</td>
                     <td class="num">{{ formatNum(row.avg_price) }}</td>
                   </tr>
                 </tbody>

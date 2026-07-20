@@ -215,8 +215,9 @@ class NotificationAgentTests(unittest.TestCase):
                 "variety_name": "신고",
                 "spec_name": "15kg",
                 "corp_name": "동화청과",
-                "quantity": 8,
+                "quantity": 4,
                 "auction_price": 150000,
+                "origin_name": "화성시",
             },
             {
                 "variety_name": "신고",
@@ -224,6 +225,7 @@ class NotificationAgentTests(unittest.TestCase):
                 "corp_name": "동화청과",
                 "quantity": 2,
                 "auction_price": 40000,
+                "origin_name": "안성시",
             },
             {
                 "variety_name": "신고",
@@ -252,10 +254,13 @@ class NotificationAgentTests(unittest.TestCase):
         self.assertEqual(by_name["서울청과"]["avg_price"], 40000)
         self.assertEqual(by_name["서울청과"]["qty_change_vs_prev"], 6)
         self.assertEqual(by_name["동화청과"]["max_price"], 150000)
-        self.assertEqual(by_name["동화청과"]["box_qty"], 10)
-        # 수량가중: (150000*8 + 40000*2) / 10 = 128000
-        self.assertEqual(by_name["동화청과"]["avg_price"], 128000)
-        for key in ("box_qty", "max_price", "avg_price"):
+        self.assertEqual(by_name["동화청과"]["box_qty"], 6)
+        # 수량가중: (150000*4 + 40000*2) / 6 = 113333
+        self.assertEqual(by_name["동화청과"]["avg_price"], 113333)
+        self.assertEqual(by_name["동화청과"]["max_price_origin"], "화성시")
+        self.assertEqual(by_name["동화청과"]["max_price_box_qty"], 4)
+        self.assertEqual(by_name["동화청과"]["max_price_kg"], 60.0)
+        for key in ("box_qty", "max_price", "avg_price", "max_price_origin", "max_price_kg"):
             self.assertIn(key, by_name["한국청과"])
 
     def test_market_api_failure_skips(self) -> None:
