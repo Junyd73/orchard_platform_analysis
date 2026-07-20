@@ -94,6 +94,22 @@ class ObservationCandidateConfirmApiService:
         except (TypeError, ValueError):
             seq_i = None
         err_code = str(payload.get("error_code") or "").strip() or None
+
+        if ok:
+            try:
+                from app.agents.observation_severity_notifier import (
+                    emit_observation_severity_guide,
+                )
+
+                emit_observation_severity_guide(
+                    self._db_path,
+                    farm_cd=farm,
+                    obs_id=oid,
+                    severity_cd=str(payload.get("severity_cd") or severity_cd or ""),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
         return ObservationCandidateConfirmResponse(
             success=ok,
             analysis_id=(str(payload.get("analysis_id") or "").strip() or None),

@@ -31,15 +31,13 @@ const emit = defineEmits<{
 const router = useRouter()
 const store = useAppStore()
 const badgeStore = useNotificationBadgeStore()
-const { farm, farmCd } = storeToRefs(store)
+const { farm, farmCd, farmTitle } = storeToRefs(store)
 const { unreadBadge } = storeToRefs(badgeStore)
 const toast = ref('')
 /** 0(Glass) ~ 1(Surface) */
 const progress = ref(0)
 
 let ticking = false
-
-const farmName = () => farm.value?.farm_nm || farmCd.value
 
 const barStyle = computed(() => ({
   '--ods-appbar-p': String(progress.value),
@@ -85,6 +83,10 @@ function onSettings() {
 onMounted(() => {
   updateProgress()
   window.addEventListener('scroll', onScroll, { passive: true })
+  // 알림 등 직접 진입 시에도 농장명 표시
+  if (!String(farm.value?.farm_nm || '').trim()) {
+    void store.refreshAll()
+  }
   void badgeStore.refresh(farmCd.value)
 })
 
@@ -113,7 +115,7 @@ onUnmounted(() => {
         </button>
         <button type="button" class="ods-appbar__farm" aria-label="농장 선택">
           <img class="ods-appbar__farm-mark" :src="iconFarm" alt="" aria-hidden="true">
-          <span class="ods-appbar__farm-name">{{ farmName() }}</span>
+          <span class="ods-appbar__farm-name">{{ farmTitle }}</span>
           <img class="ods-appbar__farm-chev" :src="iconChevronDown" alt="" aria-hidden="true">
         </button>
       </div>

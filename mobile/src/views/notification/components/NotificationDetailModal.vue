@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import iconWarn from '@/assets/ods/common/icon-kpi-warn.svg'
+import iconPest from '@/assets/ods/common/icon-kpi-pest.svg'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
@@ -45,6 +47,15 @@ type WeatherSummary = {
   rain_amount?: number
   wind_speed?: number
   humidity?: number
+}
+
+type SprayAssessment = {
+  grade: 'good' | 'caution' | 'bad' | string
+  grade_label: string
+  rain_prob: number
+  rain_amount: number
+  wind_speed: number
+  rain_prob_24h: number
 }
 
 function badgeTone(
@@ -125,6 +136,49 @@ const isSignalView = computed(() => {
   return Boolean(flow?.max_flow || flow?.avg_flow)
 })
 
+const sprayAssessment = computed((): SprayAssessment | null => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const spray = asRecord(payload?.spray)
+  if (!spray) return null
+  const grade = String(spray.grade || '')
+  const label = String(spray.grade_label || '').trim()
+  if (!grade && !label) return null
+  return {
+    grade: grade || 'bad',
+    grade_label: label || '—',
+    rain_prob: Number(spray.rain_prob) || 0,
+    rain_amount: Number(spray.rain_amount) || 0,
+    wind_speed: Number(spray.wind_speed) || 0,
+    rain_prob_24h: Number(spray.rain_prob_24h) || 0,
+  }
+})
+
+const sprayGradeClass = computed(() => {
+  const g = sprayAssessment.value?.grade
+  if (g === 'good') return 'ntf-spray__grade--good'
+  if (g === 'caution') return 'ntf-spray__grade--caution'
+  return 'ntf-spray__grade--bad'
+})
+
+const sourceOrg = computed(() => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const org = String(payload?.source_org || '').trim()
+  return org || ''
+})
+
+const sprayGuide = computed(() => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const guide = asRecord(payload?.spray_guide)
+  if (!guide) return null
+  const title = String(guide.title || '추천 방제 및 대응 가이드').trim()
+  const text = String(guide.text || '').trim()
+  if (!text) return null
+  const pesticides = Array.isArray(guide.pesticides)
+    ? guide.pesticides.map((x) => String(x || '').trim()).filter(Boolean)
+    : []
+  return { title, text, pesticides }
+})
+
 const flowDates = computed((): string[] => {
   const payload = props.item?.payload as NotificationPayload | null | undefined
   const market = asRecord(payload?.market)
@@ -177,6 +231,26 @@ const corpRows = computed((): CorpRow[] => {
     .filter((x): x is CorpRow => x != null)
 })
 
+function parseWeatherSummary(src: Record<string, unknown> | null): WeatherSummary | null {
+  if (!src) return null
+  const hasAny =
+    src.temp_min != null ||
+    src.temp_max != null ||
+    src.rain_prob != null ||
+    src.rain_amount != null ||
+    src.wind_speed != null ||
+    src.humidity != null
+  if (!hasAny) return null
+  return {
+    temp_min: src.temp_min == null ? undefined : Number(src.temp_min),
+    temp_max: src.temp_max == null ? undefined : Number(src.temp_max),
+    rain_prob: src.rain_prob == null ? undefined : Number(src.rain_prob),
+    rain_amount: src.rain_amount == null ? undefined : Number(src.rain_amount),
+    wind_speed: src.wind_speed == null ? undefined : Number(src.wind_speed),
+    humidity: src.humidity == null ? undefined : Number(src.humidity),
+  }
+}
+
 const weatherSummary = computed((): WeatherSummary | null => {
   const payload = props.item?.payload as NotificationPayload | null | undefined
   if (!payload) return null
@@ -187,15 +261,12 @@ const weatherSummary = computed((): WeatherSummary | null => {
     payload.rain_prob != null ||
     payload.rain_amount != null
   if (!weather && !hasTop) return null
-  const src = weather || (payload as Record<string, unknown>)
-  return {
-    temp_min: src.temp_min == null ? undefined : Number(src.temp_min),
-    temp_max: src.temp_max == null ? undefined : Number(src.temp_max),
-    rain_prob: src.rain_prob == null ? undefined : Number(src.rain_prob),
-    rain_amount: src.rain_amount == null ? undefined : Number(src.rain_amount),
-    wind_speed: src.wind_speed == null ? undefined : Number(src.wind_speed),
-    humidity: src.humidity == null ? undefined : Number(src.humidity),
-  }
+  return parseWeatherSummary(weather || (payload as Record<string, unknown>))
+})
+
+const weatherTomorrow = computed((): WeatherSummary | null => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  return parseWeatherSummary(asRecord(payload?.weather_tomorrow))
 })
 
 const hasDeepLink = computed(() => {
@@ -237,13 +308,67 @@ function onNavigate() {
           <button type="button" class="ntf-sheet__x" aria-label="닫기" @click="emit('close')">
             ×
           </button>
+          <p v-if="sourceOrg" class="ntf-sheet__source">출처: {{ sourceOrg }}</p>
         </header>
 
         <div class="ntf-sheet__body">
           <h2 class="ntf-sheet__title">{{ item.title }}</h2>
-          <p class="ntf-sheet__text" :class="{ 'ntf-sheet__text--pre': isSignalView }">
+          <p
+            v-if="!sprayAssessment"
+            class="ntf-sheet__text"
+            :class="{ 'ntf-sheet__text--pre': isSignalView || Boolean(sprayGuide) }"
+          >
             {{ item.body || '상세 본문이 없습니다.' }}
           </p>
+
+          <section
+            v-if="sprayGuide"
+            class="ntf-sheet__block ntf-guide"
+            aria-label="추천 방제 및 대응 가이드"
+          >
+            <h3 class="ntf-sheet__block-title">{{ sprayGuide.title }}</h3>
+            <div class="ntf-guide__box">
+              <p class="ntf-guide__text">{{ sprayGuide.text }}</p>
+              <ul v-if="sprayGuide.pesticides.length" class="ntf-guide__list">
+                <li v-for="name in sprayGuide.pesticides" :key="name">{{ name }}</li>
+              </ul>
+            </div>
+          </section>
+
+          <section
+            v-if="sprayAssessment"
+            class="ntf-sheet__block ntf-spray"
+            aria-label="방제작업여건"
+          >
+            <ul class="ntf-spray__list">
+              <li class="ntf-spray__row">
+                <img class="ntf-spray__icon" :src="iconPest" alt="" />
+                <span>
+                  방제작업여건
+                  <strong class="ntf-spray__grade" :class="sprayGradeClass">
+                    {{ sprayAssessment.grade_label }}
+                  </strong>
+                </span>
+              </li>
+              <li class="ntf-spray__row">
+                <img class="ntf-spray__icon" :src="iconWarn" alt="" />
+                <span>
+                  방제안내 : 강수확률({{ formatNum(sprayAssessment.rain_prob) }}%),
+                  예상강수량({{ formatNum(sprayAssessment.rain_amount, 1) }}mm)
+                </span>
+              </li>
+              <li class="ntf-spray__row">
+                <img class="ntf-spray__icon" :src="iconWarn" alt="" />
+                <span>풍속 : {{ formatNum(sprayAssessment.wind_speed, 1) }} m/s</span>
+              </li>
+              <li class="ntf-spray__row">
+                <img class="ntf-spray__icon" :src="iconWarn" alt="" />
+                <span>
+                  24시간내 비 올 확률 : {{ formatNum(sprayAssessment.rain_prob_24h) }}%
+                </span>
+              </li>
+            </ul>
+          </section>
 
           <template v-if="isSignalView">
             <section
@@ -368,9 +493,9 @@ function onNavigate() {
           <section
             v-if="weatherSummary"
             class="ntf-sheet__block"
-            aria-label="기상 요약"
+            aria-label="오늘의 기상 요약"
           >
-            <h3 class="ntf-sheet__block-title">오늘의 기상 요약</h3>
+            <h3 class="ntf-sheet__block-title">오늘의 기상요약</h3>
             <div class="ntf-sheet__table-wrap">
               <table class="ntf-sheet__table ntf-sheet__table--weather">
                 <tbody>
@@ -397,6 +522,40 @@ function onNavigate() {
                       /
                       {{ formatNum(weatherSummary.humidity, 1) }}%
                     </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section
+            v-if="weatherTomorrow"
+            class="ntf-sheet__block"
+            aria-label="내일의 기상 요약"
+          >
+            <h3 class="ntf-sheet__block-title">내일의 기상요약</h3>
+            <div class="ntf-sheet__table-wrap">
+              <table class="ntf-sheet__table ntf-sheet__table--weather">
+                <tbody>
+                  <tr>
+                    <th scope="row">기온 (최저 / 최고)</th>
+                    <td>
+                      {{ formatNum(weatherTomorrow.temp_min, 1) }}℃
+                      /
+                      {{ formatNum(weatherTomorrow.temp_max, 1) }}℃
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">강수확률 / 예상 강수량</th>
+                    <td>
+                      {{ formatNum(weatherTomorrow.rain_prob) }}%
+                      /
+                      {{ formatNum(weatherTomorrow.rain_amount, 1) }}mm
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">풍속</th>
+                    <td>{{ formatNum(weatherTomorrow.wind_speed, 1) }}m/s</td>
                   </tr>
                 </tbody>
               </table>
@@ -455,9 +614,10 @@ function onNavigate() {
 
 .ntf-sheet__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ods-space-12);
+  gap: var(--ods-space-8) var(--ods-space-12);
   padding: var(--ods-space-16);
   border-bottom: 1px solid var(--ods-color-gray-100);
 }
@@ -467,6 +627,15 @@ function onNavigate() {
   align-items: center;
   gap: var(--ods-space-8);
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ntf-sheet__source {
+  flex: 1 1 100%;
+  margin: 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+  line-height: 1.35;
 }
 
 .ntf-sheet__time {
@@ -589,6 +758,68 @@ function onNavigate() {
   font-weight: 600;
   color: var(--ods-color-text-secondary);
   background: var(--ods-color-white);
+}
+
+.ntf-spray__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+
+.ntf-spray__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ods-space-8);
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+}
+
+.ntf-spray__icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ntf-spray__grade {
+  margin-left: var(--ods-space-4);
+  font-weight: 700;
+}
+
+.ntf-spray__grade--good {
+  color: #2e7d32;
+}
+
+.ntf-spray__grade--caution {
+  color: #ef6c00;
+}
+
+.ntf-spray__grade--bad {
+  color: #e53935;
+}
+
+.ntf-guide__box {
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  border: 1px solid color-mix(in srgb, var(--ods-color-danger) 28%, var(--ods-color-gray-100));
+  background: color-mix(in srgb, var(--ods-color-danger) 8%, white);
+}
+
+.ntf-guide__text {
+  margin: 0;
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+  white-space: pre-line;
+}
+
+.ntf-guide__list {
+  margin: var(--ods-space-8) 0 0;
+  padding-left: 1.2em;
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text-secondary);
 }
 
 .ntf-sheet__foot {

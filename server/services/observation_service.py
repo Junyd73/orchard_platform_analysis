@@ -15,6 +15,8 @@ from app.core.observation_constants import (
     OBS_AI_STATUS_NONE,
     OBS_PROGRESS_WATCHING_CD,
     OBS_SEVERITY_CDS,
+    OBS_SEVERITY_CAUTION_CD,
+    OBS_SEVERITY_DANGER_CD,
     OBS_SEVERITY_NORMAL_CD,
     TARGET_DEFAULT_OBS_TYPE,
 )
@@ -43,6 +45,7 @@ from app.services.observation_media import compensate_photo_files
 logger = logging.getLogger(__name__)
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SEVERITY_GUIDE_CDS = frozenset({OBS_SEVERITY_CAUTION_CD, OBS_SEVERITY_DANGER_CD})
 
 # 관찰 관련 부속 테이블 (존재 시 물리 DELETE)
 _RELATED_TABLES_BY_OBS = (
@@ -75,6 +78,35 @@ class ObservationService:
     def _user_id(self, user_id: str | None, default: str = "MOBILE") -> str:
         uid = str(user_id or "").strip()
         return uid or default
+
+    def _maybe_emit_severity_guide(
+        self, farm_cd: str, obs_id: str, severity_cd: str
+    ) -> None:
+        """주의/위험 등록 시 방제 가이드 알림 (실패해도 본 저장은 유지)."""
+        sev = str(severity_cd or "").strip()
+        if sev not in _SEVERITY_GUIDE_CDS:
+            return
+        db_path = getattr(self._repo, "_db_path", None)
+        if db_path is None:
+            return
+        try:
+            from app.agents.observation_severity_notifier import (
+                emit_observation_severity_guide,
+            )
+
+            emit_observation_severity_guide(
+                db_path,
+                farm_cd=farm_cd,
+                obs_id=obs_id,
+                severity_cd=sev,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "observation severity guide notify skip %s/%s: %s",
+                farm_cd,
+                obs_id,
+                exc,
+            )
 
     def _resolve_user(
         self, user_id: str, role_hint: str | None = None
@@ -320,6 +352,9 @@ class ObservationService:
         if not row.get("root_obs_id"):
             row["root_obs_id"] = obs_id
         self._repo.insert_observation(row, uid)
+        self._maybe_emit_severity_guide(
+            farm, obs_id, str(row.get("severity_cd") or "")
+        )
         return ObservationSaveResponse(
             obs_id=obs_id,
             farm_cd=farm,
@@ -356,6 +391,9 @@ class ObservationService:
         ok = self._repo.update_observation_basic(farm, oid, row, uid)
         if not ok:
             raise EntityNotFoundError("Observation not found")
+        self._maybe_emit_severity_guide(
+            farm, oid, str(row.get("severity_cd") or "")
+        )
         return ObservationSaveResponse(
             obs_id=oid,
             farm_cd=farm,

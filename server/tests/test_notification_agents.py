@@ -147,6 +147,8 @@ class NotificationAgentTests(unittest.TestCase):
     def test_weather_daily_summary_includes_rain_amount(self) -> None:
         import json
 
+        from app.agents.weather_agent import evaluate_spray_work, format_spray_body
+
         def fake_wx(_farm):
             return {
                 "temp_min": 12.0,
@@ -155,6 +157,15 @@ class NotificationAgentTests(unittest.TestCase):
                 "max_wind": 2.0,
                 "rain_amount": 4.5,
                 "humidity": 55,
+                "rain_prob_24h": 40,
+                "tomorrow": {
+                    "temp_min": 13.0,
+                    "temp_max": 22.0,
+                    "rain_prob": 10,
+                    "rain_amount": 0.0,
+                    "wind_speed": 1.5,
+                    "humidity": 50,
+                },
             }
 
         result = run_weather_agent(self.db, fetch_weather=fake_wx)
@@ -162,19 +173,54 @@ class NotificationAgentTests(unittest.TestCase):
         conn = sqlite3.connect(str(self.db))
         row = conn.execute(
             """
-            SELECT title, payload_json, dedupe_key FROM t_notification
+            SELECT title, body, payload_json, dedupe_key FROM t_notification
             WHERE farm_cd='OR001' AND dedupe_key LIKE '%:daily_summary'
             """
         ).fetchone()
         conn.close()
         self.assertIsNotNone(row)
         self.assertIn("영농 기상", row[0])
-        payload = json.loads(row[1])
+        self.assertIn("방제작업여건", row[1])
+        self.assertIn("방제안내", row[1])
+        self.assertIn("24시간내 비 올 확률", row[1])
+        payload = json.loads(row[2])
         weather = payload.get("weather") or {}
         self.assertEqual(weather.get("rain_amount"), 4.5)
         self.assertIn("rain_prob", weather)
         self.assertIn("temp_min", weather)
         self.assertIn("temp_max", weather)
+        self.assertIn("source_org", payload)
+        self.assertIn("기상청", str(payload.get("source_org") or ""))
+        spray = payload.get("spray") or {}
+        self.assertIn(spray.get("grade"), ("good", "caution", "bad"))
+        self.assertEqual(payload.get("view"), "weather_daily")
+        self.assertIsNotNone(payload.get("weather_tomorrow"))
+
+        # 강수·풍속 나쁨 판정 (PC hard_fail: 누적강수 > 3mm)
+        bad = evaluate_spray_work(
+            today={
+                "temp_min": 18,
+                "temp_max": 26,
+                "rain_prob": 60,
+                "rain_amount": 7.0,
+                "wind_speed": 1.8,
+            },
+            rain_prob_24h=80,
+        )
+        self.assertEqual(bad["grade"], "bad")
+        self.assertIn("나쁨", format_spray_body(bad))
+
+        good = evaluate_spray_work(
+            today={
+                "temp_min": 18,
+                "temp_max": 24,
+                "rain_prob": 10,
+                "rain_amount": 0.0,
+                "wind_speed": 2.0,
+            },
+            rain_prob_24h=10,
+        )
+        self.assertEqual(good["grade"], "good")
 
     def test_weather_heavy_rain_by_amount(self) -> None:
         def fake_wx(_farm):
@@ -339,19 +385,58 @@ class NotificationAgentTests(unittest.TestCase):
                 }
             ]
 
-        result = run_market_agent(self.db, fetch_sale=fetch2, trade_date=today)
+        result = run_market_agent(self.db, fetch_sale=fetch2, trade_date=today, slot="09")
         self.assertIn("packet", result)
         self.assertTrue(result["packet"]["corps"])
+        self.assertEqual(result.get("slot"), "09")
         self.assertGreaterEqual(result["created"], 1)
         conn = sqlite3.connect(str(self.db))
         row = conn.execute(
-            "SELECT noti_type_cd, payload_json FROM t_notification WHERE noti_type_cd=?",
+            """
+            SELECT noti_type_cd, payload_json, dedupe_key
+            FROM t_notification WHERE noti_type_cd=?
+            ORDER BY noti_id
+            LIMIT 1
+            """,
             (NOTI_TYPE_MARKET_CD,),
         ).fetchone()
         conn.close()
         self.assertIsNotNone(row)
         self.assertEqual(row[0], NOTI_TYPE_MARKET_CD)
         self.assertNotIn('"route"', row[1] or "")
+        self.assertIn(":09", row[2] or "")
+        self.assertIn("source_org", row[1] or "")
+        self.assertIn("가락동", row[1] or "")
+
+    def test_incomplete_work_summary_includes_site_and_name(self) -> None:
+        from app.agents.internal_agent import format_incomplete_work_summary
+
+        title, body = format_incomplete_work_summary(
+            [
+                {"site_nm": "앞마당", "work_nm": "방제", "rmk": ""},
+                {"site_nm": "산밭", "work_nm": "관수", "rmk": ""},
+            ]
+        )
+        self.assertIn("앞마당", title)
+        self.assertIn("방제", title)
+        self.assertIn("산밭", body)
+        self.assertIn("관수", body)
+
+    def test_observation_severity_guide_payload(self) -> None:
+        from app.agents.observation_severity_notifier import build_spray_guide_payload
+        from app.core.observation_constants import OBS_SEVERITY_DANGER_CD
+
+        p = build_spray_guide_payload(
+            farm_cd="OR001",
+            obs_id="OBS1",
+            severity_cd=OBS_SEVERITY_DANGER_CD,
+            site_nm="산밭",
+            pest_nm="흑성병",
+            recommend_names=["캡탄", "디티아논"],
+        )
+        self.assertEqual(p["severity_nm"], "위험")
+        self.assertIn("캡탄", p["spray_guide"]["text"])
+        self.assertEqual(p["route"], "observation-detail")
 
 
 if __name__ == "__main__":

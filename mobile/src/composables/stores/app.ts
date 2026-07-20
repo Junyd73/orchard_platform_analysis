@@ -20,7 +20,10 @@ export const useAppStore = defineStore('app', () => {
   const siteCount = ref(0)
   const farmError = ref('')
 
-  const farmTitle = computed(() => farm.value?.farm_nm || farmCd.value)
+  const farmTitle = computed(() => {
+    const nm = String(farm.value?.farm_nm || '').trim()
+    return nm || farmCd.value
+  })
 
   async function refreshAll() {
     connectionStatus.value = 'loading'

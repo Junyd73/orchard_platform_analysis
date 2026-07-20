@@ -37,6 +37,7 @@ _NOTI_TYPE_CHILDREN: tuple[tuple[str, str, str], ...] = (
 
 # Agent·서비스 공용 유형 상수
 NOTI_TYPE_WORK_CD = "NT010100"
+NOTI_TYPE_OBS_RISK_CD = "NT010200"
 NOTI_TYPE_WEATHER_CD = "NT010500"
 NOTI_TYPE_RDA_CD = "NT010600"
 NOTI_TYPE_SYSTEM_CD = "NT010900"
@@ -45,6 +46,33 @@ NOTI_TYPE_MARKET_CD = "NT011000"
 SOURCE_EF_WEATHER = "EF010100"
 SOURCE_EF_RDA = "EF010200"
 SOURCE_EF_OTHER = "EF010500"
+
+# payload.source_org — 공공·내부 공식 출처 표기 (NTF 보완)
+SOURCE_ORG_WEATHER = "대한민국 국가기상데이터센터 (기상청 API)"
+SOURCE_ORG_RDA = "농촌진흥청 국가농작물병해충관리시스템 (NCPMS API)"
+SOURCE_ORG_MARKET = "가락동 농수산물도매시장 (서울시농수산식품공사 API)"
+SOURCE_ORG_INTERNAL = "과수원관리시스템(Orchard Platform System) 데이터베이스"
+
+SOURCE_ORG_BY_CD: dict[str, str] = {
+    SOURCE_EF_WEATHER: SOURCE_ORG_WEATHER,
+    SOURCE_EF_RDA: SOURCE_ORG_RDA,
+    SOURCE_EF_OTHER: SOURCE_ORG_MARKET,
+    SOURCE_INTERNAL: SOURCE_ORG_INTERNAL,
+}
+
+
+def source_org_for(source_cd: str | None) -> str:
+    key = str(source_cd or "").strip()
+    return SOURCE_ORG_BY_CD.get(key, SOURCE_ORG_INTERNAL)
+
+
+def with_source_org(
+    payload: dict[str, Any] | None, source_cd: str | None
+) -> dict[str, Any]:
+    """알림 payload에 source_org 를 붙인 복사본."""
+    out = dict(payload or {})
+    out["source_org"] = source_org_for(source_cd)
+    return out
 
 _PRIORITY_CHILDREN: tuple[tuple[str, str, str], ...] = (
     (PRIORITY_PARENT_CD, PRIORITY_URGENT_CD, "긴급"),

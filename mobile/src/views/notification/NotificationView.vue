@@ -21,6 +21,7 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import NotificationDetailModal from '@/views/notification/components/NotificationDetailModal.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
+import { formatNotificationTypeBadge } from '@/views/notification/notificationTypeBadge'
 import { useAppStore } from '@/composables/stores/app'
 import { useNotificationBadgeStore } from '@/composables/stores/notificationBadge'
 import type { NotificationItem } from '@/types/notification'
@@ -214,8 +215,8 @@ onMounted(() => {
                 class="ntf-card__dot"
                 aria-label="미읽음"
               />
-              <OdsBadge :tone="badgeTone(item)">
-                {{ item.noti_type_nm || item.noti_type_cd }}
+              <OdsBadge class="ntf-card__type" :tone="badgeTone(item)">
+                {{ formatNotificationTypeBadge(item.noti_type_nm || item.noti_type_cd) }}
               </OdsBadge>
               <span class="ntf-card__title">{{ item.title }}</span>
             </span>
@@ -384,6 +385,19 @@ onMounted(() => {
   align-items: center;
   gap: var(--ods-space-8);
   min-width: 0;
+}
+
+.ntf-card__type {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 2.75em;
+  min-height: 2.5em;
+  padding: 2px 4px;
+  justify-content: center;
+  text-align: center;
+  white-space: pre-line;
+  line-height: 1.2;
+  letter-spacing: 0;
 }
 
 .ntf-card__dot {
