@@ -227,10 +227,8 @@ onMounted(() => {
 
 <style scoped>
 .ntf-page {
+  /* padding/max-width/gap -> .ods-page-content (AppBar SSOT) */
   background: var(--ods-color-bg-muted);
-  /* page shell 패딩은 ods-page-content 가 담당. 배경만 full-bleed 느낌 */
-  margin-inline: calc(-1 * var(--ods-page-padding-x));
-  padding-inline: var(--ods-page-padding-x);
   min-height: 100%;
 }
 

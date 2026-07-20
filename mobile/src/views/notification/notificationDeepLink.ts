@@ -6,6 +6,7 @@ import type { NotificationPayload } from '@/types/notification'
 const ROUTE_ALIAS: Record<string, string> = {
   'observation-detail': 'observation-detail',
   'observation-list': 'observation',
+  'observation-new': 'observation-new',
   observation: 'observation',
   'work-log-daily': 'work-log-daily',
   'work-log': 'work-log',
@@ -57,7 +58,7 @@ export function resolveNotificationDeepLink(
     return { name: 'work-log-daily', params: { workDt } }
   }
 
-  if (name === 'observation' || name === 'work-log') {
+  if (name === 'observation' || name === 'work-log' || name === 'observation-new') {
     return { name }
   }
 
