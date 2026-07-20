@@ -9,10 +9,15 @@ import {
   markNotificationRead,
 } from '@/api/notifications'
 import { ApiClientError } from '@/api/client'
+import iconBell from '@/assets/ods/common/icon-bell.svg'
+import iconCalendar from '@/assets/ods/common/icon-kpi-calendar.svg'
+import iconPest from '@/assets/ods/common/icon-kpi-pest.svg'
+import iconRobot from '@/assets/ods/common/icon-kpi-robot.svg'
+import iconWarn from '@/assets/ods/common/icon-kpi-warn.svg'
+import iconChevronRight from '@/assets/ods/scr004/icon-chevron-right.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
-import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
 import { useAppStore } from '@/composables/stores/app'
@@ -25,7 +30,7 @@ const router = useRouter()
 const store = useAppStore()
 const badgeStore = useNotificationBadgeStore()
 const { farmCd } = storeToRefs(store)
-const { unreadCount, urgentCount } = storeToRefs(badgeStore)
+const { unreadCount } = storeToRefs(badgeStore)
 
 const loading = ref(true)
 const errorMsg = ref('')
@@ -33,12 +38,13 @@ const items = ref<NotificationItem[]>([])
 const markingAll = ref(false)
 const clickingId = ref<string | null>(null)
 
-const summaryLine = computed(() => {
-  const u = unreadCount.value
-  const g = urgentCount.value
-  if (u <= 0) return '새 알림이 없습니다.'
-  if (g > 0) return `미읽음 ${u}건 · 긴급 ${g}건`
-  return `미읽음 ${u}건`
+const headerCountLabel = computed(() => {
+  const total = items.value.length
+  const unread = unreadCount.value
+  if (loading.value) return '알림 불러오는 중…'
+  if (total <= 0) return '전체 알림 0건'
+  if (unread > 0) return `전체 알림 ${total}건 · 미읽음 ${unread}`
+  return `전체 알림 ${total}건`
 })
 
 function badgeTone(item: NotificationItem): 'neutral' | 'ok' | 'caution' | 'danger' | 'ai' {
@@ -48,6 +54,26 @@ function badgeTone(item: NotificationItem): 'neutral' | 'ok' | 'caution' | 'dang
   if (t === 'NT010300' || t === 'NT010500') return 'ai'
   if (t === 'NT010100' || t === 'NT010400') return 'ok'
   return 'neutral'
+}
+
+function typeIcon(item: NotificationItem): string {
+  if (item.priority_cd === PRIORITY_URGENT || item.noti_type_cd === 'NT010200') {
+    return iconWarn
+  }
+  if (item.noti_type_cd === 'NT010300') return iconRobot
+  if (item.noti_type_cd === 'NT010100' || item.noti_type_cd === 'NT010400') {
+    return iconCalendar
+  }
+  if (item.noti_type_cd === 'NT010500') return iconPest
+  return iconBell
+}
+
+function typeIconTone(item: NotificationItem): string {
+  return `ntf-card__icon--${badgeTone(item)}`
+}
+
+function hasDeepLink(item: NotificationItem): boolean {
+  return resolveNotificationDeepLink(item.payload) != null
 }
 
 function formatEventAt(raw: string): string {
@@ -82,7 +108,7 @@ async function loadAll() {
 
 async function onReadAll() {
   const farm = farmCd.value
-  if (!farm || markingAll.value) return
+  if (!farm || markingAll.value || unreadCount.value <= 0) return
   markingAll.value = true
   try {
     await markAllNotificationsRead(farm)
@@ -95,12 +121,6 @@ async function onReadAll() {
   }
 }
 
-/**
- * 알림 카드 클릭 완결 사이클:
- * 1) PUT read (미읽음일 때)
- * 2) 배지/목록 카운트 갱신
- * 3) payload 딥링크 이동 (없으면 읽음만)
- */
 async function handleNotificationClick(item: NotificationItem) {
   const farm = farmCd.value
   if (!farm || clickingId.value) return
@@ -135,16 +155,15 @@ onMounted(() => {
     <OdsAppBar show-back @back="goBack" />
 
     <section class="ntf-toolbar" aria-label="알림 도구">
-      <p class="ntf-summary">{{ summaryLine }}</p>
-      <OdsButton
-        variant="secondary"
-        :block="false"
+      <p class="ntf-summary">{{ headerCountLabel }}</p>
+      <button
+        type="button"
+        class="ntf-read-all"
         :disabled="markingAll || unreadCount <= 0"
-        :busy="markingAll"
         @click="onReadAll"
       >
-        전체 읽음
-      </OdsButton>
+        {{ markingAll ? '처리 중…' : '모두 읽음' }}
+      </button>
     </section>
 
     <p v-if="errorMsg" class="ntf-error" role="alert">{{ errorMsg }}</p>
@@ -163,32 +182,41 @@ onMounted(() => {
           class="ntf-card"
           :class="{
             'ntf-card--unread': item.read_yn !== 'Y',
+            'ntf-card--read': item.read_yn === 'Y',
             'ntf-card--busy': clickingId === item.noti_id,
           }"
           :disabled="clickingId === item.noti_id"
           @click="handleNotificationClick(item)"
         >
-          <span
-            v-if="item.priority_cd === PRIORITY_URGENT"
-            class="ntf-card__urgent"
-            aria-hidden="true"
-          />
-          <div class="ntf-card__body">
-            <div class="ntf-card__meta">
+          <span class="ntf-card__icon" :class="typeIconTone(item)" aria-hidden="true">
+            <img :src="typeIcon(item)" alt="">
+          </span>
+
+          <span class="ntf-card__center">
+            <span class="ntf-card__header">
+              <span
+                v-if="item.read_yn !== 'Y'"
+                class="ntf-card__dot"
+                aria-label="미읽음"
+              />
               <OdsBadge :tone="badgeTone(item)">
                 {{ item.noti_type_nm || item.noti_type_cd }}
               </OdsBadge>
-              <OdsBadge
-                v-if="item.priority_cd === PRIORITY_URGENT"
-                tone="danger"
-              >
-                {{ item.priority_nm || '긴급' }}
-              </OdsBadge>
-              <time class="ntf-card__time">{{ formatEventAt(item.event_at) }}</time>
-            </div>
-            <p class="ntf-card__title">{{ item.title }}</p>
-            <p v-if="item.body" class="ntf-card__text">{{ item.body }}</p>
-          </div>
+              <span class="ntf-card__title">{{ item.title }}</span>
+            </span>
+            <span v-if="item.body" class="ntf-card__body">{{ item.body }}</span>
+          </span>
+
+          <span class="ntf-card__right">
+            <time class="ntf-card__time">{{ formatEventAt(item.event_at) }}</time>
+            <img
+              v-if="hasDeepLink(item)"
+              class="ntf-card__chev"
+              :src="iconChevronRight"
+              alt=""
+              aria-hidden="true"
+            >
+          </span>
         </button>
       </li>
     </ul>
@@ -198,99 +226,195 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.ntf-page {
+  background: var(--ods-color-bg-muted);
+  /* page shell 패딩은 ods-page-content 가 담당. 배경만 full-bleed 느낌 */
+  margin-inline: calc(-1 * var(--ods-page-padding-x));
+  padding-inline: var(--ods-page-padding-x);
+  min-height: 100%;
+}
+
 .ntf-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-12);
+  min-height: var(--ods-touch-min);
 }
+
 .ntf-summary {
   margin: 0;
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-headline);
+  color: var(--ods-color-text);
 }
+
+.ntf-read-all {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  padding: var(--ods-space-8) var(--ods-space-4);
+  min-height: var(--ods-touch-min);
+  font: var(--ods-font-body-1);
+  font-weight: 600;
+  color: var(--ods-color-primary);
+  cursor: pointer;
+}
+
+.ntf-read-all:disabled {
+  color: var(--ods-color-gray-500);
+  cursor: default;
+}
+
 .ntf-error {
   margin: 0;
-  padding: var(--ods-space-12);
-  border-radius: var(--ods-radius-card);
-  background: #fdecea;
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-danger) 12%, white);
   color: var(--ods-color-danger);
   font: var(--ods-font-body-2);
 }
+
 .ntf-loading {
   margin: 0;
   font: var(--ods-font-body-2);
   color: var(--ods-color-text-secondary);
 }
+
 .ntf-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-10);
+  gap: var(--ods-space-12);
 }
+
 .ntf-card {
-  position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ods-space-12);
   width: 100%;
+  box-sizing: border-box;
   text-align: left;
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-card);
+  border: 1px solid var(--ods-color-gray-100);
+  border-radius: var(--ods-radius-button);
   background: var(--ods-color-white);
   box-shadow: var(--ods-shadow-card);
-  padding: var(--ods-space-12) var(--ods-space-14);
+  padding: var(--ods-space-16);
   min-height: var(--ods-touch-min);
   cursor: pointer;
+  transition: opacity var(--ods-motion-fast) var(--ods-motion-ease);
 }
+
 .ntf-card--unread {
-  background: var(--ods-color-primary-soft, #eef6ee);
+  background: color-mix(in srgb, var(--ods-color-primary-soft) 70%, white);
+  border-color: color-mix(in srgb, var(--ods-color-primary) 12%, var(--ods-color-gray-100));
 }
+
+.ntf-card--read {
+  opacity: 0.7;
+}
+
 .ntf-card--busy {
-  opacity: 0.72;
+  opacity: 0.55;
 }
-.ntf-card__urgent {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: var(--ods-color-danger);
-}
-.ntf-card__body {
-  flex: 1;
-  min-width: 0;
-  padding-left: var(--ods-space-4);
-}
-.ntf-card__meta {
-  display: flex;
-  flex-wrap: wrap;
+
+.ntf-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ods-radius-button);
+  display: inline-flex;
   align-items: center;
-  gap: var(--ods-space-6);
-  margin-bottom: var(--ods-space-6);
+  justify-content: center;
+  flex: 0 0 auto;
 }
-.ntf-card__time {
-  margin-left: auto;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
+
+.ntf-card__icon img {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
+
+.ntf-card__icon--danger {
+  background: color-mix(in srgb, var(--ods-color-danger) 14%, white);
+}
+.ntf-card__icon--caution {
+  background: color-mix(in srgb, var(--ods-color-caution) 18%, white);
+}
+.ntf-card__icon--ai {
+  background: color-mix(in srgb, var(--ods-color-ai) 14%, white);
+}
+.ntf-card__icon--ok {
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+}
+.ntf-card__icon--neutral {
+  background: var(--ods-color-gray-100);
+}
+
+.ntf-card__center {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+}
+
+.ntf-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+
+.ntf-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ods-color-primary);
+  flex: 0 0 auto;
+}
+
 .ntf-card__title {
-  margin: 0;
-  font: var(--ods-font-body-1);
-  font-weight: 700;
+  min-width: 0;
+  font: var(--ods-font-headline);
+  font-weight: 600;
   color: var(--ods-color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ntf-card__text {
-  margin: var(--ods-space-4) 0 0;
-  font: var(--ods-font-body-2);
+
+.ntf-card__body {
+  margin: 0;
+  font: var(--ods-font-body-1);
   color: var(--ods-color-text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.ntf-card__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  align-self: stretch;
+  flex: 0 0 auto;
+  min-width: 52px;
+}
+
+.ntf-card__time {
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+  white-space: nowrap;
+}
+
+.ntf-card__chev {
+  width: 16px;
+  height: 16px;
+  display: block;
+  opacity: 0.55;
 }
 </style>
