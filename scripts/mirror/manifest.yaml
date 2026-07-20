@@ -115,6 +115,9 @@ include:
   - src: docs/ODS_LOCATION.md
     dest: docs/design/ODS_LOCATION.md
 
+  - src: docs/GEMINI_COLLAB_PROMPT.md
+    dest: docs/design/GEMINI_COLLAB_PROMPT.md
+
   # --- PC: 관찰 AI 분석 (키·.env 제외, 환경변수명만 참조) ---
   - src: core/ai/**
     dest: core/ai/**
