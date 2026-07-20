@@ -144,6 +144,26 @@ class NotificationServiceTests(unittest.TestCase):
         summary3 = self.svc.get_summary("OR001", user_id="u1")
         self.assertEqual(summary3.unread_count, 0)
 
+    def test_mark_read_idempotent_and_payload(self) -> None:
+        _insert_noti(
+            self.db,
+            noti_id="NTF20260720-010",
+            title="상세 딥링크",
+            payload={
+                "route": "observation-detail",
+                "obs_id": "OBS20260719-001",
+            },
+        )
+        first = self.svc.mark_read("OR001", "NTF20260720-010", user_id="u2")
+        second = self.svc.mark_read("OR001", "NTF20260720-010", user_id="u2")
+        self.assertEqual(first.read_yn, "Y")
+        self.assertEqual(second.read_yn, "Y")
+        items = self.svc.list_notifications("OR001", user_id="u2")
+        hit = next(i for i in items if i.noti_id == "NTF20260720-010")
+        self.assertEqual(hit.read_yn, "Y")
+        self.assertEqual(hit.payload.get("obs_id"), "OBS20260719-001")
+        self.assertEqual(hit.payload.get("route"), "observation-detail")
+
 
 if __name__ == "__main__":
     unittest.main()

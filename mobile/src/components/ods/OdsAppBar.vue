@@ -3,13 +3,13 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { fetchNotificationSummary } from '@/api/notifications'
 import iconBack from '@/assets/ods/common/icon-back.svg'
 import iconBell from '@/assets/ods/common/icon-bell.svg'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import iconFarm from '@/assets/ods/common/icon-farm.svg'
 import iconSettings from '@/assets/ods/common/icon-settings.svg'
 import { useAppStore } from '@/composables/stores/app'
+import { useNotificationBadgeStore } from '@/composables/stores/notificationBadge'
 
 /** 이 스크롤 거리에서 Glass → Surface 전환 완료 */
 const SCROLL_RANGE_PX = 64
@@ -30,9 +30,10 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const store = useAppStore()
+const badgeStore = useNotificationBadgeStore()
 const { farm, farmCd } = storeToRefs(store)
+const { unreadBadge } = storeToRefs(badgeStore)
 const toast = ref('')
-const unreadCount = ref(0)
 /** 0(Glass) ~ 1(Surface) */
 const progress = ref(0)
 
@@ -43,12 +44,6 @@ const farmName = () => farm.value?.farm_nm || farmCd.value
 const barStyle = computed(() => ({
   '--ods-appbar-p': String(progress.value),
 }))
-
-const unreadBadge = computed(() => {
-  const n = unreadCount.value
-  if (n <= 0) return ''
-  return n > 99 ? '99+' : String(n)
-})
 
 function readScrollY(): number {
   return window.scrollY || document.documentElement.scrollTop || 0
@@ -77,17 +72,6 @@ function showSoon(label: string) {
   }, 1600)
 }
 
-async function refreshUnread() {
-  const farm = farmCd.value
-  if (!farm) return
-  try {
-    const s = await fetchNotificationSummary(farm)
-    unreadCount.value = Number(s.unread_count || 0)
-  } catch {
-    /* 배지 실패는 무시 */
-  }
-}
-
 function onNotification() {
   emit('notification')
   void router.push({ name: 'notifications' })
@@ -101,7 +85,7 @@ function onSettings() {
 onMounted(() => {
   updateProgress()
   window.addEventListener('scroll', onScroll, { passive: true })
-  void refreshUnread()
+  void badgeStore.refresh(farmCd.value)
 })
 
 onUnmounted(() => {

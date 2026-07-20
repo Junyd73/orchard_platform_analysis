@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
 import {
-  fetchNotificationSummary,
   fetchNotifications,
   markAllNotificationsRead,
   markNotificationRead,
@@ -15,21 +14,24 @@ import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
+import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
 import { useAppStore } from '@/composables/stores/app'
+import { useNotificationBadgeStore } from '@/composables/stores/notificationBadge'
 import type { NotificationItem } from '@/types/notification'
 
 const PRIORITY_URGENT = 'NP010100'
 
 const router = useRouter()
 const store = useAppStore()
+const badgeStore = useNotificationBadgeStore()
 const { farmCd } = storeToRefs(store)
+const { unreadCount, urgentCount } = storeToRefs(badgeStore)
 
 const loading = ref(true)
 const errorMsg = ref('')
 const items = ref<NotificationItem[]>([])
-const unreadCount = ref(0)
-const urgentCount = ref(0)
 const markingAll = ref(false)
+const clickingId = ref<string | null>(null)
 
 const summaryLine = computed(() => {
   const u = unreadCount.value
@@ -66,13 +68,9 @@ async function loadAll() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const [list, summary] = await Promise.all([
-      fetchNotifications(farm, { limit: 50 }),
-      fetchNotificationSummary(farm),
-    ])
+    const list = await fetchNotifications(farm, { limit: 50 })
     items.value = list
-    unreadCount.value = summary.unread_count
-    urgentCount.value = summary.urgent_count
+    await badgeStore.refresh(farm)
   } catch (err) {
     errorMsg.value =
       err instanceof ApiClientError ? err.message : '알림을 불러오지 못했습니다.'
@@ -97,45 +95,34 @@ async function onReadAll() {
   }
 }
 
-function navigatePayload(item: NotificationItem) {
-  const p = item.payload || {}
-  const route = String(p.route || '').trim()
-  if (route === 'observation-detail' && p.obs_id) {
-    void router.push({
-      name: 'observation-detail',
-      params: { obsId: String(p.obs_id) },
-    })
-    return
-  }
-  if (route === 'observation-list') {
-    void router.push({ name: 'observation' })
-    return
-  }
-  if (route === 'work-log-daily' && p.work_dt) {
-    void router.push({
-      name: 'work-log-daily',
-      params: { workDt: String(p.work_dt) },
-    })
-    return
-  }
-}
-
-async function onItemClick(item: NotificationItem) {
+/**
+ * 알림 카드 클릭 완결 사이클:
+ * 1) PUT read (미읽음일 때)
+ * 2) 배지/목록 카운트 갱신
+ * 3) payload 딥링크 이동 (없으면 읽음만)
+ */
+async function handleNotificationClick(item: NotificationItem) {
   const farm = farmCd.value
-  if (!farm) return
+  if (!farm || clickingId.value) return
+  clickingId.value = item.noti_id
   try {
     if (item.read_yn !== 'Y') {
-      await markNotificationRead(farm, item.noti_id)
-      item.read_yn = 'Y'
-      unreadCount.value = Math.max(0, unreadCount.value - 1)
-      if (item.priority_cd === PRIORITY_URGENT) {
-        urgentCount.value = Math.max(0, urgentCount.value - 1)
+      try {
+        await markNotificationRead(farm, item.noti_id)
+        item.read_yn = 'Y'
+      } catch {
+        /* 읽음 실패해도 딥링크는 시도 */
       }
+      await badgeStore.refresh(farm)
     }
-  } catch {
-    /* 읽음 실패해도 딥링크는 시도 */
+
+    const target = resolveNotificationDeepLink(item.payload)
+    if (target) {
+      await router.push(target)
+    }
+  } finally {
+    clickingId.value = null
   }
-  navigatePayload(item)
 }
 
 onMounted(() => {
@@ -174,8 +161,12 @@ onMounted(() => {
         <button
           type="button"
           class="ntf-card"
-          :class="{ 'ntf-card--unread': item.read_yn !== 'Y' }"
-          @click="onItemClick(item)"
+          :class="{
+            'ntf-card--unread': item.read_yn !== 'Y',
+            'ntf-card--busy': clickingId === item.noti_id,
+          }"
+          :disabled="clickingId === item.noti_id"
+          @click="handleNotificationClick(item)"
         >
           <span
             v-if="item.priority_cd === PRIORITY_URGENT"
@@ -254,6 +245,9 @@ onMounted(() => {
 }
 .ntf-card--unread {
   background: var(--ods-color-primary-soft, #eef6ee);
+}
+.ntf-card--busy {
+  opacity: 0.72;
 }
 .ntf-card__urgent {
   position: absolute;

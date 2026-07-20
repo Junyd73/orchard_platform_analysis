@@ -1,9 +1,16 @@
-/** 알림 API — NTF-001 Phase1 */
+/** 알림 API — NTF-001 */
 
 export type NotificationPayload = {
+  /** NTF-001 SSOT 딥링크 키 */
   route?: string
   obs_id?: string
   work_dt?: string
+  /** 지시서 호환 */
+  route_name?: string
+  params?: Record<string, string | number>
+  path?: string
+  obsId?: string
+  workDt?: string
   [key: string]: unknown
 }
 

@@ -3,25 +3,21 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { fetchNotificationSummary } from '@/api/notifications'
 import iconBell from '@/assets/ods/common/icon-bell.svg'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import iconSettings from '@/assets/ods/common/icon-settings.svg'
 import { useAppStore } from '@/composables/stores/app'
+import { useNotificationBadgeStore } from '@/composables/stores/notificationBadge'
 
 /** SCR-010 전용: 시안3 녹색 상단바 (전역 OdsAppBar 대체) */
 const router = useRouter()
 const store = useAppStore()
+const badgeStore = useNotificationBadgeStore()
 const { farm, farmCd } = storeToRefs(store)
+const { unreadBadge } = storeToRefs(badgeStore)
 const toast = ref('')
-const unreadCount = ref(0)
 
 const farmName = computed(() => farm.value?.farm_nm || farmCd.value)
-const unreadBadge = computed(() => {
-  const n = unreadCount.value
-  if (n <= 0) return ''
-  return n > 99 ? '99+' : String(n)
-})
 
 function showSoon(label: string) {
   toast.value = `${label} 준비 중`
@@ -30,23 +26,12 @@ function showSoon(label: string) {
   }, 1600)
 }
 
-async function refreshUnread() {
-  const farm = farmCd.value
-  if (!farm) return
-  try {
-    const s = await fetchNotificationSummary(farm)
-    unreadCount.value = Number(s.unread_count || 0)
-  } catch {
-    /* ignore */
-  }
-}
-
 function goNotifications() {
   void router.push({ name: 'notifications' })
 }
 
 onMounted(() => {
-  void refreshUnread()
+  void badgeStore.refresh(farmCd.value)
 })
 </script>
 
