@@ -109,11 +109,19 @@ class NotificationAgentTests(unittest.TestCase):
 
     def test_weather_agent_creates_and_dedupes(self) -> None:
         def fake_wx(_farm):
-            return {"temp_min": -1.0, "max_pop": 80, "max_wind": 12.0}
+            return {
+                "temp_min": -1.0,
+                "temp_max": 34.0,
+                "max_pop": 80,
+                "max_wind": 12.0,
+                "rain_amount": 5.0,
+                "humidity": 70,
+            }
 
         r1 = run_weather_agent(self.db, fetch_weather=fake_wx)
         r2 = run_weather_agent(self.db, fetch_weather=fake_wx)
-        self.assertGreaterEqual(r1["created"], 3)
+        # daily + frost + rain + heat + wind
+        self.assertGreaterEqual(r1["created"], 5)
         self.assertEqual(r2["created"], 0)
         conn = sqlite3.connect(str(self.db))
         types = {
@@ -122,8 +130,70 @@ class NotificationAgentTests(unittest.TestCase):
                 "SELECT DISTINCT noti_type_cd FROM t_notification WHERE farm_cd='OR001'"
             )
         }
+        keys = {
+            row[0]
+            for row in conn.execute(
+                "SELECT dedupe_key FROM t_notification WHERE farm_cd='OR001'"
+            )
+        }
         conn.close()
         self.assertIn(NOTI_TYPE_WEATHER_CD, types)
+        self.assertTrue(any(":daily_summary" in k for k in keys))
+
+    def test_weather_daily_summary_includes_rain_amount(self) -> None:
+        import json
+
+        def fake_wx(_farm):
+            return {
+                "temp_min": 12.0,
+                "temp_max": 24.0,
+                "max_pop": 20,
+                "max_wind": 2.0,
+                "rain_amount": 4.5,
+                "humidity": 55,
+            }
+
+        result = run_weather_agent(self.db, fetch_weather=fake_wx)
+        self.assertGreaterEqual(result["created"], 1)
+        conn = sqlite3.connect(str(self.db))
+        row = conn.execute(
+            """
+            SELECT title, payload_json, dedupe_key FROM t_notification
+            WHERE farm_cd='OR001' AND dedupe_key LIKE '%:daily_summary'
+            """
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertIn("영농 기상", row[0])
+        payload = json.loads(row[1])
+        weather = payload.get("weather") or {}
+        self.assertEqual(weather.get("rain_amount"), 4.5)
+        self.assertIn("rain_prob", weather)
+        self.assertIn("temp_min", weather)
+        self.assertIn("temp_max", weather)
+
+    def test_weather_heavy_rain_by_amount(self) -> None:
+        def fake_wx(_farm):
+            return {
+                "temp_min": 18.0,
+                "temp_max": 26.0,
+                "max_pop": 40,
+                "max_wind": 3.0,
+                "rain_amount": 35.0,
+                "humidity": 80,
+            }
+
+        result = run_weather_agent(self.db, fetch_weather=fake_wx)
+        self.assertGreaterEqual(result["created"], 2)  # daily + rain
+        conn = sqlite3.connect(str(self.db))
+        titles = [
+            r[0]
+            for r in conn.execute(
+                "SELECT title FROM t_notification WHERE farm_cd='OR001'"
+            )
+        ]
+        conn.close()
+        self.assertTrue(any("방제 연기" in t for t in titles))
 
     def test_market_corp_packet_structure(self) -> None:
         rows = [

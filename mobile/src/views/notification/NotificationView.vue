@@ -19,6 +19,7 @@ import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
+import NotificationDetailModal from '@/views/notification/components/NotificationDetailModal.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
 import { useAppStore } from '@/composables/stores/app'
 import { useNotificationBadgeStore } from '@/composables/stores/notificationBadge'
@@ -37,6 +38,8 @@ const errorMsg = ref('')
 const items = ref<NotificationItem[]>([])
 const markingAll = ref(false)
 const clickingId = ref<string | null>(null)
+const detailOpen = ref(false)
+const selectedItem = ref<NotificationItem | null>(null)
 
 const headerCountLabel = computed(() => {
   const total = items.value.length
@@ -88,6 +91,21 @@ function goBack() {
   else router.push({ name: 'observation' })
 }
 
+function closeDetail() {
+  detailOpen.value = false
+  selectedItem.value = null
+}
+
+async function navigateFromDetail() {
+  const item = selectedItem.value
+  if (!item) return
+  const target = resolveNotificationDeepLink(item.payload)
+  closeDetail()
+  if (target) {
+    await router.push(target)
+  }
+}
+
 async function loadAll() {
   const farm = farmCd.value
   if (!farm) return
@@ -131,15 +149,12 @@ async function handleNotificationClick(item: NotificationItem) {
         await markNotificationRead(farm, item.noti_id)
         item.read_yn = 'Y'
       } catch {
-        /* 읽음 실패해도 딥링크는 시도 */
+        /* 읽음 실패해도 상세 모달은 연다 */
       }
       await badgeStore.refresh(farm)
     }
-
-    const target = resolveNotificationDeepLink(item.payload)
-    if (target) {
-      await router.push(target)
-    }
+    selectedItem.value = item
+    detailOpen.value = true
   } finally {
     clickingId.value = null
   }
@@ -210,8 +225,8 @@ onMounted(() => {
           <span class="ntf-card__right">
             <time class="ntf-card__time">{{ formatEventAt(item.event_at) }}</time>
             <img
-              v-if="hasDeepLink(item)"
               class="ntf-card__chev"
+              :class="{ 'ntf-card__chev--muted': !hasDeepLink(item) }"
               :src="iconChevronRight"
               alt=""
               aria-hidden="true"
@@ -220,6 +235,13 @@ onMounted(() => {
         </button>
       </li>
     </ul>
+
+    <NotificationDetailModal
+      :open="detailOpen"
+      :item="selectedItem"
+      @close="closeDetail"
+      @navigate="navigateFromDetail"
+    />
 
     <OdsBottomNav />
   </main>
@@ -413,6 +435,10 @@ onMounted(() => {
   width: 16px;
   height: 16px;
   display: block;
-  opacity: 0.55;
+  opacity: 0.7;
+}
+
+.ntf-card__chev--muted {
+  opacity: 0.35;
 }
 </style>
