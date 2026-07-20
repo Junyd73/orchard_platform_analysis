@@ -279,7 +279,7 @@ class NotificationAgentTests(unittest.TestCase):
         body = _body_from_packet(packet)
         self.assertIn("동화청과", body)
         self.assertIn("화성시", body)
-        self.assertIn("60", body)
+        self.assertIn("90", body)  # 법인 합계 qty_kg
         self.assertIn("150,000", body)
         self.assertNotIn("서울청과:", body)  # 법인별 나열 제거
 
