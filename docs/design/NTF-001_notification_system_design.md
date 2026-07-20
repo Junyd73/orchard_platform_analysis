@@ -1,9 +1,9 @@
 # NTF-001 알림 시스템 설계
 
 > **문서 번호:** NTF-001  
-> **상태:** Draft · 설계 (구현 전)  
+> **상태:** Approved · Phase 1 마감  
 > **기준일:** 2026-07-20  
-> **관련 화면:** [SCR-012](../mobile/docs/screens/SCR-012.md)  
+> **관련 화면:** [SCR-012](../mobile/docs/screens/SCR-012.md) (문서 v1.0)  
 > **SSOT:** `mobile/docs/VERSIONS.md`
 
 ---
@@ -44,16 +44,16 @@
 
 | 코드 | 명칭 | 발생원 | 비고 |
 |------|------|--------|------|
-| NT010100 | 작업 알림 | 내부 | 영농일지·예정 작업·미기록 |
-| NT010200 | 관찰 위험·주의 | 내부 | `severity_cd` OS010300/OS010400 |
-| NT010300 | 관찰 AI 미확정 | 내부 | `ai_status` REVIEW_REQUIRED 등 |
-| NT010400 | 재관찰 예정 | 내부 | `followup_dt` 도래·경과 |
-| NT010500 | 기상 | 외부 Agent | 강수·한파·바람 등 임계 |
-| NT010600 | 농촌진흥청 | 외부 Agent | 병해충·재해·기술정보 |
-| NT010700 | 기술센터 | 외부 Agent | 지역 기술센터 RSS/API |
-| NT010800 | 농업 뉴스 | 외부 Agent | 농민신문 등 주요 헤드라인 |
+| NT010100 | 작업 알림 | 내부 | 오늘 **미완료** 작업(필지·작업명 요약) |
+| NT010200 | **생육관찰** | 내부 | `severity_cd` OS010300(주의)/OS010400(위험) + 방제 가이드 |
+| NT010300 | 관찰 AI 미확정 | 내부 | `ai_status` REVIEW_REQUIRED 등 (Phase1 선택) |
+| NT010400 | 재관찰 예정 | 내부 | `followup_dt` 도래·경과 (Phase1 선택) |
+| NT010500 | 기상 | 외부 Agent | 일별 기상요약 + **방제작업여건**(좋음/주의/나쁨) |
+| NT010600 | 농촌진흥청 | 외부 Agent | 병해충 브리핑(기관 라벨) · A단계 RSS |
+| NT010700 | 기술센터 | 외부 Agent | 병해충 브리핑(기관 라벨) · A단계 RSS |
+| NT010800 | 농업 뉴스 | 외부 Agent | 농민신문 등 (후속) |
 | NT010900 | 시스템 | 내부 | 점검·연동 실패(관리자) |
-| NT011000 | 가락 시세 | 외부 Agent | 출하 타이밍 시그널(±10%) |
+| NT011000 | 가락 시세 | 외부 Agent | 일 2회(09·16) 출하요약 + 시그널(여건·가격·추세·5영업일 흐름) |
 
 우선순위 `NP01`:
 
@@ -246,14 +246,16 @@ CREATE INDEX IF NOT EXISTS idx_agent_run_job
 
 ## 5. 내부 알림 발생 규칙
 
-### 5.1 관찰 — 위험·주의 (NT010200)
+### 5.1 생육관찰 — 주의·위험 (NT010200)
 
 | 조건 | priority | dedupe |
 |------|----------|--------|
-| `severity_cd IN (OS010300, OS010400)` AND `use_yn='Y'` AND 미완료(`progress_status_cd` NOT IN OP010400, OP010500) | OS010400→긴급, OS010300→보통 | obs_id + severity |
+| `severity_cd IN (OS010300, OS010400)` AND `use_yn='Y'` | OS010400→긴급, OS010300→보통 | `OBS:{farm}:{obs_id}:severity` |
 
-- **트리거:** 관찰 저장·수정·AI 확정 시 `NotificationService.emit_observation_severity`.
-- 제목: `{severity_nm} 관찰` / 본문: `{ai_pest_nm 또는 obs_title}` · `{site_nm}` · `{obs_dt}`.
+- **트리거:** 관찰 생성·수정·AI 후보 확정 시 `observation_severity_notifier`.
+- **본문:** 관찰 요약 + **추천 방제 및 대응 가이드**(`payload.spray_guide`).
+- **딥링크:** `route=observation-detail`.
+- **출처:** `source_org` = 내부 관찰·방제 가이드.
 
 ### 5.2 관찰 — AI 미확정 (NT010300)
 
@@ -274,57 +276,61 @@ CREATE INDEX IF NOT EXISTS idx_agent_run_job
 
 | 조건 | priority |
 |------|----------|
-| `work_dt = 오늘` AND 작업 행 존재 AND 미저장(Phase2) | 보통 |
-| 농약(`WK010200`) 작업 예정 + 최근 위험 관찰 동일 필지 | 긴급(연계) |
+| `work_dt = 오늘` AND **미완료** 작업 행 존재 | 보통 |
 
-Phase 1: 영농일지 **일간 마스터만 있는 날** 「오늘 영농일지 미작성」 (선택).
+- 본문: 필지·작업명 요약(여러 건 시 N건·대표 2~3개).
+- 딥링크: `work-log-daily`.
+- Phase1: 「오늘 영농일지 미작성」만의 단순 알림은 사용하지 않음.
 
 ---
 
 ## 6. 외부 Agent 구성
 
-### 6.1 아키텍처
+### 6.1 아키텍처 (Phase1 구현)
 
 ```text
-Windows Task Scheduler / cron
+APScheduler (server/app/scheduler.py)  /  CLI once
     ↓
-server/agents/notification_runner.py   ← 진입점(CLI)
+server/app/agents/*
+    ├── internal_agent      — 미완료 작업
+    ├── weather_agent       — 기상 + 방제작업여건 (PC evaluate_period_condition)
+    ├── market_agent        — 가락 일요약(09·16) + 시그널
+    ├── pest_agent          — A단계 RSS 브리핑(기관 라벨)
+    └── observation_severity_notifier — 이벤트 트리거
     ↓
-NotificationAgentService
-    ├── InternalScanAgent      (AG010100)
-    ├── WeatherAlertAgent      (AG010200) → core/weather_manager.py 재사용
-    ├── RdaFeedAgent           (AG010300)
-    ├── TechCenterFeedAgent    (AG010400)
-    └── AgNewsFeedAgent        (AG010500)
+notification_writer (source_org 자동 부착 · dedupe_key)
     ↓
-t_external_feed_item (upsert)
-    ↓
-t_notification (farm별 fan-out, dedupe)
-    ↓
-t_notification_agent_run (이력)
+t_notification
 ```
 
-- **API 키:** `server/.env` · `core/api_config.py` — Agent 프로세스만 로드.
-- **FastAPI와 분리:** uvicorn 재시작과 무관하게 스케줄 실행.
-- 개발: `server/run_notification_agent.ps1 -Job AG010200`
+- 개발 1회 실행: `server/scripts/run_notification_agents_once.py`
+- **공통 payload:** 모든 Agent는 `source_org`(공식 출처)를 기록한다. Agent가 명시하면 덮어쓰지 않음.
 
 ### 6.2 기상 Agent (NT010500)
 
-- 기존 `WeatherManager` · `m_farm_info.lat/lon/nx/ny` 활용.
-- 임계 예: 강수확률 ≥ 70%, 최저기온 ≤ 0°C, 풍속 주의.
-- 농장별 1건 dedupe / 일·특보 유형별.
+- `WeatherManager` · 농장 좌표.
+- **방제작업여건:** PC와 동일 규칙 → 라벨 `좋음` / `주의` / `나쁨`.
+- 본문: 방제작업여건 · 방제안내 · 풍속 · 24시간 강수 · 오늘/내일 요약.
+- dedupe: `WX:{farm}:{YYYYMMDD}:daily` (일 1건).
 
-### 6.3 RSS Agent (RDA·기술센터·농민신문)
+### 6.3 가락 시세 Agent (NT011000)
 
-- `feedparser` 또는 `requests` + XML 파싱.
-- `external_id` = GUID 또는 `sha256(link_url)`.
-- **전국 동일 기사** → 농장별 알림은 `m_farm_crop`·지역코드 매칭 시에만 생성 (Phase 2).
-- Phase 1: `farm_cd` NULL 글로벌 피드 + 모든 농장에 「참고」 알림 (priority 낮음).
+- 스케줄: **매일 09:00 · 16:00** (슬롯별 dedupe `MKT:{farm}:{YYYYMMDD}:{09|16}`).
+- 일요약: 법인별 출하량·최고가 표(`payload.market.corps`).
+- 시그널: 여건·가격·추세 soft body + 최고가/평균가 **5영업일 흐름표**(당일 금액·증감%).
+- 시그널 dedupe: `…:signal`.
 
-### 6.4 Agent 실패 정책
+### 6.4 병해충 Agent (NT010600/700) — A단계
 
-- 네트워크 오류: `status_cd=PARTIAL`, 다음 주기 재시도.
-- 3회 연속 FAIL: `NT010900` 시스템 알림(ADMIN/SYS_ADMIN).
+- 소스: 환경설정 RSS/피드(화성·정남·경기 + 배·병해충 키워드 필터). **NCPMS 3단 API·감염예측은 B·C단계.**
+- 일 1건 브리핑: `PEST:{farm}:{YYYYMMDD}:briefing`.
+- 본문/모달: `농촌진흥청 : …` / `기술지원센터 : …` (`agency_lines`).
+- **딥링크 없음** (정보성). `source_org` = 농촌진흥청·기술지원센터 등.
+
+### 6.5 Agent 실패 정책
+
+- 네트워크 오류: 다음 주기 재시도.
+- 연속 실패 시 `NT010900` 시스템 알림(후속).
 
 ---
 
@@ -343,29 +349,29 @@ Prefix: `/api/v1/farms/{farm_cd}/notifications`
 
 응답 필드: `noti_id`, `noti_type_cd`, `noti_type_nm`, `priority_cd`, `title`, `body`, `event_at`, `read_yn`, `payload`.
 
+`payload` 권장 키: `source_org`, `route`, `weather`/`spray`, `market`/`flow`, `agency_lines`, `spray_guide`.
+
 **권한:** `m_user.farm_cd` 일치 USER 이상. SYS_ADMIN 전 농장.
 
 ---
 
 ## 8. 모바일 연동 (SCR-012)
 
-- AppBar 종 아이콘 → `/notifications` (SCR-012).
-- 미읽음 배지: `GET .../summary`.
-- 탭 시 `payload.route` 로 관찰 상세·영농일지 등 이동.
-- ODS: `OdsCard` 리스트 · `OdsBadge` 유형·우선순위 톤.
+- AppBar 종 아이콘 → `/notifications`.
+- 미읽음 배지: `GET .../summary` ↔ `notificationBadge` 스토어.
+- 탭 → 읽음 + 바텀시트. **이동은 `payload.route` 있을 때만**.
+- ODS: 그룹 좌측 보더 · SVG 아이콘 웰 · 2×N 유형 뱃지. 상세는 SCR-012 v1.0.
 
 ---
 
 ## 9. 구현 Phase
 
-| Phase | 범위 |
-|-------|------|
-| **1** | DB 스키마 · 공통코드 · REST(목록/요약/읽음) · SCR-012 골격 · AppBar 연결 (**2026-07-20 구현**) |
-| **2** | Agent runner · 기상 · 필터 Chip · AppBar 배지 고도화 |
-| **3** | RSS 3종 · 농장별 필터 · 읽음/숨김 UX |
-| **4** | Push(Web Push) · 사용자 알림 설정(유형 on/off) |
-
-Project A 범위 밖: Push, SMS — Phase 4·별도 승인.
+| Phase | 범위 | 상태 |
+|-------|------|------|
+| **1** | DB·공통코드·REST · SCR-012 · Agent(기상/시세/병해충A/내부) · source_org · 그룹 UI | **마감 (2026-07-20)** |
+| **2** | 필터 Chip · dismiss · 유형 on/off 설정 | 예정 |
+| **3** | NCPMS·기상연동 감염위험(B·C) · 농장별 피드 정밀화 | 예정 |
+| **4** | Push(Web Push) · SMS(별도 승인) | 예정 |
 
 ---
 
@@ -381,4 +387,5 @@ Project A 범위 밖: Push, SMS — Phase 4·별도 승인.
 | 버전 | 일자 | 요지 |
 |------|------|------|
 | 0.1 | 2026-07-20 | 초안 — NTF-001 · SCR-012 · DB·Agent·API |
-| 0.2 | 2026-07-20 | Phase1 구현 반영 (스키마·REST·SCR-012·AppBar) |
+| 0.2 | 2026-07-20 | Phase1 골격 (스키마·REST·SCR-012·AppBar) |
+| **1.0** | **2026-07-20** | **Phase1 마감** — 시세 09/16·시그널 흐름표 · 기상 방제여건 · 병해충 기관별 브리핑(딥링크 없음) · 생육관찰 방제가이드 · source_org · ODS 그룹 시각화 |

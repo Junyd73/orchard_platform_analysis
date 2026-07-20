@@ -7,6 +7,7 @@ import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
 import { resolveNotificationGroup } from '@/views/notification/notificationGroupTheme'
+import { resolveNotificationTypeLabel } from '@/views/notification/notificationTypeBadge'
 import type { NotificationItem, NotificationPayload } from '@/types/notification'
 
 const PRIORITY_URGENT = 'NP010100'
@@ -180,6 +181,22 @@ const sprayGuide = computed(() => {
   return { title, text, pesticides }
 })
 
+const agencyLines = computed((): { agency: string; content: string }[] => {
+  const payload = props.item?.payload as NotificationPayload | null | undefined
+  const raw = payload?.agency_lines
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((row) => {
+      const r = asRecord(row)
+      if (!r) return null
+      const agency = String(r.agency || '').trim()
+      const content = String(r.content || '').trim()
+      if (!agency || !content) return null
+      return { agency, content }
+    })
+    .filter((x): x is { agency: string; content: string } => x != null)
+})
+
 const flowDates = computed((): string[] => {
   const payload = props.item?.payload as NotificationPayload | null | undefined
   const market = asRecord(payload?.market)
@@ -302,13 +319,12 @@ function onNavigate() {
         <header class="ntf-sheet__head" :class="groupTheme.className">
           <div class="ntf-sheet__head-main">
             <OdsBadge :tone="badgeTone(item)" class="ntf-sheet__type">
-              <img
-                class="ntf-sheet__type-icon"
-                :src="groupTheme.iconSrc"
-                alt=""
-                aria-hidden="true"
-              >
-              {{ item.noti_type_nm || item.noti_type_cd }}
+              {{
+                resolveNotificationTypeLabel(
+                  item.noti_type_cd,
+                  item.noti_type_nm || item.noti_type_cd,
+                )
+              }}
             </OdsBadge>
             <time class="ntf-sheet__time">{{ formatEventAt(item.event_at) }}</time>
           </div>
@@ -321,12 +337,31 @@ function onNavigate() {
         <div class="ntf-sheet__body">
           <h2 class="ntf-sheet__title">{{ item.title }}</h2>
           <p
-            v-if="!sprayAssessment"
+            v-if="!sprayAssessment && !agencyLines.length"
             class="ntf-sheet__text"
             :class="{ 'ntf-sheet__text--pre': isSignalView || Boolean(sprayGuide) }"
           >
             {{ item.body || '상세 본문이 없습니다.' }}
           </p>
+
+          <section
+            v-if="agencyLines.length"
+            class="ntf-sheet__block ntf-agency"
+            aria-label="기관별 병해충 안내"
+          >
+            <h3 class="ntf-sheet__block-title">기관별 안내</h3>
+            <ul class="ntf-agency__list">
+              <li
+                v-for="(line, idx) in agencyLines"
+                :key="`${line.agency}-${idx}`"
+                class="ntf-agency__row"
+              >
+                <strong class="ntf-agency__name">{{ line.agency }}</strong>
+                <span class="ntf-agency__sep">:</span>
+                <span class="ntf-agency__content">{{ line.content }}</span>
+              </li>
+            </ul>
+          </section>
 
           <section
             v-if="sprayGuide"
@@ -651,13 +686,6 @@ function onNavigate() {
   flex: 1 1 auto;
 }
 
-.ntf-sheet__type-icon {
-  width: 14px;
-  height: 14px;
-  display: block;
-  flex-shrink: 0;
-}
-
 .ntf-sheet__source {
   flex: 1 1 100%;
   margin: 0;
@@ -848,6 +876,46 @@ function onNavigate() {
   padding-left: 1.2em;
   font: var(--ods-font-body-2);
   color: var(--ods-color-text-secondary);
+}
+
+.ntf-agency__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+}
+
+.ntf-agency__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-caution) 10%, white);
+  border: 1px solid color-mix(in srgb, var(--ods-color-caution) 22%, var(--ods-color-gray-100));
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+}
+
+.ntf-agency__name {
+  flex: 0 0 auto;
+  color: #e65100;
+  font-weight: 700;
+}
+
+.ntf-agency__sep {
+  flex: 0 0 auto;
+  color: var(--ods-color-text-secondary);
+}
+
+.ntf-agency__content {
+  flex: 1 1 12rem;
+  min-width: 0;
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 .ntf-sheet__foot {

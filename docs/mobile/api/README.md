@@ -27,13 +27,15 @@
 | PUT | `/api/v1/farms/{farm_cd}/notifications/{noti_id}/read` | 단건 읽음 |
 | PUT | `/api/v1/farms/{farm_cd}/notifications/read-all` | 전체 읽음 |
 
-### 알림 (NTF-001 Phase1)
+### 알림 (NTF-001 Phase1 마감 · SCR-012 v1.0)
 
 - 스키마: `t_notification` + `t_notification_read` (`core/notification_schema.py`)
 - 헤더: `X-User-Id` (없으면 서버 `MOBILE_USER`)
 - 응답: `noti_id`, `noti_type_cd/nm`, `priority_cd/nm`, `title`, `body`, `payload`, `event_at`, `read_yn`
-- 딥링크: `payload.route` = `observation-detail` | `observation-list` | `work-log-daily`
-- Phase1 비범위: Push, Agent, dismiss, Chip Filter
+- `payload` 권장: `source_org`, `route`, `weather`/`spray`, `market`/`flow`, `agency_lines`, `spray_guide`
+- 딥링크(`route` 있을 때만): `observation-detail` | `work-log-daily` (병해충 브리핑은 route 없음)
+- Agent: 기상·시세(09/16)·병해충A·내부 미완료 · `observation_severity_notifier`
+- Phase1 비범위: Push, dismiss, Chip Filter, NCPMS B·C
 
 ### 기본정보 임시 저장 (등록 완료 아님)
 

@@ -24,7 +24,7 @@ _PRIORITY_PARENT = (PRIORITY_PARENT_CD, "알림우선순위")
 
 _NOTI_TYPE_CHILDREN: tuple[tuple[str, str, str], ...] = (
     (NOTI_TYPE_PARENT_CD, "NT010100", "작업 알림"),
-    (NOTI_TYPE_PARENT_CD, "NT010200", "관찰 위험·주의"),
+    (NOTI_TYPE_PARENT_CD, "NT010200", "생육관찰"),
     (NOTI_TYPE_PARENT_CD, "NT010300", "관찰 AI 미확정"),
     (NOTI_TYPE_PARENT_CD, "NT010400", "재관찰 예정"),
     (NOTI_TYPE_PARENT_CD, "NT010500", "기상"),
@@ -49,7 +49,8 @@ SOURCE_EF_OTHER = "EF010500"
 
 # payload.source_org — 공공·내부 공식 출처 표기 (NTF 보완)
 SOURCE_ORG_WEATHER = "대한민국 국가기상데이터센터 (기상청 API)"
-SOURCE_ORG_RDA = "농촌진흥청 국가농작물병해충관리시스템 (NCPMS API)"
+SOURCE_ORG_RDA = "농촌진흥청 국가농작물병해충관리시스템 (NCPMS·공개예보)"
+SOURCE_ORG_TECH = "지역 농업기술센터 (기술지원·예찰 안내)"
 SOURCE_ORG_MARKET = "가락동 농수산물도매시장 (서울시농수산식품공사 API)"
 SOURCE_ORG_INTERNAL = "과수원관리시스템(Orchard Platform System) 데이터베이스"
 
@@ -69,9 +70,10 @@ def source_org_for(source_cd: str | None) -> str:
 def with_source_org(
     payload: dict[str, Any] | None, source_cd: str | None
 ) -> dict[str, Any]:
-    """알림 payload에 source_org 를 붙인 복사본."""
+    """알림 payload에 source_org 를 붙인 복사본. 이미 있으면 유지."""
     out = dict(payload or {})
-    out["source_org"] = source_org_for(source_cd)
+    if not str(out.get("source_org") or "").strip():
+        out["source_org"] = source_org_for(source_cd)
     return out
 
 _PRIORITY_CHILDREN: tuple[tuple[str, str, str], ...] = (
@@ -246,5 +248,18 @@ def _seed_common_codes(conn: sqlite3.Connection, stats: dict[str, Any]) -> None:
                 )
                 """,
                 (farm_cd, code_cd, code_nm, parent_cd, farm_cd, code_cd),
+            )
+            # 기존 시드 명칭 갱신(예: 관찰 위험·주의 → 생육관찰)
+            conn.execute(
+                f"""
+                UPDATE m_common_code
+                SET code_nm = ?,
+                    mod_id = 'SYSTEM',
+                    mod_dt = {now_sql}
+                WHERE farm_cd = ?
+                  AND code_cd = ?
+                  AND COALESCE(code_nm, '') <> ?
+                """,
+                (code_nm, farm_cd, code_cd, code_nm),
             )
     stats["codes_seeded"] = True

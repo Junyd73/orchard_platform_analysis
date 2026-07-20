@@ -207,13 +207,12 @@ onMounted(() => {
                 :class="groupTheme(item).className"
                 :tone="badgeTone(item)"
               >
-                <img
-                  class="ntf-card__type-icon"
-                  :src="groupTheme(item).iconSrc"
-                  alt=""
-                  aria-hidden="true"
-                >
-                {{ formatNotificationTypeBadge(item.noti_type_nm || item.noti_type_cd) }}
+                {{
+                  formatNotificationTypeBadge(
+                    item.noti_type_nm || item.noti_type_cd,
+                    item.noti_type_cd,
+                  )
+                }}
               </OdsBadge>
               <span class="ntf-card__title">{{ item.title }}</span>
             </span>
@@ -374,7 +373,8 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  background: var(--ods-color-stone-soft, var(--ods-color-gray-100));
+  /* 그룹 공통: 반투명 톤 (미지정 폴백) */
+  background: color-mix(in srgb, var(--ods-color-gray-500) 14%, transparent);
 }
 
 .ntf-card__icon img {
@@ -384,16 +384,16 @@ onMounted(() => {
 }
 
 .ntf-card__icon.ntf-group--market {
-  background: var(--ods-color-primary-soft);
+  background: color-mix(in srgb, var(--ods-color-primary) 16%, transparent);
 }
 .ntf-card__icon.ntf-group--weather {
-  background: var(--ods-color-ai-soft);
+  background: color-mix(in srgb, var(--ods-color-ai) 16%, transparent);
 }
 .ntf-card__icon.ntf-group--rda {
-  background: var(--ods-color-caution-soft);
+  background: color-mix(in srgb, var(--ods-color-caution) 16%, transparent);
 }
 .ntf-card__icon.ntf-group--system {
-  background: var(--ods-color-stone-soft, var(--ods-color-gray-100));
+  background: color-mix(in srgb, var(--ods-color-gray-700) 12%, transparent);
 }
 
 .ntf-card__center {
@@ -416,20 +416,11 @@ onMounted(() => {
   width: 2.75em;
   min-height: 2.5em;
   padding: 2px 4px;
-  flex-direction: column;
   justify-content: center;
   text-align: center;
   white-space: pre-line;
-  line-height: 1.15;
+  line-height: 1.2;
   letter-spacing: 0;
-  gap: 2px;
-}
-
-.ntf-card__type-icon {
-  width: 11px;
-  height: 11px;
-  display: block;
-  flex-shrink: 0;
 }
 
 .ntf-card__dot {

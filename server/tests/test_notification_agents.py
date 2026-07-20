@@ -438,6 +438,85 @@ class NotificationAgentTests(unittest.TestCase):
         self.assertIn("캡탄", p["spray_guide"]["text"])
         self.assertEqual(p["route"], "observation-detail")
 
+    def test_pest_briefing_agency_lines(self) -> None:
+        from app.agents.pest_agent import (
+            AGENCY_RDA,
+            AGENCY_TECH,
+            build_pest_briefing,
+            format_agency_body,
+            run_pest_agent,
+        )
+
+        body = format_agency_body(
+            [
+                {"agency": AGENCY_RDA, "content": "흑성병 주의보"},
+                {"agency": AGENCY_TECH, "content": "정남면 예찰 증가"},
+            ]
+        )
+        self.assertIn("농촌진흥청 : 흑성병 주의보", body)
+        self.assertIn("기술지원센터 : 정남면 예찰 증가", body)
+
+        briefing = build_pest_briefing(
+            [
+                {
+                    "agency": AGENCY_RDA,
+                    "title": "경기도 배나무 흑성병 주의",
+                    "summary": "화성 지역 확산 유의",
+                },
+                {
+                    "agency": AGENCY_TECH,
+                    "title": "화성시 정남면 예찰",
+                    "summary": "배나무 병반 증가",
+                },
+                {
+                    "title": "전국 벼 병해충",
+                    "summary": "남부 지방 주의",
+                },
+            ]
+        )
+        self.assertIsNotNone(briefing)
+        assert briefing is not None
+        self.assertEqual(set(briefing["agencies"]), {AGENCY_RDA, AGENCY_TECH})
+        self.assertIn("농촌진흥청", briefing["body"])
+        self.assertIn("기술지원센터", briefing["body"])
+        self.assertIn("source_org", briefing)
+
+        def feed():
+            return [
+                {
+                    "agency": AGENCY_RDA,
+                    "title": "화성 배나무 흑성병",
+                    "summary": "경기 화성 주의",
+                },
+                {
+                    "agency": AGENCY_TECH,
+                    "title": "정남면 예찰",
+                    "summary": "화성 배 병해충 점검",
+                },
+            ]
+
+        result = run_pest_agent(self.db, fetch_feed=feed)
+        self.assertGreaterEqual(result["created"], 1)
+        conn = sqlite3.connect(str(self.db))
+        row = conn.execute(
+            """
+            SELECT title, body, payload_json, dedupe_key
+            FROM t_notification
+            WHERE dedupe_key LIKE '%:briefing'
+            """
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertIn("병해충 예보", row[0])
+        self.assertIn("농촌진흥청 :", row[1])
+        self.assertIn("기술지원센터 :", row[1])
+        self.assertIn(":briefing", row[3])
+        import json
+
+        payload = json.loads(row[2])
+        self.assertTrue(payload.get("agency_lines"))
+        self.assertIn("농촌진흥청", payload.get("source_org") or "")
+
 
 if __name__ == "__main__":
     unittest.main()

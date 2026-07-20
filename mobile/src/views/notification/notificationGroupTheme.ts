@@ -66,7 +66,7 @@ export function resolveNotificationGroup(
   const t = String(notiTypeCd || '').trim().toUpperCase()
   if (t === 'NT011000') return GROUP_MARKET
   if (t === 'NT010500') return GROUP_WEATHER
-  if (t === 'NT010600') return GROUP_RDA
+  if (t === 'NT010600' || t === 'NT010700') return GROUP_RDA
   if (
     t === 'NT010100' ||
     t === 'NT010200' ||
