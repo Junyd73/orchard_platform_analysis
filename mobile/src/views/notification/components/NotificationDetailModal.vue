@@ -6,6 +6,7 @@ import iconPest from '@/assets/ods/common/icon-kpi-pest.svg'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
+import { resolveNotificationGroup } from '@/views/notification/notificationGroupTheme'
 import type { NotificationItem, NotificationPayload } from '@/types/notification'
 
 const PRIORITY_URGENT = 'NP010100'
@@ -58,15 +59,15 @@ type SprayAssessment = {
   rain_prob_24h: number
 }
 
+const groupTheme = computed(() =>
+  resolveNotificationGroup(props.item?.noti_type_cd),
+)
+
 function badgeTone(
   item: NotificationItem,
 ): 'neutral' | 'ok' | 'caution' | 'danger' | 'ai' {
   if (item.priority_cd === PRIORITY_URGENT) return 'danger'
-  const t = item.noti_type_cd
-  if (t === 'NT010200') return 'caution'
-  if (t === 'NT010300' || t === 'NT010500' || t === 'NT011000') return 'ai'
-  if (t === 'NT010100' || t === 'NT010400' || t === 'NT010600') return 'ok'
-  return 'neutral'
+  return resolveNotificationGroup(item.noti_type_cd).badgeTone
 }
 
 function formatEventAt(raw: string): string {
@@ -298,9 +299,15 @@ function onNavigate() {
         @click="emit('close')"
       />
       <div class="ntf-sheet__panel">
-        <header class="ntf-sheet__head">
+        <header class="ntf-sheet__head" :class="groupTheme.className">
           <div class="ntf-sheet__head-main">
-            <OdsBadge :tone="badgeTone(item)">
+            <OdsBadge :tone="badgeTone(item)" class="ntf-sheet__type">
+              <img
+                class="ntf-sheet__type-icon"
+                :src="groupTheme.iconSrc"
+                alt=""
+                aria-hidden="true"
+              >
               {{ item.noti_type_nm || item.noti_type_cd }}
             </OdsBadge>
             <time class="ntf-sheet__time">{{ formatEventAt(item.event_at) }}</time>
@@ -620,6 +627,20 @@ function onNavigate() {
   gap: var(--ods-space-8) var(--ods-space-12);
   padding: var(--ods-space-16);
   border-bottom: 1px solid var(--ods-color-gray-100);
+  border-top: 4px solid var(--ods-color-gray-300);
+}
+
+.ntf-sheet__head.ntf-group--market {
+  border-top-color: var(--ods-color-primary);
+}
+.ntf-sheet__head.ntf-group--weather {
+  border-top-color: var(--ods-color-ai);
+}
+.ntf-sheet__head.ntf-group--rda {
+  border-top-color: var(--ods-color-caution);
+}
+.ntf-sheet__head.ntf-group--system {
+  border-top-color: var(--ods-color-gray-500);
 }
 
 .ntf-sheet__head-main {
@@ -628,6 +649,13 @@ function onNavigate() {
   gap: var(--ods-space-8);
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.ntf-sheet__type-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
 }
 
 .ntf-sheet__source {

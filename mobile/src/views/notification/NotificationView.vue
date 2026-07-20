@@ -9,11 +9,6 @@ import {
   markNotificationRead,
 } from '@/api/notifications'
 import { ApiClientError } from '@/api/client'
-import iconBell from '@/assets/ods/common/icon-bell.svg'
-import iconCalendar from '@/assets/ods/common/icon-kpi-calendar.svg'
-import iconPest from '@/assets/ods/common/icon-kpi-pest.svg'
-import iconRobot from '@/assets/ods/common/icon-kpi-robot.svg'
-import iconWarn from '@/assets/ods/common/icon-kpi-warn.svg'
 import iconChevronRight from '@/assets/ods/scr004/icon-chevron-right.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
@@ -21,6 +16,7 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import NotificationDetailModal from '@/views/notification/components/NotificationDetailModal.vue'
 import { resolveNotificationDeepLink } from '@/views/notification/notificationDeepLink'
+import { resolveNotificationGroup } from '@/views/notification/notificationGroupTheme'
 import { formatNotificationTypeBadge } from '@/views/notification/notificationTypeBadge'
 import { useAppStore } from '@/composables/stores/app'
 import { useNotificationBadgeStore } from '@/composables/stores/notificationBadge'
@@ -51,29 +47,13 @@ const headerCountLabel = computed(() => {
   return `전체 알림 ${total}건`
 })
 
+function groupTheme(item: NotificationItem) {
+  return resolveNotificationGroup(item.noti_type_cd)
+}
+
 function badgeTone(item: NotificationItem): 'neutral' | 'ok' | 'caution' | 'danger' | 'ai' {
   if (item.priority_cd === PRIORITY_URGENT) return 'danger'
-  const t = item.noti_type_cd
-  if (t === 'NT010200') return 'caution'
-  if (t === 'NT010300' || t === 'NT010500') return 'ai'
-  if (t === 'NT010100' || t === 'NT010400') return 'ok'
-  return 'neutral'
-}
-
-function typeIcon(item: NotificationItem): string {
-  if (item.priority_cd === PRIORITY_URGENT || item.noti_type_cd === 'NT010200') {
-    return iconWarn
-  }
-  if (item.noti_type_cd === 'NT010300') return iconRobot
-  if (item.noti_type_cd === 'NT010100' || item.noti_type_cd === 'NT010400') {
-    return iconCalendar
-  }
-  if (item.noti_type_cd === 'NT010500') return iconPest
-  return iconBell
-}
-
-function typeIconTone(item: NotificationItem): string {
-  return `ntf-card__icon--${badgeTone(item)}`
+  return groupTheme(item).badgeTone
 }
 
 function hasDeepLink(item: NotificationItem): boolean {
@@ -196,16 +176,23 @@ onMounted(() => {
         <button
           type="button"
           class="ntf-card"
-          :class="{
-            'ntf-card--unread': item.read_yn !== 'Y',
-            'ntf-card--read': item.read_yn === 'Y',
-            'ntf-card--busy': clickingId === item.noti_id,
-          }"
+          :class="[
+            groupTheme(item).className,
+            {
+              'ntf-card--unread': item.read_yn !== 'Y',
+              'ntf-card--read': item.read_yn === 'Y',
+              'ntf-card--busy': clickingId === item.noti_id,
+            },
+          ]"
           :disabled="clickingId === item.noti_id"
           @click="handleNotificationClick(item)"
         >
-          <span class="ntf-card__icon" :class="typeIconTone(item)" aria-hidden="true">
-            <img :src="typeIcon(item)" alt="">
+          <span
+            class="ntf-card__icon"
+            :class="groupTheme(item).className"
+            aria-hidden="true"
+          >
+            <img :src="groupTheme(item).iconSrc" alt="">
           </span>
 
           <span class="ntf-card__center">
@@ -215,7 +202,17 @@ onMounted(() => {
                 class="ntf-card__dot"
                 aria-label="미읽음"
               />
-              <OdsBadge class="ntf-card__type" :tone="badgeTone(item)">
+              <OdsBadge
+                class="ntf-card__type"
+                :class="groupTheme(item).className"
+                :tone="badgeTone(item)"
+              >
+                <img
+                  class="ntf-card__type-icon"
+                  :src="groupTheme(item).iconSrc"
+                  alt=""
+                  aria-hidden="true"
+                >
                 {{ formatNotificationTypeBadge(item.noti_type_nm || item.noti_type_cd) }}
               </OdsBadge>
               <span class="ntf-card__title">{{ item.title }}</span>
@@ -319,6 +316,8 @@ onMounted(() => {
   box-sizing: border-box;
   text-align: left;
   border: 1px solid var(--ods-color-gray-100);
+  border-left-width: 4px;
+  border-left-color: var(--ods-color-gray-300);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white);
   box-shadow: var(--ods-shadow-card);
@@ -328,9 +327,35 @@ onMounted(() => {
   transition: opacity var(--ods-motion-fast) var(--ods-motion-ease);
 }
 
+.ntf-card.ntf-group--market {
+  border-left-color: var(--ods-color-primary);
+}
+.ntf-card.ntf-group--weather {
+  border-left-color: var(--ods-color-ai);
+}
+.ntf-card.ntf-group--rda {
+  border-left-color: var(--ods-color-caution);
+}
+.ntf-card.ntf-group--system {
+  border-left-color: var(--ods-color-gray-500);
+}
+
 .ntf-card--unread {
   background: color-mix(in srgb, var(--ods-color-primary-soft) 70%, white);
   border-color: color-mix(in srgb, var(--ods-color-primary) 12%, var(--ods-color-gray-100));
+}
+
+.ntf-card--unread.ntf-group--market {
+  border-left-color: var(--ods-color-primary);
+}
+.ntf-card--unread.ntf-group--weather {
+  border-left-color: var(--ods-color-ai);
+}
+.ntf-card--unread.ntf-group--rda {
+  border-left-color: var(--ods-color-caution);
+}
+.ntf-card--unread.ntf-group--system {
+  border-left-color: var(--ods-color-gray-500);
 }
 
 .ntf-card--read {
@@ -349,6 +374,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  background: var(--ods-color-stone-soft, var(--ods-color-gray-100));
 }
 
 .ntf-card__icon img {
@@ -357,20 +383,17 @@ onMounted(() => {
   display: block;
 }
 
-.ntf-card__icon--danger {
-  background: color-mix(in srgb, var(--ods-color-danger) 14%, white);
+.ntf-card__icon.ntf-group--market {
+  background: var(--ods-color-primary-soft);
 }
-.ntf-card__icon--caution {
-  background: color-mix(in srgb, var(--ods-color-caution) 18%, white);
+.ntf-card__icon.ntf-group--weather {
+  background: var(--ods-color-ai-soft);
 }
-.ntf-card__icon--ai {
-  background: color-mix(in srgb, var(--ods-color-ai) 14%, white);
+.ntf-card__icon.ntf-group--rda {
+  background: var(--ods-color-caution-soft);
 }
-.ntf-card__icon--ok {
-  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
-}
-.ntf-card__icon--neutral {
-  background: var(--ods-color-gray-100);
+.ntf-card__icon.ntf-group--system {
+  background: var(--ods-color-stone-soft, var(--ods-color-gray-100));
 }
 
 .ntf-card__center {
@@ -393,11 +416,20 @@ onMounted(() => {
   width: 2.75em;
   min-height: 2.5em;
   padding: 2px 4px;
+  flex-direction: column;
   justify-content: center;
   text-align: center;
   white-space: pre-line;
-  line-height: 1.2;
+  line-height: 1.15;
   letter-spacing: 0;
+  gap: 2px;
+}
+
+.ntf-card__type-icon {
+  width: 11px;
+  height: 11px;
+  display: block;
+  flex-shrink: 0;
 }
 
 .ntf-card__dot {

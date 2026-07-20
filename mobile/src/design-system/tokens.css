@@ -91,9 +91,11 @@
   --ods-shadow-elevated: 0 8px 24px rgba(33, 33, 33, 0.14);
   --ods-shadow-fab: 0 8px 22px color-mix(in srgb, var(--ods-color-primary) 28%, transparent);
 
-  /* Surface helpers (selected / soft primary) */
-  --ods-color-primary-soft: color-mix(in srgb, var(--ods-color-primary) 8%, white);
-  --ods-color-secondary-soft: color-mix(in srgb, var(--ods-color-secondary) 28%, white);
+  /* Soft surfaces for notification group badges / icon wells */
+  --ods-color-ai-soft: color-mix(in srgb, var(--ods-color-ai) 14%, white);
+  --ods-color-caution-soft: color-mix(in srgb, var(--ods-color-caution) 18%, white);
+  --ods-color-danger-soft: color-mix(in srgb, var(--ods-color-danger) 12%, white);
+  --ods-color-stone-soft: var(--ods-color-gray-100);
 
   /* Motion (ODS 200~250ms) */
   --ods-motion-fast: 200ms;
