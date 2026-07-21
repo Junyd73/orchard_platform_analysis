@@ -129,6 +129,13 @@
   - `pesticide_count` / `fertilizer_count`: 작업 mid `WK010200` / `WK010800` 건수
 - **일간 MVP:** 인력·경비·전표 CRUD 미포함. 자식 행이 있으면 작업 삭제 거부
 
+### 영농 일정 Schedule (WLS-001 Phase1)
+
+- Spec: [`docs/WORK_SCHEDULE_PHASE1_SPEC.md`](../../docs/WORK_SCHEDULE_PHASE1_SPEC.md)
+- 스키마: `t_work_schedule` + `WS01` (`core/work_schedule_schema.py`)
+- Base: `/api/v1/farms/{farm_cd}/work-schedules` — CRUD + `convert-to-draft`
+- 일정은 미래일 가능 · **실적 전환은 당일/과거만** · `integrated`/Google 동기화는 비범위
+
 ## 향후 (미구현)
 
 GPS 고도화·영농일지 Phase 2(일간 인력/경비 CRUD·전표·시간별 예보) 등은 후속. 모바일 번들에 API 키 금지.  

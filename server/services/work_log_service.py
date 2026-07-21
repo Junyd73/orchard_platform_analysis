@@ -1291,6 +1291,17 @@ class WorkLogService:
                 "DELETE FROM t_work_detail WHERE farm_cd = ? AND work_id = ?",
                 (farm, wid),
             )
+            # 일정→실적 전환분 삭제 시 Schedule PENDING 복구 (WLS-001)
+            try:
+                from app.services.work_schedule_service import (  # noqa: WPS433
+                    WorkScheduleService,
+                )
+
+                WorkScheduleService.rollback_converted_work(
+                    conn, farm, wid, user_id=_s(user_id) or "MOBILE"
+                )
+            except Exception:  # noqa: BLE001
+                pass
             conn.commit()
         return WorkLogSaveResponse(
             work_dt=dt, farm_cd=farm, message="작업이 삭제되었습니다."
