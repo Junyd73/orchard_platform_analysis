@@ -9,6 +9,7 @@ import iconExpense from '@/assets/ods/work-log/icon-expense.svg'
 import iconPesticide from '@/assets/ods/work-log/icon-pesticide.svg'
 import iconFertilizer from '@/assets/ods/work-log/icon-fertilizer.svg'
 import iconOther from '@/assets/ods/work-log/icon-other.svg'
+import iconCalendar from '@/assets/ods/work-log/icon-calendar.svg'
 import iconTabExpense from '@/assets/ods/work-log/icon-tab-expense.svg'
 import iconTabPesticide from '@/assets/ods/work-log/icon-tab-pesticide.svg'
 import iconTabFertilizer from '@/assets/ods/work-log/icon-tab-fertilizer.svg'
@@ -28,6 +29,17 @@ export const WORK_MID_CD_PESTICIDE = 'WK010200'
 export const WORK_MID_CD_FERTILIZER = 'WK010800'
 
 export const MSG_FUTURE_WORK_LOG = '영농일지는 오늘까지만 작성할 수 있습니다.'
+export const MSG_SCHEDULE_LOAD_FAILED = '예정 일정을 불러오지 못했습니다.'
+export const MSG_SCHEDULE_SAVE_OK = '일정이 등록되었습니다.'
+export const MSG_SCHEDULE_CONVERT_OK = '일정을 불러와 임시 초안으로 넣었습니다.'
+export const MSG_SCHEDULE_CONVERT_FUTURE =
+  '미래 날짜 일정은 실적으로 전환할 수 없습니다. 당일·과거에만 가능합니다.'
+export const MSG_SCHEDULE_EMPTY = '이 날의 예정 일정이 없습니다.'
+export const MSG_SCHEDULE_MID_REQUIRED = '작업 유형을 선택해 주세요.'
+export const LABEL_SCHEDULE_SECTION = '예정 일정'
+export const BTN_SCHEDULE_ADD = '일정 등록'
+export const BTN_SCHEDULE_CONVERT = '실적으로 불러오기'
+export const BTN_SCHEDULE_OPEN = '예정 일정 불러오기'
 export const MSG_DETAIL_PENDING = '준비 중입니다.'
 export const MSG_COPY_HINT =
   '인력·경비·농약·비료·사진은 복사되지 않습니다. 작업 기본정보만 저장됩니다.'
@@ -80,6 +92,7 @@ export function heroGreetingForHour(hour: number): string {
 
 /** 작업필터 키 (클라이언트 전용) */
 export const WORK_FILTER_WORK = 'work'
+export const WORK_FILTER_SCHEDULE = 'schedule'
 export const WORK_FILTER_LABOR = 'labor'
 export const WORK_FILTER_EXPENSE = 'expense'
 export const WORK_FILTER_PESTICIDE = 'pesticide'
@@ -89,6 +102,7 @@ export const WORK_FILTER_OTHER = 'other'
 
 export type WorkFilterKey =
   | typeof WORK_FILTER_WORK
+  | typeof WORK_FILTER_SCHEDULE
   | typeof WORK_FILTER_LABOR
   | typeof WORK_FILTER_EXPENSE
   | typeof WORK_FILTER_PESTICIDE
@@ -100,6 +114,7 @@ export type CalendarLineKind = WorkFilterKey
 
 export const WORK_FILTER_OPTIONS: ReadonlyArray<{ key: WorkFilterKey; label: string }> = [
   { key: WORK_FILTER_WORK, label: '작업' },
+  { key: WORK_FILTER_SCHEDULE, label: '예정' },
   { key: WORK_FILTER_LABOR, label: '인력' },
   { key: WORK_FILTER_EXPENSE, label: '경비' },
   { key: WORK_FILTER_PESTICIDE, label: '농약' },
@@ -110,6 +125,7 @@ export const WORK_FILTER_OPTIONS: ReadonlyArray<{ key: WorkFilterKey; label: str
 
 export const CALENDAR_KIND_ICON: Record<CalendarLineKind, string> = {
   work: iconWork,
+  schedule: iconCalendar,
   labor: iconLabor,
   expense: iconExpense,
   pesticide: iconPesticide,
@@ -118,9 +134,10 @@ export const CALENDAR_KIND_ICON: Record<CalendarLineKind, string> = {
   other: iconOther,
 }
 
-/** 시안3 분류 색상 */
+/** 시안3 분류 색상 · 예정=ODS AI(하늘) */
 export const CALENDAR_KIND_COLOR: Record<CalendarLineKind, string> = {
   work: '#2E7D32',
+  schedule: '#4F7FB8',
   labor: '#1E88E5',
   expense: '#FB8C00',
   pesticide: '#C62828',
@@ -132,6 +149,7 @@ export const CALENDAR_KIND_COLOR: Record<CalendarLineKind, string> = {
 export function defaultWorkFilters(): Record<WorkFilterKey, boolean> {
   return {
     [WORK_FILTER_WORK]: true,
+    [WORK_FILTER_SCHEDULE]: true,
     [WORK_FILTER_LABOR]: true,
     [WORK_FILTER_EXPENSE]: true,
     [WORK_FILTER_PESTICIDE]: true,
@@ -340,8 +358,6 @@ export function isRestDay(iso: string): boolean {
   return isWeekend(iso) || isPublicHoliday(iso)
 }
 
-export type CalendarLine = { kind: CalendarLineKind; text: string }
-
 /** 방제/약제살포 작업 여부 (PC is_pesticide_work와 동일 기준) */
 export function isPesticideWork(midCd: string, midNm: string): boolean {
   const cd = String(midCd || '').trim().toUpperCase()
@@ -361,6 +377,15 @@ function isFertilizerWork(midCd: string, midNm: string): boolean {
   return nm.includes('비료') || nm.includes('영양제')
 }
 
+export type CalendarScheduleHint = {
+  title: string
+}
+
+export type CalendarLine = {
+  kind: CalendarLineKind
+  text: string
+}
+
 export function buildCalendarLines(
   cell: {
     work_names?: string[]
@@ -376,61 +401,74 @@ export function buildCalendarLines(
     work_rmk?: string
   } | null,
   filters: Record<WorkFilterKey, boolean>,
+  schedules: CalendarScheduleHint[] = [],
 ): { lines: CalendarLine[]; extra: number } {
-  if (!cell) return { lines: [], extra: 0 }
   const all: CalendarLine[] = []
 
-  const items =
-    cell.work_items && cell.work_items.length > 0
-      ? cell.work_items.map((it) => ({
-          cd: String(it.work_mid_cd || '').trim(),
-          nm: String(it.work_mid_nm || '').trim() || '-',
-        }))
-      : (cell.work_names || []).map((nm) => ({ cd: '', nm: String(nm || '').trim() || '-' }))
-
-  for (const it of items) {
-    if (isPesticideWork(it.cd, it.nm)) {
-      if (filters[WORK_FILTER_PESTICIDE]) {
-        all.push({ kind: WORK_FILTER_PESTICIDE, text: it.nm })
-      }
-      continue
-    }
-    if (isFertilizerWork(it.cd, it.nm)) {
-      if (filters[WORK_FILTER_FERTILIZER]) {
-        all.push({ kind: WORK_FILTER_FERTILIZER, text: it.nm })
-      }
-      continue
-    }
-    if (filters[WORK_FILTER_WORK] && cell.has_work) {
-      all.push({ kind: WORK_FILTER_WORK, text: it.nm })
+  if (filters[WORK_FILTER_SCHEDULE]) {
+    for (const s of schedules) {
+      const text = String(s.title || '').trim() || '예정'
+      all.push({ kind: WORK_FILTER_SCHEDULE, text })
     }
   }
 
-  if (filters[WORK_FILTER_LABOR]) {
-    const people = Number(cell.resource_count || 0)
-    const hours = Number(cell.labor_hour_sum || 0)
-    if (people > 0 || hours > 0) {
+  if (cell) {
+    const items =
+      cell.work_items && cell.work_items.length > 0
+        ? cell.work_items.map((it) => ({
+            cd: String(it.work_mid_cd || '').trim(),
+            nm: String(it.work_mid_nm || '').trim() || '-',
+          }))
+        : (cell.work_names || []).map((nm) => ({
+            cd: '',
+            nm: String(nm || '').trim() || '-',
+          }))
+
+    for (const it of items) {
+      if (isPesticideWork(it.cd, it.nm)) {
+        if (filters[WORK_FILTER_PESTICIDE]) {
+          all.push({ kind: WORK_FILTER_PESTICIDE, text: it.nm })
+        }
+        continue
+      }
+      if (isFertilizerWork(it.cd, it.nm)) {
+        if (filters[WORK_FILTER_FERTILIZER]) {
+          all.push({ kind: WORK_FILTER_FERTILIZER, text: it.nm })
+        }
+        continue
+      }
+      if (filters[WORK_FILTER_WORK] && cell.has_work) {
+        all.push({ kind: WORK_FILTER_WORK, text: it.nm })
+      }
+    }
+
+    if (filters[WORK_FILTER_LABOR]) {
+      const people = Number(cell.resource_count || 0)
+      const hours = Number(cell.labor_hour_sum || 0)
+      if (people > 0 || hours > 0) {
+        all.push({
+          kind: WORK_FILTER_LABOR,
+          text: formatLaborSummary(people, hours),
+        })
+      }
+    }
+    const cost = Number(cell.labor_sum || 0) + Number(cell.expense_sum || 0)
+    if (filters[WORK_FILTER_EXPENSE] && cost > 0) {
+      all.push({ kind: WORK_FILTER_EXPENSE, text: '경비' })
+    }
+    const weatherLabel = displayWeatherNm(cell.weather_cd, cell.weather_nm)
+    const hasWeather = Boolean(cell.weather_cd) || Boolean(weatherLabel)
+    if (filters[WORK_FILTER_WEATHER] && hasWeather) {
       all.push({
-        kind: WORK_FILTER_LABOR,
-        text: formatLaborSummary(people, hours),
+        kind: WORK_FILTER_WEATHER,
+        text: weatherLabel || '기상',
       })
     }
+    if (filters[WORK_FILTER_OTHER] && cell.has_issue) {
+      all.push({ kind: WORK_FILTER_OTHER, text: '이슈' })
+    }
   }
-  const cost = Number(cell.labor_sum || 0) + Number(cell.expense_sum || 0)
-  if (filters[WORK_FILTER_EXPENSE] && cost > 0) {
-    all.push({ kind: WORK_FILTER_EXPENSE, text: '경비' })
-  }
-  const weatherLabel = displayWeatherNm(cell.weather_cd, cell.weather_nm)
-  const hasWeather = Boolean(cell.weather_cd) || Boolean(weatherLabel)
-  if (filters[WORK_FILTER_WEATHER] && hasWeather) {
-    all.push({
-      kind: WORK_FILTER_WEATHER,
-      text: weatherLabel || '기상',
-    })
-  }
-  if (filters[WORK_FILTER_OTHER] && cell.has_issue) {
-    all.push({ kind: WORK_FILTER_OTHER, text: '이슈' })
-  }
+
   const max = 2
   if (all.length <= max) return { lines: all, extra: 0 }
   return { lines: all.slice(0, max), extra: all.length - max }

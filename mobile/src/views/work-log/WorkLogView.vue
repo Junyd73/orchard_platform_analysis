@@ -8,6 +8,7 @@ import {
   fetchWorkLogMonthly,
   fetchWorkLogWeather,
 } from '@/api/workLogs'
+import { fetchWorkSchedules } from '@/api/workSchedules'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
@@ -24,8 +25,10 @@ import {
   isFutureDate,
   MSG_DETAIL_PENDING,
   MSG_LOAD_MONTH_FAILED,
+  pad2,
   shiftMonth,
   todayIso,
+  type CalendarScheduleHint,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
 import { useAppStore } from '@/composables/stores/app'
@@ -34,6 +37,7 @@ import type {
   WorkLogMasterDto,
   WorkLogMonthSummary as SummaryDto,
 } from '@/types/workLog'
+import { SCHED_STATUS_PENDING } from '@/types/workSchedule'
 
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 
@@ -61,6 +65,7 @@ const toastMessage = ref('')
 const loadFailed = ref(false)
 const summary = ref<SummaryDto | null>(null)
 const days = ref<Record<string, WorkLogDayCell>>({})
+const schedulesByDt = ref<Record<string, CalendarScheduleHint[]>>({})
 /** 표시 월이 바뀌어도 Hero '오늘' KPI는 유지 */
 const todayCellCache = ref<WorkLogDayCell | null>(null)
 const todayMaster = ref<WorkLogMasterDto | null>(null)
@@ -80,15 +85,16 @@ const todayExpenseSum = computed(() => {
 })
 
 const canGoNext = computed(() => {
+  // 일정 등록을 위해 미래 월 허용 (오늘 기준 최대 18개월)
   const t = new Date()
-  const cy = t.getFullYear()
-  const cm = t.getMonth() + 1
-  return year.value < cy || (year.value === cy && month.value < cm)
+  const max = new Date(t.getFullYear(), t.getMonth() + 18, 1)
+  const cur = new Date(year.value, month.value - 1, 1)
+  return cur < max
 })
 
 const canGoNextYear = computed(() => {
   const cy = new Date().getFullYear()
-  return year.value < cy
+  return year.value < cy + 1
 })
 
 const showMonthSkeleton = computed(() => bootstrapping.value)
@@ -105,13 +111,36 @@ async function loadMonth() {
   loading.value = true
   loadFailed.value = false
   try {
-    const res = await fetchWorkLogMonthly(farmCd.value, year.value, month.value)
+    const startDt = `${year.value}-${pad2(month.value)}-01`
+    const lastDay = new Date(year.value, month.value, 0).getDate()
+    const endDt = `${year.value}-${pad2(month.value)}-${pad2(lastDay)}`
+    const [res, schedRes] = await Promise.all([
+      fetchWorkLogMonthly(farmCd.value, year.value, month.value),
+      fetchWorkSchedules(farmCd.value, {
+        start_dt: startDt,
+        end_dt: endDt,
+        status_cd: SCHED_STATUS_PENDING,
+      }).catch(() => ({ success: true, data: [] })),
+    ])
     summary.value = res.summary
     days.value = res.days || {}
     rememberTodayCell(days.value)
+    const map: Record<string, CalendarScheduleHint[]> = {}
+    for (const s of schedRes.data || []) {
+      const dt = String(s.work_dt || '').slice(0, 10)
+      if (!dt) continue
+      const title =
+        String(s.title || '').trim() ||
+        String(s.work_mid_cd || '').trim() ||
+        '예정'
+      if (!map[dt]) map[dt] = []
+      map[dt].push({ title })
+    }
+    schedulesByDt.value = map
   } catch (err) {
     summary.value = null
     days.value = {}
+    schedulesByDt.value = {}
     loadFailed.value = true
     const msg =
       err instanceof ApiClientError ? err.message : MSG_LOAD_MONTH_FAILED
@@ -203,10 +232,6 @@ function goTodayMonth() {
 }
 
 function onSelectDay(workDt: string) {
-  if (isFutureDate(workDt)) {
-    showToast('영농일지는 오늘까지만 작성할 수 있습니다.')
-    return
-  }
   selectedDt.value = workDt
   void router.push({ name: 'work-log-daily', params: { workDt } })
 }
@@ -301,11 +326,15 @@ onMounted(async () => {
           :year="year"
           :month="month"
           :days="days"
+          :schedules-by-dt="schedulesByDt"
           :filters="filters"
           :selected-dt="selectedDt"
           :loading="loading"
           :show-empty="
-            !loading && (loadFailed || Object.keys(days).length === 0)
+            !loading &&
+            (loadFailed ||
+              (Object.keys(days).length === 0 &&
+                Object.keys(schedulesByDt).length === 0))
           "
           @select="onSelectDay"
           @blocked="onBlocked"

@@ -17,6 +17,7 @@ import {
   todayIso,
   WEEKDAY_LABELS,
   WORK_FILTER_OPTIONS,
+  type CalendarScheduleHint,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
 import type { WorkLogDayCell } from '@/types/workLog'
@@ -27,6 +28,8 @@ const props = defineProps<{
   year: number
   month: number
   days: Record<string, WorkLogDayCell>
+  /** work_dt → 예정 일정 힌트 */
+  schedulesByDt?: Record<string, CalendarScheduleHint[]>
   filters: Record<WorkFilterKey, boolean>
   selectedDt?: string | null
   loading?: boolean
@@ -77,6 +80,7 @@ type CalCell = {
   isSelected: boolean
   isRest: boolean
   cell: WorkLogDayCell | null
+  hasSchedule: boolean
   lines: ReturnType<typeof buildCalendarLines>['lines']
   extra: number
 }
@@ -102,6 +106,7 @@ const cells = computed((): CalCell[] => {
       isSelected: false,
       isRest: isRestDay(iso),
       cell: null,
+      hasSchedule: false,
       lines: [],
       extra: 0,
     })
@@ -110,7 +115,8 @@ const cells = computed((): CalCell[] => {
   for (let d = 1; d <= total; d += 1) {
     const iso = `${props.year}-${pad2(props.month)}-${pad2(d)}`
     const cell = props.days[iso] || null
-    const built = buildCalendarLines(cell, props.filters)
+    const sched = props.schedulesByDt?.[iso] || []
+    const built = buildCalendarLines(cell, props.filters, sched)
     out.push({
       key: iso,
       day: d,
@@ -121,6 +127,7 @@ const cells = computed((): CalCell[] => {
       isSelected: iso === selected,
       isRest: isRestDay(iso),
       cell,
+      hasSchedule: sched.length > 0,
       lines: built.lines,
       extra: built.extra,
     })
@@ -140,6 +147,7 @@ const cells = computed((): CalCell[] => {
       isSelected: false,
       isRest: isRestDay(iso),
       cell: null,
+      hasSchedule: false,
       lines: [],
       extra: 0,
     })
@@ -149,7 +157,8 @@ const cells = computed((): CalCell[] => {
 })
 
 const hasAnyWork = computed(() =>
-  Object.values(props.days).some((d) => d.has_work || Number(d.work_count || 0) > 0),
+  Object.values(props.days).some((d) => d.has_work || Number(d.work_count || 0) > 0) ||
+  Object.values(props.schedulesByDt || {}).some((arr) => arr.length > 0),
 )
 
 const swipe = ref<{ x: number; y: number; active: boolean } | null>(null)
@@ -220,7 +229,8 @@ function onTap(c: CalCell) {
     return
   }
   if (c.future) {
-    emit('blocked', '영농일지는 오늘까지만 작성할 수 있습니다.')
+    // 미래일도 일정 확인·등록을 위해 일간 진입 허용 (실적 저장은 일간에서 차단)
+    emit('select', c.iso)
     return
   }
   emit('select', c.iso)
@@ -282,7 +292,10 @@ function onTap(c: CalCell) {
               'cal__cell--today': c.isToday && !c.isSelected,
               'cal__cell--selected': c.inMonth && c.isSelected,
               'cal__cell--work':
-                c.inMonth && c.cell?.has_work && !c.isSelected && !c.isToday,
+                c.inMonth &&
+                (c.cell?.has_work || c.hasSchedule) &&
+                !c.isSelected &&
+                !c.isToday,
             }"
             @click="onTap(c)"
           >
@@ -321,8 +334,8 @@ function onTap(c: CalCell) {
       v-if="showEmpty && !loading && !hasAnyWork"
       class="cal-empty"
       compact
-      title="이 달의 작업 기록이 없습니다"
-      description="날짜를 눌러 영농일지를 등록해 보세요."
+      title="이 달의 작업·예정이 없습니다"
+      description="날짜를 눌러 영농일지 또는 일정을 등록해 보세요."
     />
 
     <div class="cal__legend" aria-label="작업 필터">

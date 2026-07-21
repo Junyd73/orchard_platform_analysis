@@ -25,6 +25,7 @@ import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import WorkLogDailyDateBar from '@/views/work-log/components/WorkLogDailyDateBar.vue'
 import WorkLogDailyExtras from '@/views/work-log/components/WorkLogDailyExtras.vue'
+import WorkLogDailySchedulePanel from '@/views/work-log/components/WorkLogDailySchedulePanel.vue'
 import WorkLogDailySummary from '@/views/work-log/components/WorkLogDailySummary.vue'
 import WorkLogDailyTimeline from '@/views/work-log/components/WorkLogDailyTimeline.vue'
 import WorkLogDailyWeatherStrip from '@/views/work-log/components/WorkLogDailyWeatherStrip.vue'
@@ -390,6 +391,48 @@ function onCopySelected() {
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
   captureCleanState()
+}
+
+function onScheduleConverted(payload: {
+  workId: string
+  workMidCd: string
+  workLocId: string
+  memo: string
+}) {
+  clearCopyMode()
+  const midLabel =
+    workOptions.value.find((o) => o.value === payload.workMidCd)?.label ||
+    payload.workMidCd
+  const siteLabel =
+    siteOptions.value.find((o) => o.value === payload.workLocId)?.label || ''
+  formModel.value = {
+    workId: payload.workId,
+    workMidCd: payload.workMidCd,
+    workContent: midLabel,
+    workLocId: payload.workLocId,
+    siteNm: siteLabel,
+    startTime: '08:00',
+    endTime: '09:00',
+    statusCd: '',
+    statusNm: '',
+    rmk: payload.memo,
+  }
+  laborRows.value = []
+  expenseRows.value = []
+  pesticideRows.value = []
+  pesticideAppliedYn.value = 'N'
+  pesticideUseId.value = null
+  pesticideReplaceUseId.value = null
+  removedResIds.value = []
+  removedExpIds.value = []
+  selectedId.value = payload.workId
+  isEditing.value = true
+  activeTab.value = DAILY_TAB_WORK
+  void loadDaily().then(() => {
+    selectedId.value = payload.workId
+    isEditing.value = true
+    captureCleanState()
+  })
 }
 
 function showToast(msg: string) {
@@ -900,6 +943,16 @@ onMounted(async () => {
       <WorkLogDailyDateBar :work-dt="workDt" @go-today="goToday" />
 
       <WorkLogDailyWeatherStrip :master="master" :loading="dailyLoading" />
+
+      <WorkLogDailySchedulePanel
+        :farm-cd="farmCd"
+        :work-dt="workDt"
+        :is-future="isFuture"
+        :work-options="workOptions"
+        :site-options="siteOptions"
+        @toast="showToast"
+        @converted="onScheduleConverted"
+      />
 
       <WorkLogDailyTimeline
         :items="workItems"
