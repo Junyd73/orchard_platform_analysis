@@ -63,16 +63,16 @@ const emit = defineEmits<{
   position: absolute;
   inset: 0;
   border: none;
-  background: rgba(0, 0, 0, 0.45);
+  background: color-mix(in srgb, black 45%, transparent);
   cursor: pointer;
 }
 .sheet__panel {
   position: relative;
   z-index: 1;
   width: 100%;
-  max-width: 480px;
+  max-width: var(--ods-page-content-max);
   background: var(--ods-color-white);
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--ods-radius-card) var(--ods-radius-card) 0 0;
   padding: var(--ods-space-16) var(--ods-space-16)
     calc(var(--ods-space-16) + env(safe-area-inset-bottom));
   display: flex;
@@ -86,7 +86,7 @@ const emit = defineEmits<{
 }
 .sheet__desc {
   margin: 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
 .sheet__list {

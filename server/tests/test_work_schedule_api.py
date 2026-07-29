@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""영농 일정(Schedule) Phase1 서비스 테스트 — WLS-001."""
+"""예정→실적 이관 · schedule API 410 — 예정·실적 통합."""
 
 from __future__ import annotations
 
@@ -13,22 +13,18 @@ from pathlib import Path
 
 _SERVER = Path(__file__).resolve().parents[1]
 _REPO = _SERVER.parent
-# server/app 이 repo/app 보다 우선되도록 server를 앞쪽에 둔다.
 for p in (_REPO, _SERVER):
     s = str(p)
     if s in sys.path:
         sys.path.remove(s)
     sys.path.insert(0, s)
 
-from app.core.exceptions import BusinessRuleError  # noqa: E402
-from app.schemas.work_schedule import WorkScheduleCreateRequest  # noqa: E402
-from app.services.work_log_service import WorkLogService  # noqa: E402
-from app.services.work_schedule_service import WorkScheduleService  # noqa: E402
 from core.work_schedule_constants import (  # noqa: E402
-    ERR_FUTURE_CONVERT,
     SCHED_STATUS_CONVERTED,
     SCHED_STATUS_PENDING,
 )
+from core.work_schedule_migrate import migrate_work_schedules_to_work_detail  # noqa: E402
+from core.work_schedule_schema import ensure_work_schedule_schema  # noqa: E402
 
 
 def _build_tmp_db() -> Path:
@@ -49,9 +45,6 @@ def _build_tmp_db() -> Path:
             use_yn TEXT DEFAULT 'Y',
             reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT
         );
-        INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
-          ('OR001','WK010100','전정','WK01'),
-          ('OR001','WK010200','방제','WK01');
 
         CREATE TABLE t_work_master (
             work_dt TEXT PRIMARY KEY,
@@ -67,97 +60,78 @@ def _build_tmp_db() -> Path:
             work_dt TEXT NOT NULL, farm_cd TEXT NOT NULL,
             work_main_cd TEXT DEFAULT 'WK01', work_mid_cd TEXT,
             work_loc_id TEXT, start_tm TEXT, end_tm TEXT, status_cd TEXT,
+            google_event_id TEXT, sync_status TEXT, last_synced_at TEXT,
             reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT, rmk TEXT
         );
         """
     )
     conn.commit()
     conn.close()
+    ensure_work_schedule_schema(path)
     return path
 
 
-class WorkScheduleServiceTest(unittest.TestCase):
+class WorkScheduleMigrateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.db = _build_tmp_db()
-        self.svc = WorkScheduleService(self.db)
-        self.work_svc = WorkLogService(db_path=self.db)
+        self.future = (date.today() + timedelta(days=3)).isoformat()
 
     def tearDown(self) -> None:
-        self.db.unlink(missing_ok=True)
+        try:
+            self.db.unlink(missing_ok=True)
+        except OSError:
+            pass
 
-    def test_create_list_and_future_convert_blocked(self) -> None:
-        today = date.today()
-        future = (today + timedelta(days=3)).isoformat()
-        created = self.svc.create(
-            "OR001",
-            WorkScheduleCreateRequest(
-                work_dt=future,
-                work_mid_cd="WK010200",
-                title="미래 방제",
-                contents="예찰 후 실시",
-            ),
-            user_id="tester",
+    def test_migrate_pending_to_preparing_work(self):
+        conn = sqlite3.connect(str(self.db))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            INSERT INTO t_work_schedule (
+                farm_cd, sched_id, work_dt, work_tm, work_main_cd, work_mid_cd,
+                work_loc_id, title, contents, sched_status_cd,
+                converted_work_id, google_event_id, sync_status, last_synced_at,
+                reg_dt, reg_id, mod_dt, mod_id
+            ) VALUES (
+                'OR001', 'SCH20260101-001', ?, '09:00', 'WK01', 'WK010100',
+                NULL, '전정 예정', '메모', ?,
+                NULL, 'gev-1', 'SYNCED', datetime('now','localtime'),
+                datetime('now','localtime'), 'T', datetime('now','localtime'), 'T'
+            )
+            """,
+            (self.future, SCHED_STATUS_PENDING),
         )
-        sid = created.data["sched_id"]
-        self.assertTrue(sid.startswith("SCH"))
-        listed = self.svc.list_schedules("OR001", start_dt=future, end_dt=future)
-        self.assertEqual(len(listed.data), 1)
-        self.assertEqual(listed.data[0].work_main_cd, "WK01")
+        conn.commit()
+        conn.close()
 
-        with self.assertRaises(BusinessRuleError) as ctx:
-            self.svc.convert_to_draft("OR001", sid, user_id="tester")
-        self.assertEqual(ctx.exception.error_code, ERR_FUTURE_CONVERT)
-
-    def test_convert_idempotent_and_rollback_on_delete(self) -> None:
-        today = date.today().isoformat()
-        created = self.svc.create(
-            "OR001",
-            WorkScheduleCreateRequest(
-                work_dt=today,
-                work_mid_cd="WK010100",
-                work_loc_id="SITE01",
-                title="전정",
-            ),
-            user_id="tester",
-        )
-        sid = created.data["sched_id"]
-        r1 = self.svc.convert_to_draft("OR001", sid, user_id="tester")
-        wid = r1.data.work_id
-        self.assertRegex(wid, r"^\d{8}-\d{2}$")
-        self.assertEqual(r1.data.prefilled_data.work_mid_cd, "WK010100")
-
-        r2 = self.svc.convert_to_draft("OR001", sid, user_id="tester")
-        self.assertEqual(r2.data.work_id, wid)
+        stats = migrate_work_schedules_to_work_detail(self.db)
+        self.assertTrue(stats["ok"], stats.get("reason"))
+        self.assertEqual(stats["migrated"], 1)
 
         conn = sqlite3.connect(str(self.db))
         conn.row_factory = sqlite3.Row
-        st = conn.execute(
-            "SELECT sched_status_cd, converted_work_id FROM t_work_schedule WHERE sched_id=?",
-            (sid,),
+        work = conn.execute(
+            "SELECT * FROM t_work_detail WHERE farm_cd='OR001'"
         ).fetchone()
-        conn.close()
-        self.assertEqual(st["sched_status_cd"], SCHED_STATUS_CONVERTED)
-        self.assertEqual(st["converted_work_id"], wid)
+        self.assertIsNotNone(work)
+        assert work is not None
+        self.assertEqual(work["status_cd"], "WO010100")
+        self.assertEqual(work["google_event_id"], "gev-1")
+        self.assertIn("전정 예정", work["rmk"] or "")
+        self.assertEqual(work["start_tm"], "09:00")
 
-        # 기존 작업이 있어도 convert는 추가만 함
-        created2 = self.svc.create(
-            "OR001",
-            WorkScheduleCreateRequest(work_dt=today, work_mid_cd="WK010200", title="방제"),
-            user_id="tester",
-        )
-        r3 = self.svc.convert_to_draft("OR001", created2.data["sched_id"], user_id="tester")
-        self.assertNotEqual(r3.data.work_id, wid)
-
-        self.work_svc.delete_work("OR001", wid, user_id="tester")
-        conn = sqlite3.connect(str(self.db))
-        conn.row_factory = sqlite3.Row
-        st2 = conn.execute(
-            "SELECT sched_status_cd, converted_work_id FROM t_work_schedule WHERE sched_id=?",
-            (sid,),
+        sched = conn.execute(
+            "SELECT sched_status_cd, converted_work_id FROM t_work_schedule"
         ).fetchone()
+        assert sched is not None
+        self.assertEqual(sched["sched_status_cd"], SCHED_STATUS_CONVERTED)
+        self.assertEqual(sched["converted_work_id"], work["work_id"])
         conn.close()
-        self.assertEqual(st2["sched_status_cd"], SCHED_STATUS_PENDING)
-        self.assertIsNone(st2["converted_work_id"])
+
+        # 멱등: 재실행 시 skip
+        stats2 = migrate_work_schedules_to_work_detail(self.db)
+        self.assertTrue(stats2["ok"])
+        self.assertEqual(stats2["migrated"], 0)
 
 
 if __name__ == "__main__":

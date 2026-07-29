@@ -51,8 +51,8 @@ const isToday = computed(() => props.workDt === todayIso())
   min-width: 0;
 }
 .date-bar__cal-ico {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   color: var(--ods-color-primary);
 }
 .date-bar__title {
@@ -66,11 +66,11 @@ const isToday = computed(() => props.workDt === todayIso())
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
+  min-height: var(--ods-hit-sm);
   padding: 0 var(--ods-space-12);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-badge);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   font-weight: 600;
   line-height: 1;
   color: var(--ods-color-text);

@@ -8,7 +8,6 @@ import {
   fetchWorkLogMonthly,
   fetchWorkLogWeather,
 } from '@/api/workLogs'
-import { fetchWorkSchedules } from '@/api/workSchedules'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
@@ -25,10 +24,8 @@ import {
   isFutureDate,
   MSG_DETAIL_PENDING,
   MSG_LOAD_MONTH_FAILED,
-  pad2,
   shiftMonth,
   todayIso,
-  type CalendarScheduleHint,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
 import { useAppStore } from '@/composables/stores/app'
@@ -37,7 +34,6 @@ import type {
   WorkLogMasterDto,
   WorkLogMonthSummary as SummaryDto,
 } from '@/types/workLog'
-import { SCHED_STATUS_PENDING } from '@/types/workSchedule'
 
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 
@@ -65,7 +61,6 @@ const toastMessage = ref('')
 const loadFailed = ref(false)
 const summary = ref<SummaryDto | null>(null)
 const days = ref<Record<string, WorkLogDayCell>>({})
-const schedulesByDt = ref<Record<string, CalendarScheduleHint[]>>({})
 /** 표시 월이 바뀌어도 Hero '오늘' KPI는 유지 */
 const todayCellCache = ref<WorkLogDayCell | null>(null)
 const todayMaster = ref<WorkLogMasterDto | null>(null)
@@ -111,36 +106,13 @@ async function loadMonth() {
   loading.value = true
   loadFailed.value = false
   try {
-    const startDt = `${year.value}-${pad2(month.value)}-01`
-    const lastDay = new Date(year.value, month.value, 0).getDate()
-    const endDt = `${year.value}-${pad2(month.value)}-${pad2(lastDay)}`
-    const [res, schedRes] = await Promise.all([
-      fetchWorkLogMonthly(farmCd.value, year.value, month.value),
-      fetchWorkSchedules(farmCd.value, {
-        start_dt: startDt,
-        end_dt: endDt,
-        status_cd: SCHED_STATUS_PENDING,
-      }).catch(() => ({ success: true, data: [] })),
-    ])
+    const res = await fetchWorkLogMonthly(farmCd.value, year.value, month.value)
     summary.value = res.summary
     days.value = res.days || {}
     rememberTodayCell(days.value)
-    const map: Record<string, CalendarScheduleHint[]> = {}
-    for (const s of schedRes.data || []) {
-      const dt = String(s.work_dt || '').slice(0, 10)
-      if (!dt) continue
-      const title =
-        String(s.title || '').trim() ||
-        String(s.work_mid_cd || '').trim() ||
-        '예정'
-      if (!map[dt]) map[dt] = []
-      map[dt].push({ title })
-    }
-    schedulesByDt.value = map
   } catch (err) {
     summary.value = null
     days.value = {}
-    schedulesByDt.value = {}
     loadFailed.value = true
     const msg =
       err instanceof ApiClientError ? err.message : MSG_LOAD_MONTH_FAILED
@@ -249,6 +221,10 @@ function onSummaryDetail() {
   showToast(MSG_DETAIL_PENDING)
 }
 
+function onStockView() {
+  void router.push({ name: 'pesticide' })
+}
+
 function onToggleFilter(key: WorkFilterKey) {
   filters.value = { ...filters.value, [key]: !filters.value[key] }
 }
@@ -271,6 +247,16 @@ onMounted(async () => {
   }
   await Promise.all([loadMonth(), loadTodayWeather(), ensureTodayCellCache()])
   bootstrapping.value = false
+  if (route.query.google === 'connected') {
+    showToast('구글 캘린더가 연결되었습니다.')
+    void router.replace({
+      name: 'work-log',
+      query: {
+        ...(route.query.year ? { year: String(route.query.year) } : {}),
+        ...(route.query.month ? { month: String(route.query.month) } : {}),
+      },
+    })
+  }
   const toast = String(route.query.toast || '').trim()
   if (toast) {
     showToast(toast)
@@ -326,15 +312,11 @@ onMounted(async () => {
           :year="year"
           :month="month"
           :days="days"
-          :schedules-by-dt="schedulesByDt"
           :filters="filters"
           :selected-dt="selectedDt"
           :loading="loading"
           :show-empty="
-            !loading &&
-            (loadFailed ||
-              (Object.keys(days).length === 0 &&
-                Object.keys(schedulesByDt).length === 0))
+            !loading && (loadFailed || Object.keys(days).length === 0)
           "
           @select="onSelectDay"
           @blocked="onBlocked"
@@ -352,13 +334,14 @@ onMounted(async () => {
           :summary="summary"
           :loading="loading"
           @detail="onSummaryDetail"
+          @stock="onStockView"
         />
 
         <WorkLogMonthChart :year="year" :month="month" :days="days" />
       </template>
     </main>
 
-    <OdsFab label="등록" aria-label="오늘 영농일지 등록" @click="onFabRegister">
+    <OdsFab label="등록" ariaLabel="오늘 영농일지 등록" @click="onFabRegister">
       <img :src="iconPlus" alt="" />
     </OdsFab>
 
@@ -400,13 +383,13 @@ onMounted(async () => {
   bottom: calc(150px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 70;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - var(--ods-hit-sm)));
   margin: 0;
   padding: var(--ods-space-12) var(--ods-space-16);
   border-radius: var(--ods-radius-button);
   background: color-mix(in srgb, var(--ods-color-gray-900) 92%, transparent);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 600;
   text-align: center;
   box-shadow: var(--ods-shadow-card);

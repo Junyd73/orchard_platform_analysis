@@ -51,7 +51,7 @@ class ObservationAiService:
         if not ok:
             return ObservationAiResponse(
                 ok=False,
-                error_code="IMAGE",
+                error_code="AI_IMAGE",
                 error_message=msg,
                 provider=getattr(self.provider, "_model", "") and "openai" or "unknown",
             )

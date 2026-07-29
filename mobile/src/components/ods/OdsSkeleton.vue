@@ -67,7 +67,7 @@ withDefaults(
   animation: ods-skel-shimmer var(--ods-motion-base) ease-in-out infinite alternate;
 }
 .ods-skel__block--card {
-  height: 96px;
+  height: var(--ods-thumb-lg);
   border-radius: var(--ods-radius-card);
 }
 .ods-skel__block--circle {
@@ -81,7 +81,7 @@ withDefaults(
 }
 .ods-skel__block--kpi {
   flex: 1;
-  height: 56px;
+  height: var(--ods-thumb-sm);
 }
 @keyframes ods-skel-shimmer {
   from {

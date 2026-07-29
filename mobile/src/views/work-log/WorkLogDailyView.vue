@@ -9,6 +9,9 @@ import {
 import { storeToRefs } from 'pinia'
 
 import { fetchCommonCodes } from '@/api/commonCodes'
+import {
+  rememberRecentPurpose,
+} from '@/views/pesticide/pesticideConstants'
 import { ApiClientError } from '@/api/client'
 import { fetchFarmSites } from '@/api/farms'
 import {
@@ -20,12 +23,20 @@ import {
   saveWorkLogMaster,
   saveWorkLogWorks,
 } from '@/api/workLogs'
+import {
+  confirmGoogleImport,
+  fetchGoogleCalendarStatus,
+  fetchGoogleImportPreview,
+  pushWorkToGoogle,
+  requestGoogleCalendarAuthUrl,
+  type GoogleCalendarStatus,
+  type GoogleImportPreviewItem,
+} from '@/api/googleCalendar'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import WorkLogDailyDateBar from '@/views/work-log/components/WorkLogDailyDateBar.vue'
 import WorkLogDailyExtras from '@/views/work-log/components/WorkLogDailyExtras.vue'
-import WorkLogDailySchedulePanel from '@/views/work-log/components/WorkLogDailySchedulePanel.vue'
 import WorkLogDailySummary from '@/views/work-log/components/WorkLogDailySummary.vue'
 import WorkLogDailyTimeline from '@/views/work-log/components/WorkLogDailyTimeline.vue'
 import WorkLogDailyWeatherStrip from '@/views/work-log/components/WorkLogDailyWeatherStrip.vue'
@@ -37,6 +48,7 @@ import iconTrash from '@/assets/ods/scr004/icon-trash.svg'
 import {
   buildDailySummaryCards,
   createEmptyWorkForm,
+  DAILY_TAB_LABOR,
   DAILY_TAB_WORK,
   hasWorkLogWeather,
   isFutureDate,
@@ -50,11 +62,16 @@ import {
   MSG_COPY_DATE_INVALID,
   MSG_COPY_OK,
   MSG_FUTURE_WORK_LOG,
+  MSG_FUTURE_DETAIL_LOCKED,
+  MSG_GOOGLE_IMPORT_EMPTY,
+  MSG_GOOGLE_IMPORT_NEED_CONNECT,
+  MSG_GOOGLE_IMPORT_SAVED,
   MSG_LOAD_DAILY_FAILED,
   MSG_SAVE_FAILED,
   MSG_SAVE_OK,
   MSG_UNSAVED_LEAVE_CONFIRM,
   MSG_WORK_CONTENT_REQUIRED,
+  STATUS_PREPARING_CD,
   todayIso,
   WORK_STATUS_PARENT_CD,
   WORK_TYPE_PARENT_CD,
@@ -66,6 +83,7 @@ import {
   type DailyWorkFormModel,
   type DailyWorkTabKey,
 } from '@/views/work-log/workLogConstants'
+import { HOME_DAILY_NEW_QUERY } from '@/views/home/homeConstants'
 import { useAppStore } from '@/composables/stores/app'
 import type {
   WorkLogExpenseDto,
@@ -99,7 +117,24 @@ const isEditing = ref(true)
 const isCopyMode = ref(false)
 /** 복사 대상 작업일 (YYYY-MM-DD) */
 const copyTargetDt = ref('')
+/** 작업복사 모달 오픈 */
+const copyModalOpen = ref(false)
+/** 복사 버튼 클릭 시 원본 작업(work_id) — 취소 시 복원 */
+const copySourceWorkId = ref<string | null>(null)
+/** 복사 저장 전 확인(질문) 모달 */
+const copyConfirmOpen = ref(false)
+const copyConfirmMode = ref<'draft' | 'final'>('final')
+const copyConfirmReportMsg = ref('')
+/** 복사 후 이동 시(다른 날짜) 인력 탭으로 전환 + 복사된 작업 선택 */
+const goLaborAfterCopy = ref(false)
+const copyCreatedWorkId = ref<string | null>(null)
 const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
+const googleStatus = ref<GoogleCalendarStatus | null>(null)
+const googleImportOpen = ref(false)
+const googleImportLoading = ref(false)
+const googleImportBusy = ref(false)
+const googleImportItems = ref<GoogleImportPreviewItem[]>([])
+const googleImportMessage = ref('')
 
 const laborRows = ref<DailyShellLaborRow[]>([])
 const expenseRows = ref<DailyShellExpenseRow[]>([])
@@ -288,6 +323,7 @@ function refreshSummaryCards() {
 function clearCopyMode() {
   isCopyMode.value = false
   copyTargetDt.value = ''
+  copyModalOpen.value = false
 }
 
 function onSelectTimeline(id: string) {
@@ -307,6 +343,14 @@ function onAddWork() {
   clearCopyMode()
   activeTab.value = DAILY_TAB_WORK
   formModel.value = createEmptyWorkForm()
+  if (isFuture.value) {
+    const prep = statusOptions.value.find((o) => o.value === STATUS_PREPARING_CD)
+    formModel.value = {
+      ...formModel.value,
+      statusCd: STATUS_PREPARING_CD,
+      statusNm: prep?.label || '준비중',
+    }
+  }
   laborRows.value = []
   expenseRows.value = []
   pesticideRows.value = []
@@ -352,6 +396,8 @@ function onEditSelected() {
     statusCd: String(w.status_cd || ''),
     statusNm: String(w.status_nm || ''),
     rmk: String(w.rmk || ''),
+    syncGoogle: false,
+    googleEventId: String(w.google_event_id || '') || null,
   }
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
@@ -365,6 +411,7 @@ function onCopySelected() {
     onPending()
     return
   }
+  copySourceWorkId.value = selectedId.value
   formModel.value = {
     workId: null,
     workMidCd: String(w.work_mid_cd || ''),
@@ -376,6 +423,8 @@ function onCopySelected() {
     statusCd: String(w.status_cd || ''),
     statusNm: String(w.status_nm || ''),
     rmk: String(w.rmk || ''),
+    syncGoogle: false,
+    googleEventId: null,
   }
   laborRows.value = []
   expenseRows.value = []
@@ -388,51 +437,78 @@ function onCopySelected() {
   selectedId.value = null
   isCopyMode.value = true
   copyTargetDt.value = todayIso()
+  copyCreatedWorkId.value = null
+  goLaborAfterCopy.value = false
+  copyModalOpen.value = true
+  copyConfirmOpen.value = false
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
   captureCleanState()
 }
 
-function onScheduleConverted(payload: {
-  workId: string
-  workMidCd: string
-  workLocId: string
-  memo: string
-}) {
+function buildCopyWorkReport(): string {
+  const dt = String(copyTargetDt.value || '').trim()
+  const workType = String(formModel.value.workContent || '').trim()
+  const site = String(formModel.value.siteNm || '').trim()
+  const start = String(formModel.value.startTime || '').slice(0, 5)
+  const end = String(formModel.value.endTime || '').slice(0, 5)
+  const memo = String(formModel.value.rmk || '').trim()
+  const memoPart = memo ? ` · 메모: ${memo}` : ''
+  return `복사 완료 · ${dt} · ${workType || '—'} · ${site || '—'} · ${start}~${end}${memoPart}`
+}
+
+function shouldConfirmCopyDate(): boolean {
+  // 작업일을 “오늘”로 고정하지만, 현재 화면 날짜와 다르면(과거/미래) 사용자 의도 확인이 필요.
+  return String(copyTargetDt.value || '') !== String(workDt.value || '')
+}
+
+function onCancelCopyModal() {
+  const restoreId = copySourceWorkId.value
+  copyConfirmOpen.value = false
   clearCopyMode()
-  const midLabel =
-    workOptions.value.find((o) => o.value === payload.workMidCd)?.label ||
-    payload.workMidCd
-  const siteLabel =
-    siteOptions.value.find((o) => o.value === payload.workLocId)?.label || ''
-  formModel.value = {
-    workId: payload.workId,
-    workMidCd: payload.workMidCd,
-    workContent: midLabel,
-    workLocId: payload.workLocId,
-    siteNm: siteLabel,
-    startTime: '08:00',
-    endTime: '09:00',
-    statusCd: '',
-    statusNm: '',
-    rmk: payload.memo,
-  }
-  laborRows.value = []
-  expenseRows.value = []
-  pesticideRows.value = []
-  pesticideAppliedYn.value = 'N'
-  pesticideUseId.value = null
-  pesticideReplaceUseId.value = null
-  removedResIds.value = []
-  removedExpIds.value = []
-  selectedId.value = payload.workId
-  isEditing.value = true
-  activeTab.value = DAILY_TAB_WORK
-  void loadDaily().then(() => {
-    selectedId.value = payload.workId
+  if (!restoreId) {
+    selectedId.value = null
     isEditing.value = true
+    formModel.value = createEmptyWorkForm()
     captureCleanState()
-  })
+    return
+  }
+  selectedId.value = restoreId
+  isEditing.value = false
+  activeTab.value = DAILY_TAB_WORK
+  loadSideForWork(
+    restoreId,
+    cachedResources,
+    cachedExpenses,
+    cachedPesticides,
+  )
+  captureCleanState()
+}
+
+async function onCopyModalSave(mode: 'draft' | 'final') {
+  if (saving.value) return false
+  const reportMsg = buildCopyWorkReport()
+  if (shouldConfirmCopyDate()) {
+    copyConfirmMode.value = mode
+    copyConfirmReportMsg.value = reportMsg
+    copyConfirmOpen.value = true
+    return false
+  }
+  const ok = await onSave(mode)
+  if (ok) showToast(reportMsg)
+  return ok
+}
+
+async function onCopyConfirmYes() {
+  copyConfirmOpen.value = false
+  const mode = copyConfirmMode.value
+  const reportMsg = copyConfirmReportMsg.value
+  const ok = await onSave(mode)
+  if (ok && reportMsg) showToast(reportMsg)
+}
+
+function onCopyConfirmNo() {
+  copyConfirmOpen.value = false
 }
 
 function showToast(msg: string) {
@@ -442,8 +518,8 @@ function showToast(msg: string) {
   }, 2400)
 }
 
-function onPending() {
-  showToast(MSG_DETAIL_PENDING)
+function onPending(msg?: string) {
+  showToast(msg || MSG_DETAIL_PENDING)
 }
 
 function goBack() {
@@ -587,6 +663,9 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
       showToast(MSG_WORK_CONTENT_REQUIRED)
       return null
     }
+    const statusCd = isFuture.value
+      ? STATUS_PREPARING_CD
+      : formModel.value.statusCd || null
     const draft: WorkLogWorkUpsertItem = {
       work_id: formModel.value.workId,
       work_mid_cd: formModel.value.workMidCd,
@@ -594,7 +673,7 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
       rmk: formModel.value.rmk || null,
       start_tm: formModel.value.startTime || null,
       end_tm: formModel.value.endTime || null,
-      status_cd: formModel.value.statusCd || null,
+      status_cd: statusCd,
     }
     if (draft.work_id) {
       const idx = list.findIndex((w) => w.work_id === draft.work_id)
@@ -609,6 +688,9 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
   if (valid.length === 0) {
     showToast(MSG_WORK_CONTENT_REQUIRED)
     return null
+  }
+  if (isFuture.value) {
+    return valid.map((w) => ({ ...w, status_cd: STATUS_PREPARING_CD }))
   }
   return valid
 }
@@ -642,6 +724,217 @@ function sameWorkId(
   return String(a) === String(b)
 }
 
+async function loadGoogleStatus() {
+  try {
+    googleStatus.value = await fetchGoogleCalendarStatus(farmCd.value)
+  } catch {
+    googleStatus.value = { configured: false, connected: false }
+  }
+}
+
+async function maybePushGoogleAfterSave(
+  workId: string | null | undefined,
+  opts?: { shouldPush?: boolean },
+): Promise<string | null> {
+  if (!googleStatus.value?.connected) return null
+  const wid = String(workId || '').trim()
+  if (!wid) return null
+  const shouldPush =
+    opts?.shouldPush ??
+    (formModel.value.syncGoogle || Boolean(formModel.value.googleEventId))
+  if (!shouldPush) return null
+  try {
+    await pushWorkToGoogle(farmCd.value, wid)
+    return '구글 캘린더에 반영했습니다.'
+  } catch (err) {
+    return err instanceof ApiClientError
+      ? err.message
+      : '구글 반영에 실패했습니다.'
+  }
+}
+
+/** loadDaily 이후 · 저장 응답/폼 힌트로 push 대상 확정 (selectedId=첫 카드 오인 방지) */
+function resolvePushWorkIdAfterSave(
+  idsBefore: Set<string>,
+  saveWorkIds: string[] | undefined,
+  hint: {
+    workId: string | null
+    workMidCd: string
+    startTime: string
+    endTime: string
+    rmk: string
+  },
+): string | null {
+  const prev = String(hint.workId || '').trim()
+  if (prev) return prev
+  const saved = (saveWorkIds || []).map((id) => String(id || '').trim()).filter(Boolean)
+  const created = saved.filter((id) => !idsBefore.has(id))
+  const pool = created.length > 0 ? created : saved
+  if (pool.length === 1) return pool[0] || null
+
+  const mid = String(hint.workMidCd || '').trim()
+  const start = String(hint.startTime || '').slice(0, 5)
+  const end = String(hint.endTime || '').slice(0, 5)
+  const rmk = String(hint.rmk || '').trim()
+  const candidates = sourceWorks.value.filter((w) => pool.includes(String(w.work_id)))
+  const matched = (candidates.length ? candidates : sourceWorks.value).find((w) => {
+    if (mid && String(w.work_mid_cd || '').trim() !== mid) return false
+    if (start && String(w.start_tm || '').slice(0, 5) !== start) return false
+    if (end && String(w.end_tm || '').slice(0, 5) !== end) return false
+    if (rmk && String(w.rmk || '').trim() !== rmk) return false
+    return true
+  })
+  if (matched?.work_id) return String(matched.work_id)
+  return pool[pool.length - 1] || null
+}
+
+async function onPushGoogleNow() {
+  const wid = String(formModel.value.workId || selectedId.value || '').trim()
+  if (!wid) {
+    showToast('먼저 작업을 저장한 뒤 보내 주세요.')
+    return
+  }
+  try {
+    await pushWorkToGoogle(farmCd.value, wid)
+    await loadDaily()
+    const w = sourceWorks.value.find((it) => it.work_id === wid)
+    if (w) {
+      formModel.value = {
+        ...formModel.value,
+        googleEventId: String(w.google_event_id || '') || null,
+        syncGoogle: false,
+      }
+    }
+    showToast('구글 캘린더에 반영했습니다.')
+  } catch (err) {
+    const msg =
+      err instanceof ApiClientError ? err.message : '구글 반영에 실패했습니다.'
+    showToast(msg)
+  }
+}
+
+function openWorkForEdit(workId: string) {
+  const w = sourceWorks.value.find((it) => it.work_id === workId)
+  if (!w) return
+  clearCopyMode()
+  selectedId.value = workId
+  formModel.value = {
+    workId: w.work_id,
+    workMidCd: String(w.work_mid_cd || ''),
+    workContent: String(w.work_mid_nm || ''),
+    workLocId: String(w.work_loc_id || ''),
+    siteNm: String(w.work_loc_nm || ''),
+    startTime: String(w.start_tm || '08:00').slice(0, 5),
+    endTime: String(w.end_tm || '09:00').slice(0, 5),
+    statusCd: String(w.status_cd || ''),
+    statusNm: String(w.status_nm || ''),
+    rmk: String(w.rmk || ''),
+    syncGoogle: false,
+    googleEventId: String(w.google_event_id || '') || null,
+  }
+  isEditing.value = true
+  activeTab.value = DAILY_TAB_WORK
+  loadSideForWork(workId, cachedResources, cachedExpenses, cachedPesticides)
+  captureCleanState()
+}
+
+async function onImportGoogle() {
+  await loadGoogleStatus()
+  if (!googleStatus.value?.configured) {
+    showToast('서버에 구글 연동 설정이 없습니다.')
+    return
+  }
+  if (!googleStatus.value?.connected) {
+    showToast(MSG_GOOGLE_IMPORT_NEED_CONNECT)
+    await onGoogleConnect()
+    return
+  }
+  googleImportOpen.value = true
+  googleImportLoading.value = true
+  googleImportMessage.value = ''
+  googleImportItems.value = []
+  try {
+    const res = await fetchGoogleImportPreview(farmCd.value, workDt.value)
+    googleImportItems.value = res.items || []
+    googleImportMessage.value =
+      res.message ||
+      (googleImportItems.value.length ? '' : MSG_GOOGLE_IMPORT_EMPTY)
+  } catch (err) {
+    googleImportItems.value = []
+    googleImportMessage.value =
+      err instanceof ApiClientError
+        ? err.message
+        : '구글 일정을 불러오지 못했습니다.'
+  } finally {
+    googleImportLoading.value = false
+  }
+}
+
+async function onGoogleConnect() {
+  try {
+    const successRedirect = `${window.location.origin}/work-log`
+    const res = await requestGoogleCalendarAuthUrl(farmCd.value, successRedirect)
+    if (res.auth_url) {
+      window.location.href = res.auth_url
+      return
+    }
+    showToast('구글 인증 주소를 받지 못했습니다.')
+  } catch (err) {
+    const msg =
+      err instanceof ApiClientError
+        ? err.message
+        : '구글 연결을 시작하지 못했습니다.'
+    showToast(msg)
+  }
+}
+
+async function onGoogleImportItemClick(it: GoogleImportPreviewItem) {
+  if (googleImportBusy.value) return
+  googleImportBusy.value = true
+  try {
+    if (it.already_linked && it.linked_work_id) {
+      googleImportOpen.value = false
+      await loadDaily()
+      openWorkForEdit(it.linked_work_id)
+      showToast(MSG_GOOGLE_IMPORT_SAVED)
+      return
+    }
+    const defaultMid =
+      workOptions.value[0]?.value ||
+      String(sourceWorks.value[0]?.work_mid_cd || '') ||
+      'WK010100'
+    const res = await confirmGoogleImport(farmCd.value, {
+      google_event_id: it.google_event_id,
+      work_dt: it.work_dt || workDt.value,
+      kind: 'work',
+      title: it.title,
+      description: it.description,
+      start_tm: it.start_tm,
+      end_tm: it.end_tm,
+      work_mid_cd: defaultMid,
+      work_loc_id: null,
+      work_id: it.linked_work_id,
+      status_cd: isFuture.value ? STATUS_PREPARING_CD : undefined,
+    })
+    googleImportOpen.value = false
+    await loadDaily()
+    if (res.kind === 'work' && res.work_id) {
+      openWorkForEdit(res.work_id)
+      showToast(MSG_GOOGLE_IMPORT_SAVED)
+      return
+    }
+    showToast('구글 일정을 반영했습니다.')
+  } catch (err) {
+    const msg =
+      err instanceof ApiClientError
+        ? err.message
+        : '구글 일정 가져오기에 실패했습니다.'
+    showToast(msg)
+  } finally {
+    googleImportBusy.value = false
+  }
+}
+
 async function persistMasterIfNeeded() {
   const m = master.value
   if (!m || !hasWorkLogWeather(m)) return
@@ -669,8 +962,8 @@ async function onSave(
   if (isCopyMode.value) {
     return saveCopiedWork(mode, opts)
   }
-  if (isFuture.value) {
-    showToast(MSG_FUTURE_WORK_LOG)
+  if (isFuture.value && mode === 'final') {
+    showToast(MSG_FUTURE_DETAIL_LOCKED)
     return false
   }
   const payload = buildWorksPayload()
@@ -678,10 +971,41 @@ async function onSave(
   saving.value = true
   try {
     if (mode === 'draft') {
-      await persistMasterIfNeeded()
-      await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
+      if (!isFuture.value) {
+        await persistMasterIfNeeded()
+      }
+      const wantSync =
+        formModel.value.syncGoogle || Boolean(formModel.value.googleEventId)
+      const pushHint = {
+        workId: formModel.value.workId,
+        workMidCd: formModel.value.workMidCd,
+        startTime: formModel.value.startTime,
+        endTime: formModel.value.endTime,
+        rmk: formModel.value.rmk,
+      }
+      const idsBefore = new Set(
+        sourceWorks.value.map((w) => String(w.work_id || '').trim()).filter(Boolean),
+      )
+      const saveRes = await saveWorkLogWorks(farmCd.value, workDt.value, {
+        works: payload,
+      })
       await loadDaily()
-      showToast(MSG_DRAFT_OK)
+      const pushedId = resolvePushWorkIdAfterSave(
+        idsBefore,
+        saveRes.work_ids,
+        pushHint,
+      )
+      let googleMsg: string | null = null
+      if (wantSync) {
+        if (!pushedId) {
+          googleMsg = '저장은 됐으나 구글 반영 대상을 찾지 못했습니다.'
+        } else {
+          googleMsg = await maybePushGoogleAfterSave(pushedId, {
+            shouldPush: true,
+          })
+        }
+      }
+      showToast(googleMsg || MSG_DRAFT_OK)
       return true
     }
 
@@ -762,12 +1086,37 @@ async function onSave(
       removed_res_ids: removedResIds.value,
       removed_exp_ids: removedExpIds.value,
     }
+    const wantSync =
+      formModel.value.syncGoogle || Boolean(formModel.value.googleEventId)
+    const pushHint = {
+      workId: laborWorkId || formModel.value.workId,
+      workMidCd: formModel.value.workMidCd,
+      startTime: formModel.value.startTime,
+      endTime: formModel.value.endTime,
+      rmk: formModel.value.rmk,
+    }
+    const idsBefore = new Set(
+      sourceWorks.value.map((w) => String(w.work_id || '').trim()).filter(Boolean),
+    )
     await saveWorkLogIntegrated(farmCd.value, workDt.value, integrated)
+    for (const row of pesticideRows.value) {
+      if (row.purpose?.trim()) {
+        rememberRecentPurpose(farmCd.value, row.purpose.trim())
+      }
+    }
     removedResIds.value = []
     removedExpIds.value = []
     pesticideReplaceUseId.value = null
     await loadDaily()
-    showToast(MSG_SAVE_OK)
+    const pushedId = resolvePushWorkIdAfterSave(
+      idsBefore,
+      [laborWorkId || ''].filter(Boolean),
+      pushHint,
+    )
+    const googleMsg = await maybePushGoogleAfterSave(pushedId || laborWorkId, {
+      shouldPush: wantSync,
+    })
+    showToast(googleMsg || MSG_SAVE_OK)
     if (opts?.navigateTo) {
       leaveGuardBypass.value = true
       void router.push(opts.navigateTo.fullPath || opts.navigateTo)
@@ -814,21 +1163,51 @@ async function saveCopiedWork(
     showToast(MSG_COPY_DATE_INVALID)
     return false
   }
-  if (isFutureDate(targetDt)) {
-    showToast(MSG_FUTURE_WORK_LOG)
-    return false
-  }
   const draft = buildCopyDraftItem()
   if (!draft) return false
+  if (isFutureDate(targetDt)) {
+    draft.status_cd = STATUS_PREPARING_CD
+    if (mode === 'final') {
+      showToast(MSG_FUTURE_DETAIL_LOCKED)
+      return false
+    }
+  }
 
   saving.value = true
   try {
     if (targetDt === workDt.value) {
+      goLaborAfterCopy.value = false
+      const idsBefore = new Set(
+        sourceWorks.value
+          .map((w) => String(w.work_id || '').trim())
+          .filter(Boolean),
+      )
       const payload = buildWorksPayload()
       if (!payload) return false
-      await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
+      const res = await saveWorkLogWorks(farmCd.value, workDt.value, {
+        works: payload,
+      })
       clearCopyMode()
+      const createdId =
+        (res?.work_ids || []).find((id) => id && !idsBefore.has(id)) ||
+        (res?.work_ids || [])[0] ||
+        null
+      copyCreatedWorkId.value = createdId
       await loadDaily()
+      if (createdId) {
+        selectedId.value = createdId
+        isEditing.value = false
+        activeTab.value = DAILY_TAB_LABOR
+        loadSideForWork(
+          createdId,
+          cachedResources,
+          cachedExpenses,
+          cachedPesticides,
+        )
+        copyCreatedWorkId.value = null
+      } else {
+        activeTab.value = DAILY_TAB_LABOR
+      }
       showToast(mode === 'draft' ? MSG_DRAFT_OK : MSG_COPY_OK)
       if (opts?.navigateTo) {
         leaveGuardBypass.value = true
@@ -838,10 +1217,21 @@ async function saveCopiedWork(
     }
 
     const daily = await fetchWorkLogDaily(farmCd.value, targetDt)
+    const existingIds = new Set(
+      (daily.works || [])
+        .map((w) => String(w.work_id || '').trim())
+        .filter(Boolean),
+    )
     const works = (daily.works || []).map(toUpsertItem)
     works.push(draft)
-    await saveWorkLogWorks(farmCd.value, targetDt, { works })
+    const res = await saveWorkLogWorks(farmCd.value, targetDt, { works })
     clearCopyMode()
+    const createdId =
+      (res?.work_ids || []).find((id) => id && !existingIds.has(id)) ||
+      (res?.work_ids || [])[0] ||
+      null
+    copyCreatedWorkId.value = createdId
+    goLaborAfterCopy.value = true
     showToast(mode === 'draft' ? MSG_DRAFT_OK : MSG_COPY_OK)
     leaveGuardBypass.value = true
     if (opts?.navigateTo) {
@@ -920,23 +1310,46 @@ async function onDeleteSelected() {
   }
 }
 
-watch(workDt, () => {
+watch(workDt, async () => {
   clearCopyMode()
-  void loadDaily()
+  await loadDaily()
+  if (goLaborAfterCopy.value) {
+    activeTab.value = DAILY_TAB_LABOR
+    if (copyCreatedWorkId.value) {
+      selectedId.value = copyCreatedWorkId.value
+      isEditing.value = false
+      loadSideForWork(
+        copyCreatedWorkId.value,
+        cachedResources,
+        cachedExpenses,
+        cachedPesticides,
+      )
+      copyCreatedWorkId.value = null
+    }
+    goLaborAfterCopy.value = false
+  }
 })
 
 onMounted(async () => {
   if (!farm.value) {
     await store.refreshAll()
   }
-  await Promise.all([loadDaily(), loadPickOptions()])
+  await Promise.all([loadDaily(), loadPickOptions(), loadGoogleStatus()])
+  if (String(route.query.new || '') === HOME_DAILY_NEW_QUERY) {
+    onAddWork()
+    void router.replace({
+      name: 'work-log-daily',
+      params: { workDt: workDt.value },
+      query: {},
+    })
+  }
 })
 </script>
 
 <template>
   <div class="page">
     <main class="content ods-page-content">
-      <OdsAppBar show-back @back="goBack" />
+      <OdsAppBar show-back back-fallback="work-log" />
 
       <p v-if="isFuture" class="warn" role="alert">{{ MSG_FUTURE_WORK_LOG }}</p>
 
@@ -944,25 +1357,16 @@ onMounted(async () => {
 
       <WorkLogDailyWeatherStrip :master="master" :loading="dailyLoading" />
 
-      <WorkLogDailySchedulePanel
-        :farm-cd="farmCd"
-        :work-dt="workDt"
-        :is-future="isFuture"
-        :work-options="workOptions"
-        :site-options="siteOptions"
-        @toast="showToast"
-        @converted="onScheduleConverted"
-      />
-
       <WorkLogDailyTimeline
         :items="workItems"
         :selected-id="selectedId"
         @select="onSelectTimeline"
         @add="onAddWork"
+        @import-google="onImportGoogle"
       />
 
       <WorkLogDailyWorkForm
-        v-if="showForm"
+        v-if="showForm && !copyModalOpen && !isCopyMode"
         v-model="formModel"
         v-model:active-tab="activeTab"
         v-model:labor-rows="laborRows"
@@ -970,6 +1374,7 @@ onMounted(async () => {
         v-model:pesticide-rows="pesticideRows"
         v-model:copy-work-dt="copyTargetDt"
         :copy-mode="isCopyMode"
+        :detail-locked="isFuture"
         :work-options="workOptions"
         :site-options="siteOptions"
         :status-options="statusOptions"
@@ -977,14 +1382,18 @@ onMounted(async () => {
         :farm-cd="farmCd"
         :stock-applied-yn="pesticideAppliedYn"
         :editing-replace="!!pesticideReplaceUseId"
+        :google-configured="!!googleStatus?.configured"
+        :google-connected="!!googleStatus?.connected"
         @pending="onPending"
         @cancel-pesticide="onCancelPesticide"
         @edit-pesticide="onEditPesticide"
         @remove-labor-res="onRemoveLaborRes"
         @remove-expense-exp="onRemoveExpenseExp"
+        @push-google="onPushGoogleNow"
+        @connect-google="onGoogleConnect"
       />
       <WorkLogDailyWorkCard
-        v-else-if="selectedItem"
+        v-else-if="selectedItem && !copyModalOpen"
         v-model:active-tab="activeTab"
         v-model:labor-rows="laborRows"
         v-model:expense-rows="expenseRows"
@@ -992,6 +1401,7 @@ onMounted(async () => {
         :item="selectedItem"
         :work-dt="workDt"
         :farm-cd="farmCd"
+        :detail-locked="isFuture"
         :stock-applied-yn="pesticideAppliedYn"
         :editing-replace="!!pesticideReplaceUseId"
         @edit="onEditSelected"
@@ -1015,7 +1425,7 @@ onMounted(async () => {
     </main>
 
     <div
-      v-if="showForm"
+      v-if="showForm && !copyModalOpen && !isCopyMode"
       class="footer-actions"
       aria-label="임시 저장·저장하기"
     >
@@ -1030,6 +1440,7 @@ onMounted(async () => {
         임시 저장
       </OdsButton>
       <OdsButton
+        v-if="!isFuture"
         variant="primary"
         type="button"
         :block="false"
@@ -1040,8 +1451,9 @@ onMounted(async () => {
         저장하기
       </OdsButton>
     </div>
-    <div v-else class="footer-actions" aria-label="저장·삭제">
+    <div v-else-if="!showForm" class="footer-actions" aria-label="저장·삭제">
       <OdsButton
+        v-if="!isFuture"
         variant="primary"
         type="button"
         :block="false"
@@ -1067,6 +1479,186 @@ onMounted(async () => {
     </div>
 
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
+
+    <Teleport to="body">
+      <div
+        v-if="copyModalOpen"
+        class="workcopy-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="작업 복사"
+      >
+        <button
+          type="button"
+          class="workcopy-modal__backdrop"
+          aria-label="닫기"
+          @click="onCancelCopyModal"
+        />
+        <div class="workcopy-modal__panel">
+          <header class="workcopy-modal__head">
+            <h3 class="workcopy-modal__title">작업 복사</h3>
+            <button
+              type="button"
+              class="workcopy-modal__close"
+              aria-label="닫기"
+              @click="onCancelCopyModal"
+            >✕</button>
+          </header>
+
+          <div class="workcopy-modal__body">
+            <WorkLogDailyWorkForm
+              v-model="formModel"
+              v-model:active-tab="activeTab"
+              v-model:labor-rows="laborRows"
+              v-model:expense-rows="expenseRows"
+              v-model:pesticide-rows="pesticideRows"
+              v-model:copy-work-dt="copyTargetDt"
+              :copy-mode="isCopyMode"
+              :copy-date-fixed="true"
+              :detail-locked="isFuture"
+              :work-options="workOptions"
+              :site-options="siteOptions"
+              :status-options="statusOptions"
+              :work-dt="workDt"
+              :farm-cd="farmCd"
+              :stock-applied-yn="pesticideAppliedYn"
+              :editing-replace="!!pesticideReplaceUseId"
+              :google-configured="!!googleStatus?.configured"
+              :google-connected="!!googleStatus?.connected"
+              @pending="onPending"
+              @cancel-pesticide="onCancelPesticide"
+              @edit-pesticide="onEditPesticide"
+              @remove-labor-res="onRemoveLaborRes"
+              @remove-expense-exp="onRemoveExpenseExp"
+              @push-google="onPushGoogleNow"
+              @connect-google="onGoogleConnect"
+            />
+          </div>
+
+          <div class="workcopy-modal__actions" aria-label="작업 복사 저장">
+            <OdsButton
+              variant="secondary"
+              type="button"
+              :block="false"
+              class="footer-btn footer-btn--outline"
+              :busy="saving"
+              @click="onCopyModalSave('draft')"
+            >
+              임시 저장
+            </OdsButton>
+            <OdsButton
+              v-if="!isFutureDate(copyTargetDt)"
+              variant="primary"
+              type="button"
+              :block="false"
+              class="footer-btn"
+              :busy="saving"
+              @click="onCopyModalSave('final')"
+            >
+              저장하기
+            </OdsButton>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="copyConfirmOpen"
+        class="copy-confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-label="작업 복사 확인"
+      >
+        <button
+          type="button"
+          class="copy-confirm__backdrop"
+          aria-label="닫기"
+          @click="onCopyConfirmNo"
+        />
+        <div class="copy-confirm__card">
+          <p class="copy-confirm__title">복사 저장 확인</p>
+          <p class="copy-confirm__msg">
+            현재 화면 날짜 {{ workDt }}의 작업을
+            <strong>{{ copyTargetDt }}</strong>(오늘)에 추가할까요?
+          </p>
+          <div class="copy-confirm__actions">
+            <button
+              type="button"
+              class="copy-confirm__btn copy-confirm__btn--primary"
+              :disabled="saving"
+              @click.stop="onCopyConfirmYes"
+            >
+              예, 저장
+            </button>
+            <button
+              type="button"
+              class="copy-confirm__btn copy-confirm__btn--secondary"
+              :disabled="saving"
+              @click.stop="onCopyConfirmNo"
+            >
+              아니요
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="googleImportOpen"
+        class="gimport"
+        role="dialog"
+        aria-modal="true"
+        aria-label="구글 일정 불러오기"
+      >
+        <button
+          type="button"
+          class="gimport__backdrop"
+          aria-label="닫기"
+          @click="googleImportOpen = false"
+        />
+        <div class="gimport__panel">
+          <header class="gimport__head">
+            <h3 class="gimport__title">구글 일정 불러오기</h3>
+            <button type="button" class="gimport__x" @click="googleImportOpen = false">
+              닫기
+            </button>
+          </header>
+          <div class="gimport__body">
+            <p v-if="googleImportLoading" class="gimport__empty">불러오는 중…</p>
+            <p v-else-if="!googleImportItems.length" class="gimport__empty">
+              {{ googleImportMessage || MSG_GOOGLE_IMPORT_EMPTY }}
+            </p>
+            <ul v-else class="gimport__list">
+              <li
+                v-for="it in googleImportItems"
+                :key="it.google_event_id"
+                class="gimport__item"
+              >
+                <button
+                  type="button"
+                  class="gimport__btn"
+                  :disabled="googleImportBusy"
+                  @click="onGoogleImportItemClick(it)"
+                >
+                  <span class="gimport__name">{{ it.title }}</span>
+                  <span class="gimport__meta">
+                    <template v-if="it.start_tm">{{ it.start_tm }}</template>
+                    <template v-if="it.end_tm"> ~ {{ it.end_tm }}</template>
+                    <template v-if="it.already_linked"> · 이미 연동됨</template>
+                    <template v-else>
+                      · 영농일지로 저장
+                    </template>
+                  </span>
+                  <span v-if="it.description" class="gimport__desc">{{ it.description }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <div
       v-if="leaveConfirmOpen"
@@ -1133,7 +1725,7 @@ onMounted(async () => {
   border-radius: var(--ods-radius-button);
   background: color-mix(in srgb, var(--ods-color-caution) 18%, transparent);
   color: var(--ods-color-text);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 600;
 }
 
@@ -1145,7 +1737,7 @@ onMounted(async () => {
   z-index: 30;
   display: flex;
   gap: var(--ods-space-8);
-  max-width: 480px;
+  max-width: var(--ods-page-content-max, 480px);
   margin: 0 auto;
   padding: var(--ods-space-8) var(--ods-page-padding-x)
     calc(var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
@@ -1156,12 +1748,12 @@ onMounted(async () => {
   flex: 1;
 }
 .footer-actions :deep(.ods-btn) {
-  min-height: 48px;
+  min-height: var(--ods-button-height);
 }
 .footer-btn--outline :deep(.ods-btn),
 .footer-actions :deep(.footer-btn--outline) {
   background: var(--ods-color-white);
-  border: 1.5px solid var(--ods-color-primary);
+  border: 2px solid var(--ods-color-primary);
   color: var(--ods-color-primary);
 }
 .footer-btn__inner {
@@ -1171,8 +1763,8 @@ onMounted(async () => {
   gap: var(--ods-space-8);
 }
 .footer-btn__inner img {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
 }
 
 .toast {
@@ -1181,13 +1773,13 @@ onMounted(async () => {
   bottom: calc(150px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 90;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - var(--ods-hit-sm)));
   margin: 0;
   padding: var(--ods-space-12) var(--ods-space-16);
   border-radius: var(--ods-radius-button);
   background: color-mix(in srgb, var(--ods-color-gray-900) 92%, transparent);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 600;
   text-align: center;
   box-shadow: var(--ods-shadow-card);
@@ -1216,7 +1808,7 @@ onMounted(async () => {
   z-index: 1;
   width: min(360px, 100%);
   padding: var(--ods-space-20) var(--ods-space-16);
-  border-radius: var(--ods-radius-card, 16px);
+  border-radius: var(--ods-radius-card);
   background: var(--ods-color-white);
   box-shadow: var(--ods-shadow-card);
   display: flex;
@@ -1238,9 +1830,9 @@ onMounted(async () => {
 }
 .leave-confirm__btn {
   width: 100%;
-  min-height: 48px;
+  min-height: var(--ods-button-height);
   border-radius: var(--ods-radius-button);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   cursor: pointer;
 }
@@ -1254,14 +1846,269 @@ onMounted(async () => {
   color: var(--ods-color-white);
 }
 .leave-confirm__btn--secondary {
-  border: 1.5px solid var(--ods-color-primary);
+  border: 2px solid var(--ods-color-primary);
   background: var(--ods-color-white);
   color: var(--ods-color-primary);
 }
 .leave-confirm__btn--ghost {
   border: 0;
   background: transparent;
-  color: var(--ods-color-gray-600, #6b7280);
+  color: var(--ods-color-gray-700);
   font-weight: 600;
+}
+
+.workcopy-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ods-space-16);
+}
+
+.workcopy-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
+  cursor: pointer;
+}
+
+.workcopy-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: min(520px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-bg-muted);
+  box-shadow: var(--ods-shadow-card);
+  overflow: hidden;
+}
+
+.workcopy-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ods-space-14) var(--ods-space-16);
+  border-bottom: 1px solid var(--ods-color-border);
+  background: var(--ods-color-white);
+  flex-shrink: 0;
+}
+
+.workcopy-modal__title {
+  margin: 0;
+  font: 700 16px/1.3 var(--ods-font-family);
+  color: var(--ods-color-text);
+}
+
+.workcopy-modal__close {
+  border: 0;
+  background: transparent;
+  color: var(--ods-color-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.workcopy-modal__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--ods-space-12);
+  -webkit-overflow-scrolling: touch;
+}
+
+.workcopy-modal__actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-top: 1px solid var(--ods-color-border);
+  background: var(--ods-color-white);
+}
+
+.workcopy-modal__actions :deep(.ods-btn) {
+  min-height: var(--ods-button-height);
+  flex: 1;
+}
+
+.copy-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 86;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ods-space-16);
+}
+
+.copy-confirm__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
+  cursor: pointer;
+}
+
+.copy-confirm__card {
+  position: relative;
+  z-index: 1;
+  width: min(380px, 100%);
+  padding: var(--ods-space-20) var(--ods-space-16);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-16);
+}
+
+.copy-confirm__title {
+  margin: 0;
+  font: var(--ods-font-body-1);
+  font-weight: 800;
+  color: var(--ods-color-text);
+  text-align: center;
+}
+
+.copy-confirm__msg {
+  margin: 0;
+  font: var(--ods-font-form-help);
+  color: var(--ods-color-text-secondary);
+  line-height: 1.5;
+}
+
+.copy-confirm__actions {
+  display: flex;
+  gap: var(--ods-space-8);
+}
+
+.copy-confirm__btn {
+  flex: 1;
+  min-height: var(--ods-button-height);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-form-value);
+  font-weight: 700;
+  cursor: pointer;
+  border: 0;
+}
+
+.copy-confirm__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.copy-confirm__btn--primary {
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
+}
+
+.copy-confirm__btn--secondary {
+  background: var(--ods-color-white);
+  border: 2px solid var(--ods-color-primary);
+  color: var(--ods-color-primary);
+}
+
+.gimport {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.gimport__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
+  cursor: pointer;
+}
+.gimport__panel {
+  position: relative;
+  z-index: 1;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ods-radius-card) var(--ods-radius-card) 0 0;
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+}
+.gimport__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.gimport__title {
+  margin: 0;
+  font: var(--ods-font-headline);
+  color: var(--ods-color-text);
+}
+.gimport__x {
+  border: 0;
+  background: transparent;
+  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-form-help);
+  cursor: pointer;
+}
+.gimport__body {
+  overflow: auto;
+  padding: var(--ods-space-12) var(--ods-space-16) var(--ods-space-24);
+}
+.gimport__empty {
+  margin: var(--ods-space-16) 0;
+  text-align: center;
+  font: var(--ods-font-form-help);
+  color: var(--ods-color-text-secondary);
+}
+.gimport__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+.gimport__btn {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  padding: var(--ods-space-12) var(--ods-space-16);
+  background: var(--ods-color-gray-100);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+}
+.gimport__btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.gimport__name {
+  font: var(--ods-font-body-1);
+  font-weight: 600;
+  color: var(--ods-color-text);
+}
+.gimport__meta {
+  font: var(--ods-font-card-help);
+  color: var(--ods-color-text-secondary);
+}
+.gimport__desc {
+  font: var(--ods-font-card-help);
+  color: var(--ods-color-text-secondary);
+  white-space: pre-wrap;
 }
 </style>

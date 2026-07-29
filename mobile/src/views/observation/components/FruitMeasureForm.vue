@@ -174,28 +174,28 @@ const model = defineModel<FruitMeasureFormModel>({ required: true })
 .defect {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 40px;
+  gap: var(--ods-space-8);
+  min-height: var(--ods-button-height-in-card);
   padding: 0 var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-value);
   color: var(--ods-color-text);
 }
 .defect input {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   accent-color: var(--ods-color-primary);
 }
 .rmk {
   width: 100%;
   box-sizing: border-box;
-  min-height: 72px;
+  min-height: calc(2 * var(--ods-control-height));
   padding: var(--ods-space-12) var(--ods-space-16);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
-  font: var(--ods-font-form-value, var(--ods-font-body-1));
+  font: var(--ods-font-form-value);
   color: var(--ods-color-text);
   background: var(--ods-color-white);
   resize: vertical;

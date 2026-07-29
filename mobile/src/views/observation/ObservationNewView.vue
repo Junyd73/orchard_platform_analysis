@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * ODS 폼 가독성 레퍼런스 (SCR-002).
+ * @see docs/ODS/MOBILE_FORM_READABILITY.md — 라벨15 / 값14 / 컨트롤·하단버튼 48
+ */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
@@ -20,6 +24,7 @@ import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSegmented from '@/components/ods/OdsSegmented.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
+  OBS_FOLLOW_UP_ROOT_TITLE_LABEL,
   OBS_SEVERITY_NORMAL_CD,
   OBS_SEVERITY_PARENT_CD,
   OBS_TARGET_FRUIT_CD,
@@ -71,6 +76,17 @@ const isEditCompleted = computed(
 )
 /** 추적 관찰(신규·수정): 부모 연결 건 — 일자·내용만 편집 */
 const isFollowUpObs = computed(() => Boolean(String(parentObsId.value || '').trim()))
+/** 카드 타이틀용 1차(최초) 관찰명 */
+const followUpRootTitle = computed(() => {
+  const raw = String(obsTitle.value || '').trim()
+  if (!raw) return ''
+  return stripTrackSuffix(raw)
+})
+const followUpCardTitle = computed(() => {
+  const name = followUpRootTitle.value
+  if (!name) return ''
+  return `${OBS_FOLLOW_UP_ROOT_TITLE_LABEL} : ${name}`
+})
 const canSubmit = computed(() => {
   if (saving.value) return false
   if (!obsDt.value || !obsContent.value.trim()) return false
@@ -79,13 +95,6 @@ const canSubmit = computed(() => {
   }
   if (!siteId.value || !targetTypeCd.value || !severityCd.value) return false
   return Boolean(obsTitle.value.trim())
-})
-
-const pageTitle = computed(() => {
-  if (isFollowUpObs.value) {
-    return isEditCompleted.value && obsId.value ? '추적 관찰 수정' : '추적 관찰'
-  }
-  return isEditCompleted.value && obsId.value ? '관찰 수정' : '관찰기록'
 })
 
 const targetOptions = [
@@ -385,13 +394,8 @@ watch(
 
 <template>
   <div class="page">
-    <main class="content">
-      <OdsAppBar show-back @back="onCancel" />
-
-      <header class="top">
-        <h1 class="title">{{ pageTitle }}</h1>
-        <p v-if="isFollowUpObs && obsTitle" class="sub-title">{{ obsTitle }}</p>
-      </header>
+    <main class="content ods-page-content">
+      <OdsAppBar show-back back-mode="emit" @back="onCancel" />
 
       <nav class="steps" aria-label="등록 단계">
         <template v-if="targetTypeCd === OBS_TARGET_FRUIT_CD">
@@ -415,6 +419,11 @@ watch(
         class="form"
         @submit.prevent="onNext"
       >
+        <h2 v-if="isFollowUpObs && followUpCardTitle" class="form-card-title">
+          {{ followUpCardTitle }}
+        </h2>
+
+        <div class="form__fields">
         <OdsInput
           label="농장"
           :model-value="farmLabel"
@@ -463,26 +472,28 @@ watch(
             />
           </OdsFormField>
 
-          <OdsFormField label="필지" required>
-            <OdsSelect v-model="siteId" variant="form" required>
-              <option value="" disabled>필지 선택</option>
-              <option v-for="s in sites" :key="s.site_id" :value="s.site_id">
-                {{ s.site_nm || s.site_id }}
-              </option>
-            </OdsSelect>
-          </OdsFormField>
+          <div class="field-row">
+            <OdsFormField label="필지" required class="field-row__item">
+              <OdsSelect v-model="siteId" variant="form" required>
+                <option value="" disabled>필지 선택</option>
+                <option v-for="s in sites" :key="s.site_id" :value="s.site_id">
+                  {{ s.site_nm || s.site_id }}
+                </option>
+              </OdsSelect>
+            </OdsFormField>
 
-          <OdsFormField label="위험도" required>
-            <OdsSelect v-model="severityCd" variant="form" required>
-              <option
-                v-for="c in severityCodes"
-                :key="c.code_cd"
-                :value="c.code_cd"
-              >
-                {{ c.code_nm || c.code_cd }}
-              </option>
-            </OdsSelect>
-          </OdsFormField>
+            <OdsFormField label="위험도" required class="field-row__item">
+              <OdsSelect v-model="severityCd" variant="form" required>
+                <option
+                  v-for="c in severityCodes"
+                  :key="c.code_cd"
+                  :value="c.code_cd"
+                >
+                  {{ c.code_nm || c.code_cd }}
+                </option>
+              </OdsSelect>
+            </OdsFormField>
+          </div>
 
           <OdsInput
             v-model="obsTitle"
@@ -520,6 +531,7 @@ watch(
           </template>
         </p>
         <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
+        </div>
       </form>
     </main>
 
@@ -557,33 +569,28 @@ watch(
   padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
 }
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--ods-space-16) var(--ods-page-padding-x) var(--ods-space-24);
+  /* AppBar↔다음 블록: ODS 공통 (--ods-appbar-content-gap: 0 + page gap 16) */
+  --ods-page-content-gap: var(--ods-space-16);
 }
-.top {
-  margin-top: var(--ods-space-8);
+.form-card-title {
+  margin: 0 0 var(--ods-space-8);
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-primary);
+  word-break: break-word;
 }
-.title {
-  margin: 0;
-  font: var(--ods-font-title-1);
-  color: var(--ods-color-text);
-}
-.sub-title {
-  margin: var(--ods-space-4) 0 0;
-  font: var(--ods-font-body-2);
-  font-weight: 600;
-  color: var(--ods-color-text-secondary);
-  word-break: break-all;
+.form__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-form-field-gap);
 }
 .steps {
   display: flex;
   gap: var(--ods-space-8);
-  margin: var(--ods-space-16) 0;
+  margin: 0;
   flex-wrap: wrap;
 }
 .step {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-emphasis);
   font-weight: 700;
   color: var(--ods-color-gray-500);
   padding: var(--ods-space-4) var(--ods-space-8);
@@ -603,8 +610,7 @@ watch(
 .form {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-form-field-gap);
-  padding: var(--ods-space-16);
+  padding: var(--ods-card-padding, var(--ods-space-16));
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-card);
@@ -613,6 +619,17 @@ watch(
 /* 관찰 대상: 라벨·칩을 한 묶음으로 (필드 간 section gap은 form gap 유지) */
 :deep(.field-target) {
   gap: var(--ods-space-4);
+}
+/* 1행 2열 — 필지 | 위험도 */
+.field-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+.field-row__item {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .date-field {
   position: relative;
@@ -623,12 +640,15 @@ watch(
   display: flex;
   align-items: center;
   width: 100%;
+  height: var(--ods-control-height);
   min-height: var(--ods-control-height);
+  max-height: var(--ods-control-height);
   padding: 0 var(--ods-space-16);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white);
   font: var(--ods-font-form-value);
+  line-height: 1.2;
   color: var(--ods-color-text);
   text-align: left;
   cursor: pointer;
@@ -686,7 +706,7 @@ watch(
   z-index: 30;
   display: flex;
   gap: var(--ods-space-8);
-  max-width: 480px;
+  max-width: var(--ods-page-content-max, 480px);
   margin: 0 auto;
   padding: var(--ods-space-8) var(--ods-page-padding-x)
     calc(var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
@@ -697,6 +717,6 @@ watch(
   flex: 1;
 }
 .footer-actions :deep(.ods-btn) {
-  min-height: 48px;
+  min-height: var(--ods-button-height, 48px);
 }
 </style>

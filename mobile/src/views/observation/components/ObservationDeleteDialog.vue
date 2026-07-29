@@ -87,7 +87,7 @@ watch(
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: rgba(0, 0, 0, 0.5);
+  background: color-mix(in srgb, var(--ods-color-gray-900) 50%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -95,42 +95,45 @@ watch(
 }
 .dlg__panel {
   width: 100%;
-  max-width: 400px;
+  max-width: min(400px, var(--ods-page-content-max, 480px));
   background: var(--ods-color-white);
   border-radius: var(--ods-radius-card);
-  padding: var(--ods-space-16);
+  padding: var(--ods-card-padding, var(--ods-space-16));
   box-shadow: var(--ods-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 .dlg__title {
   margin: 0;
-  font: var(--ods-font-headline);
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
 }
 .dlg__lead,
 .dlg__body,
 .dlg__ask {
-  margin: var(--ods-space-8) 0 0;
-  font: var(--ods-font-body-2);
+  margin: var(--ods-form-label-gap, var(--ods-space-8)) 0 0;
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text);
 }
 .dlg__cascade {
-  margin: var(--ods-space-8) 0 0;
+  margin: var(--ods-form-label-gap, var(--ods-space-8)) 0 0;
   padding: var(--ods-space-8);
   border-radius: var(--ods-radius-button);
-  background: color-mix(in srgb, var(--ods-color-danger) 12%, transparent);
-  font: var(--ods-font-body-2);
+  background: var(--ods-color-danger-soft);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-danger);
 }
 .dlg__list {
-  margin: var(--ods-space-8) 0 0;
+  margin: var(--ods-form-label-gap, var(--ods-space-8)) 0 0;
   padding-left: 1.2em;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
 .dlg__warn {
   margin: var(--ods-space-12) 0 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-danger);
 }
@@ -141,9 +144,9 @@ watch(
 }
 .dlg__btn {
   flex: 1;
-  min-height: 48px;
+  min-height: var(--ods-button-height);
   border-radius: var(--ods-radius-button);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   cursor: pointer;
   border: 1px solid var(--ods-color-border);

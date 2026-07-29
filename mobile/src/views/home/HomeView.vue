@@ -1,147 +1,145 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import MenuCard from '@/components/MenuCard.vue'
-import StatusCard from '@/components/StatusCard.vue'
 import MobileLayout from '@/layouts/MobileLayout.vue'
 import { useAppStore } from '@/composables/stores/app'
+import HomeBriefingCard from '@/views/home/components/HomeBriefingCard.vue'
+import HomeHero from '@/views/home/components/HomeHero.vue'
+import HomePesticideQuickModal from '@/views/home/components/HomePesticideQuickModal.vue'
+import HomeQuickActions from '@/views/home/components/HomeQuickActions.vue'
+import HomeRecentActivity from '@/views/home/components/HomeRecentActivity.vue'
+import HomeSmartSprayCard from '@/views/home/components/HomeSmartSprayCard.vue'
+import HomeWeatherCard from '@/views/home/components/HomeWeatherCard.vue'
+import {
+  HOME_KPI_EMPTY,
+  HOME_SMART_SPRAY_EMPTY,
+  HOME_WEATHER_EMPTY,
+  loadHomeDashboard,
+} from '@/views/home/homeData'
+import type { HomeBriefingItem, HomeRecentItem } from '@/views/home/homeMock'
 
+const router = useRouter()
 const store = useAppStore()
-const {
-  connectionStatus,
-  connectionMessage,
-  farm,
-  siteCount,
-  farmError,
-  farmCd,
-} = storeToRefs(store)
+const { farm, farmCd } = storeToRefs(store)
+
+const toastMsg = ref('')
+const pestModalOpen = ref(false)
+let toastTimer = 0
+
+const kpi = ref({ ...HOME_KPI_EMPTY })
+const smartSpray = ref({ ...HOME_SMART_SPRAY_EMPTY })
+const weather = ref({ ...HOME_WEATHER_EMPTY })
+const briefing = ref<HomeBriefingItem[]>([])
+const recent = ref<HomeRecentItem[]>([])
+
+let loadSeq = 0
+
+async function reloadHomeDashboard() {
+  const cd = String(farmCd.value || '').trim()
+  if (!cd) return
+  const seq = ++loadSeq
+  const data = await loadHomeDashboard(cd, {
+    farmNm: farm.value?.farm_nm,
+    farmAddress: farm.value?.address,
+  })
+  if (seq !== loadSeq) return
+  kpi.value = data.kpi
+  smartSpray.value = data.smartSpray
+  weather.value = data.weather
+  briefing.value = data.briefing
+  recent.value = data.recent
+}
 
 onMounted(() => {
-  void store.refreshAll()
+  void (async () => {
+    await store.refreshAll()
+    await reloadHomeDashboard()
+  })()
 })
+
+watch(farmCd, () => {
+  void reloadHomeDashboard()
+})
+
+function showToast(msg: string) {
+  toastMsg.value = msg
+  window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => {
+    toastMsg.value = ''
+  }, 2200)
+}
+
+function onWeatherDetail() {
+  void router.push({ name: 'weather-detail' })
+}
 </script>
 
 <template>
   <MobileLayout>
-    <div class="stack">
-      <StatusCard
-        title="서버 연결 상태"
-        :status="connectionStatus"
-        :message="connectionMessage"
-        @retry="store.refreshAll()"
+    <div class="home">
+      <HomeHero
+        :farm-name="farm?.farm_nm || ''"
+        :today-work="kpi.todayWork"
+        :labor-count="kpi.laborCount"
+        :pest-caution="kpi.pestCaution"
+        :spray-plan="kpi.sprayPlan"
       />
 
-      <section class="card">
-        <h2>농장 정보</h2>
-        <p v-if="connectionStatus === 'loading'" class="muted">불러오는 중…</p>
-        <p v-else-if="farmError" class="error">{{ farmError }}</p>
-        <dl v-else-if="farm" class="farm">
-          <div>
-            <dt>농장명</dt>
-            <dd>{{ farm.farm_nm || farmCd }}</dd>
-          </div>
-          <div>
-            <dt>농장주</dt>
-            <dd>{{ farm.owner_nm || '—' }}</dd>
-          </div>
-          <div>
-            <dt>주소</dt>
-            <dd>{{ farm.address || '—' }}</dd>
-          </div>
-          <div>
-            <dt>등록 필지 수</dt>
-            <dd>{{ siteCount }}곳</dd>
-          </div>
-        </dl>
-        <p v-else class="muted">표시할 농장 정보가 없습니다.</p>
-      </section>
+      <HomeQuickActions
+        @soon="showToast"
+        @pesticide="pestModalOpen = true"
+      />
 
-      <section>
-        <h2 class="section-title">모바일 메뉴</h2>
-        <div class="menu-grid">
-          <MenuCard
-            title="생육관찰"
-            description="사진·병해충·생육상태 기록"
-            to="/observation"
-          />
-          <MenuCard
-            title="영농일지"
-            description="작업·인력·경비 현장 입력"
-            to="/work-log"
-          />
-          <MenuCard
-            title="주문관리"
-            description="고객·품목·배송·입금상태 관리"
-            to="/orders"
-          />
-        </div>
-      </section>
+      <div class="home__row">
+        <HomeSmartSprayCard :spray="smartSpray" />
+        <HomeWeatherCard
+          :weather="weather"
+          @detail="onWeatherDetail"
+        />
+      </div>
 
-      <p class="footer-note">
-        현재는 개발 테스트 버전입니다. 같은 Wi-Fi에서만 접속할 수 있습니다.
-      </p>
+      <HomeBriefingCard :items="briefing" />
+
+      <HomeRecentActivity :items="recent" />
     </div>
+
+    <HomePesticideQuickModal
+      :open="pestModalOpen"
+      @close="pestModalOpen = false"
+      @saved="showToast"
+      @error="showToast"
+    />
+
+    <p v-if="toastMsg" class="toast" role="status">{{ toastMsg }}</p>
   </MobileLayout>
 </template>
 
 <style scoped>
-.stack {
+.home {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--ods-space-12);
 }
-.card {
-  background: #fff;
-  border: 1px solid #eae7e2;
-  border-radius: 14px;
-  padding: 16px;
-}
-.card h2,
-.section-title {
-  margin: 0 0 10px;
-  font-size: 16px;
-  color: #2d3748;
-}
-.farm {
-  margin: 0;
+.home__row {
   display: grid;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ods-space-12);
+  align-items: stretch;
 }
-.farm div {
-  display: grid;
-  gap: 2px;
-}
-.farm dt {
-  font-size: 12px;
-  color: #718096;
-}
-.farm dd {
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--ods-space-64) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
+  z-index: 90;
   margin: 0;
-  font-size: 16px;
-  color: #1a202c;
-  line-height: 1.4;
-  word-break: break-word;
-}
-.menu-grid {
-  display: grid;
-  gap: 10px;
-}
-.muted {
-  margin: 0;
-  color: #718096;
-  font-size: 15px;
-}
-.error {
-  margin: 0;
-  color: #c53030;
-  font-size: 15px;
-}
-.footer-note {
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: #a0aec0;
-  line-height: 1.45;
-  text-align: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(33, 33, 33, 0.88);
+  color: #fff;
+  font: var(--ods-font-body-2);
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 </style>

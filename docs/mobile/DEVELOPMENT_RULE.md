@@ -40,7 +40,9 @@ Orchard Platform 모바일은 **새로운 프로그램이 아니다.**
 - 구현 토큰: `src/design-system/tokens.css`  
 - 공통 컴포넌트: `src/components/ods/*`
 - **모바일 폼 가독성(현장 적용):** `docs/ODS/MOBILE_FORM_READABILITY.md`  
-  - 입력 라벨 16px+ / SemiBold+ / 진한 본문색, 컨트롤과 8~10px 간격  
+  - 입력 라벨 15px Bold / 입력값 14px / 필드 35px / 하단버튼 48px  
+  - 카드 내부: 섹션 13 · 메타·설명 11 · **카드 안 버튼 40px** (하단 48과 구분)  
+  - 레퍼런스: 관찰등록(SCR-002), 열매측정, 과실 추적 카드  
   - 필수·선택 명시, 도움말 13px+  
   - ODS PDF 원본은 수정하지 않고, 본 문서는 **적용 보완 규칙**으로만 관리한다.  
   - `OdsInput`/`OdsSelect`의 `variant="form"` · `OdsFormField` 사용. 기본 `variant`는 기존 화면 영향 없음.

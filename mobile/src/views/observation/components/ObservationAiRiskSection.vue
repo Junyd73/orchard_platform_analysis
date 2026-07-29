@@ -29,71 +29,72 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
 </script>
 
 <template>
-  <section class="ai-risk" :aria-label="LABEL_AI_RISK">
+  <div class="ai-risk" :aria-label="LABEL_AI_RISK">
     <header class="ai-risk__head">
-      <h2 class="ai-risk__title">
+      <h3 class="ai-risk__title">
         <img class="ai-risk__ico" :src="iconWarn" alt="" aria-hidden="true">
         {{ LABEL_AI_RISK }}
-      </h2>
+      </h3>
       <p v-if="!loading && cards.length" class="ai-risk__count">
         {{ cards.length }}건
       </p>
     </header>
 
-    <p v-if="loading" class="ai-risk__hint" role="status">
-      {{ MSG_AI_RISK_LOADING }}
-    </p>
+    <div
+      v-if="loading || isEmpty"
+      class="ai-risk__panel ai-risk__panel--empty"
+      role="status"
+    >
+      <p class="ai-risk__hint">
+        {{ loading ? MSG_AI_RISK_LOADING : MSG_AI_RISK_EMPTY }}
+      </p>
+    </div>
 
     <div
-      v-else-if="!isEmpty"
-      class="ai-risk__track"
-      role="list"
+      v-else
+      class="ai-risk__panel"
     >
-      <button
-        v-for="c in cards"
-        :key="c.id"
-        type="button"
-        class="ai-risk__card"
-        role="listitem"
-        :aria-label="`${c.pestName}, ${c.severityLabel}, ${c.timeLabel}`"
-        @click="emit('open', c.id)"
-      >
-        <div class="ai-risk__main">
-          <p class="ai-risk__name">{{ c.pestName }}</p>
-          <p class="ai-risk__meta">
-            <span class="ai-risk__sev">{{ c.severityLabel }}</span>
-            <span class="ai-risk__date">{{ c.timeLabel }}</span>
-          </p>
-        </div>
-
-        <div class="ai-risk__aside" aria-hidden="true">
-          <div class="ai-risk__thumb">
-            <img
-              v-if="c.thumbUrl"
-              class="ai-risk__img"
-              :src="c.thumbUrl"
-              alt=""
-            >
-            <span v-else class="ai-risk__ph">병해충</span>
+      <div class="ai-risk__track" role="list">
+        <button
+          v-for="c in cards"
+          :key="c.id"
+          type="button"
+          class="ai-risk__card"
+          role="listitem"
+          :aria-label="`${c.pestName}, ${c.severityLabel}, ${c.timeLabel}`"
+          @click="emit('open', c.id)"
+        >
+          <div class="ai-risk__main">
+            <p class="ai-risk__name">{{ c.pestName }}</p>
+            <p class="ai-risk__meta">
+              <span class="ai-risk__sev">{{ c.severityLabel }}</span>
+              <span class="ai-risk__date">{{ c.timeLabel }}</span>
+            </p>
           </div>
-          <span class="ai-risk__chev">›</span>
-        </div>
-      </button>
-    </div>
 
-    <div v-else class="ai-risk__card ai-risk__card--empty" role="status">
-      <div class="ai-risk__main">
-        <p class="ai-risk__empty">{{ MSG_AI_RISK_EMPTY }}</p>
+          <div class="ai-risk__aside" aria-hidden="true">
+            <div class="ai-risk__thumb">
+              <img
+                v-if="c.thumbUrl"
+                class="ai-risk__img"
+                :src="c.thumbUrl"
+                alt=""
+              >
+              <span v-else class="ai-risk__ph">병해충</span>
+            </div>
+            <span class="ai-risk__chev">›</span>
+          </div>
+        </button>
       </div>
     </div>
-  </section>
+  </div>
 </template>
 
 <style scoped>
 .ai-risk {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-10);
+  gap: var(--ods-form-label-gap, var(--ods-space-8));
   margin: 0;
 }
 .ai-risk__head {
@@ -101,45 +102,52 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  padding: 0 2px;
+  padding: 0;
 }
 .ai-risk__title {
   margin: 0;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font: var(--ods-font-headline);
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-card-section);
   color: var(--ods-color-danger);
 }
 .ai-risk__ico {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
   display: block;
   flex: 0 0 auto;
 }
 .ai-risk__count {
   margin: 0;
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text-secondary);
+}
+.ai-risk__panel {
+  margin: 0;
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-white);
+  border: 1px solid var(--ods-color-gray-100);
+  box-shadow: var(--ods-shadow-card);
+}
+.ai-risk__panel--empty {
+  background: color-mix(in srgb, var(--ods-color-danger) 4%, transparent);
+  border-color: color-mix(in srgb, var(--ods-color-danger) 10%, transparent);
+  box-shadow: none;
 }
 .ai-risk__hint {
   margin: 0;
-  padding: var(--ods-space-16);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--ods-color-danger) 4%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ods-color-danger) 10%, transparent);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-form-help);
+  font-weight: 600;
   color: var(--ods-color-text-secondary);
 }
 .ai-risk__track {
   display: flex;
-  gap: 10px;
+  gap: var(--ods-space-8);
   overflow-x: auto;
-  padding: 2px 2px 4px;
+  margin: 0 calc(-1 * var(--ods-space-4));
+  padding: 0 var(--ods-space-4);
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
@@ -149,39 +157,31 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
 }
 .ai-risk__card {
   flex: 0 0 auto;
-  width: min(292px, calc(100vw - 48px));
+  width: min(268px, calc(100vw - 4 * var(--ods-space-16)));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-12);
   margin: 0;
-  padding: 14px 12px 14px 16px;
+  padding: var(--ods-space-12) var(--ods-space-12) var(--ods-space-12) var(--ods-space-16);
   border: 1px solid color-mix(in srgb, var(--ods-color-danger) 12%, transparent);
-  border-radius: 16px;
+  border-radius: var(--ods-radius-card);
   background: color-mix(in srgb, var(--ods-color-danger) 3.5%, transparent);
   box-shadow: none;
   text-align: left;
   cursor: pointer;
   scroll-snap-align: start;
 }
-.ai-risk__card--empty {
-  width: 100%;
-  cursor: default;
-  flex: none;
-}
 .ai-risk__main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ods-space-4);
 }
 .ai-risk__name {
   margin: 0;
-  font-size: 16px;
-  font-weight: 800;
-  line-height: 1.25;
-  letter-spacing: -0.03em;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -191,17 +191,15 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
   margin: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.3;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-card-meta);
 }
 .ai-risk__sev {
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 800;
+  padding: var(--ods-space-4) var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-danger);
   background: color-mix(in srgb, var(--ods-color-danger) 8%, transparent);
 }
@@ -209,22 +207,16 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
   color: var(--ods-color-text-secondary);
   font-weight: 500;
 }
-.ai-risk__empty {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ods-color-text-secondary);
-}
 .ai-risk__aside {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ods-space-8);
 }
 .ai-risk__thumb {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
+  width: var(--ods-thumb-sm);
+  height: var(--ods-thumb-sm);
+  border-radius: var(--ods-radius-button);
   overflow: hidden;
   background: color-mix(in srgb, var(--ods-color-danger) 6%, transparent);
   display: grid;
@@ -238,21 +230,21 @@ const isEmpty = computed(() => !props.loading && cards.value.length === 0)
   display: block;
 }
 .ai-risk__ph {
-  font-size: 10px;
+  font: var(--ods-font-card-meta);
   font-weight: 700;
   color: color-mix(in srgb, var(--ods-color-danger) 55%, white);
 }
 .ai-risk__chev {
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
+  width: var(--ods-hit-sm);
+  height: var(--ods-hit-sm);
+  border-radius: var(--ods-radius-badge);
   display: grid;
   place-items: center;
-  font-size: 18px;
+  font: var(--ods-font-title-2);
   font-weight: 700;
   line-height: 1;
   color: var(--ods-color-danger);
   background: var(--ods-color-white);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--ods-shadow-card);
 }
 </style>

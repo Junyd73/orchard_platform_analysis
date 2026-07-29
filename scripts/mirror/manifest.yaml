@@ -234,6 +234,7 @@ exclude_globs:
   - scripts/generate_mobile_qr.py
 preflight_relaxed_globs:
   - server/docs/**
+  - server/tests/**
   - mobile/src/shared/mediaUrl.ts
   - mobile/src/utils/mediaUrl.ts
   - scripts/mirror/preflight.py

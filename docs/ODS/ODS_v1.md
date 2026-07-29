@@ -1,7 +1,7 @@
 # Orchard Design System (ODS) v1.2
 
 - 공식 명칭: **Orchard Design System (ODS)**
-- 문서: `ODS_v1.md` (Active: **v1.2.2**, 포함: v1.1 · v1.1.1 · v1.2 · v1.2.1 · v1.2.2)
+- 문서: `ODS_v1.md` (Active: **v1.2.4**, 포함: v1.1 ~ v1.2.4)
 - 상태: **Active**
 - 기준일: 2026-07-18
 - 버전 SSOT: `mobile/docs/VERSIONS.md`
@@ -20,6 +20,10 @@
 | **v1.2** | 2026-07-18 | 과실 추적(1차/2차+) · Wizard 4단계 · N차 사진 · cascade 삭제 · 슬라이드 뷰어 |
 | **v1.2.1** | 2026-07-18 | SCR-010 영농일지 월간 시안4 확정 (흰 페이지 · 계절 Hero · KPI 가로) |
 | **v1.2.2** | 2026-07-18 | SCR-010 월간 **1차 마감**: 고유 인원+`man_hour` 표시 · 기상 자동조회 · Hero「오늘」KPI(표시 월과 무관) · 농약/비료 건수 |
+| (문서) | 2026-07-21 | SCR-010/011 **1.2.3** — 준비중 Unify · 구글 Phase4 (ODS 토큰 동결, 화면 명세만 갱신) |
+| **v1.2.3** | **2026-07-26** | **섹션 타이틀** 공통: 아이콘+제목 · `OdsSectionTitle` · 토큰 · SCR-001 AI/관찰내역 적용 |
+| **v1.2.4** | **2026-07-26** | **레이아웃 사이즈 스케일**: thumb/dot/icon/hit 토큰 · 생육관찰→Home·농약·영농일지 |
+| (문서) | **2026-07-26** | 카드 내부 **표** 지침 — `MOBILE_FORM_READABILITY` **1.4** (공통·조회·편집, th > 본문) |
 
 ---
 
@@ -78,8 +82,8 @@ AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한
 - **AppBar 상하좌우 여백 SSOT:** `main.ods-page-content` + 토큰
   (`--ods-page-content-pad-top: 0`, `--ods-page-padding-x`, `--ods-page-content-pad-bottom`).
   화면별 `.content { padding: … }`로 AppBar 주변 여백을 덮어쓰지 **않는다**.
-- **AppBar 상단 패딩 = Hero(다음 블록) 간격:** `--ods-appbar-pad-y` = `--ods-appbar-content-gap`.
-  스크롤 전 `OdsAppBar`가 page `gap`을 음수 마진으로 상쇄해 동일 간격을 만든다.
+- **AppBar ↔ 다음 블록 추가 간격 = 0:** `--ods-appbar-content-gap: 0`.  
+  AppBar 내부 `--ods-appbar-pad-y`만 쓰고, `OdsAppBar`가 page `gap`을 음수 마진으로 상쇄한다.
 
 ### Surface 정책 (v1.1)
 
@@ -163,10 +167,58 @@ AppBar는 농장 맥락(Farm Mark · 농장명 · 알림 · 설정)을 유지한
 반드시 ODS 재사용:
 
 - Color, Typography, Spacing, Radius, Shadow
-- `OdsCard`, `OdsButton`, `OdsBadge`, `OdsBottomNav`, `OdsAppBar`
+- `OdsCard`, `OdsButton`, `OdsBadge`, `OdsBottomNav`, `OdsAppBar`, `OdsSectionTitle`
 
 화면 전용 CSS는 **배치·일러스트·상태 톤**에만 제한한다.  
 Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타일 금지.
+
+**카드 내부 vs 바깥 (v1.3+):** 상세는 `MOBILE_FORM_READABILITY.md` (폼 · 카드 · **표 1.4**).
+
+| 구분 | 타이포 | 버튼 |
+|------|--------|------|
+| 카드 제목·페이지 | 15 Bold / 폼 규칙 | Floating **48px** |
+| 카드 안 | 섹션 13 · 메타·힌트 11 | **40px** (`--ods-button-height-in-card`) |
+| 카드 안 표 | **th 13 Bold** > 본문 항목 **11** · 편집 컨트롤만 폼 14/35 | — |
+
+### 6.1 섹션 타이틀 (아이콘 + 제목) — v1.2.3
+
+페이지 스택의 독립 섹션 제목(예: SCR-001 **AI 분석**, **최근 7일 관찰 내역**)은 텍스트만 두지 않고 **연관 아이콘을 앞에 둔다.**
+
+| 항목 | 규칙 |
+|------|------|
+| 컴포넌트 | `OdsSectionTitle.vue` |
+| 구성 | `[아이콘 --ods-icon-lg] + 제목(form-label 15 Bold)` · gap 8px |
+| 토큰 | `--ods-section-title-icon`(=`--ods-icon-lg`) · `--ods-section-title-gap` |
+| 아이콘 | `assets/ods/common/icon-title-*.svg` (주제별 Primary/AI 고정색) |
+| 계층 | 페이지 섹션 `h2`(기본) · 카드 안 소제목은 `level=3` |
+| 금지 | 섹션마다 임의 font-size/아이콘 크기 · emoji 대체 |
+
+SCR-001 적용 자산:
+
+| 섹션 | 아이콘 |
+|------|--------|
+| AI 분석 | `icon-title-ai.svg` (AI Blue `#4F7FB8`) |
+| 관찰 내역 | `icon-title-observation.svg` (Primary `#2E7D32`) |
+
+Home 카드 헤드(`HomeCardHead`)·농약 섹션 헤더도 동일 패턴을 따르며, 신규 화면은 **`OdsSectionTitle`을 우선** 사용한다.
+
+### 6.2 레이아웃 사이즈 스케일 — v1.2.4
+
+썸네일·캘린더 점·아이콘·소형 히트 영역은 **하드코딩 px 금지**. `tokens.css` 스케일을 사용한다.
+
+| 토큰 | 값 | 용도 |
+|------|-----|------|
+| `--ods-thumb-sm` | 56 | AI 위험·추적·타임라인 썸네일 |
+| `--ods-thumb-md` | 72 | 목록 카드 썸네일 |
+| `--ods-thumb-lg` | 96 | 사진 그리드 |
+| `--ods-dot-sm` | 4 | 캘린더 기본 점 |
+| `--ods-dot-md` | 8 | 범례·강조 점 |
+| `--ods-icon-sm` ~ `2xl` | 14 / 16 / 18 / 22 / 24 | 인라인 → AppBar → BottomNav |
+| `--ods-hit-sm` | 32 | 캘린더 prev/next · 인라인 › |
+
+**제외(화면 특화):** Hero 높이(180/188), 가로 스크롤 카드 폭(158/292), textarea 최소높이 등.
+
+**적용 순서:** 1) 생육관찰 SCR-001~004 → 2) Home · 농약 · 영농일지 · 공통 ODS 컴포넌트
 
 ## 7. 사진 — v1.1 + v1.1.1
 
@@ -210,7 +262,7 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 | 차수 | **1차** = 최초 관찰. **2차부터** = 추적 관찰 |
 | 제목 | 추적 생성 시 `{기본제목} N차` (구형 `N차추적` 접미는 표시·생성 시 정규화) |
 | 타임라인 | 각 항목에 `1차`·`2차`… 뱃지. 사진→슬라이드 뷰어, 본문→해당 차수 상세 |
-| 추적관찰 CTA | **1차 상세·완료 후만** 표시. 2차 이상은 **invisible** (disabled 아님) |
+| 추적관찰 CTA | **모든 차수 상세**에 표시. 클릭 시 **1차(root)** 기준으로 다음 차수 등록. 1차 미완료 시만 disabled |
 | 사진 | **N차 상세 모두** `PhotoPanel`로 해당 차수 사진 표시 |
 | 삭제 | 1차 삭제 시 2차 이상 일괄 삭제 가능 → **경고 후 확인**. 2차+ 삭제는 해당 건만 |
 | Wizard | 과실: 기본 → 사진 → **열매** → 완료 (4단계) |
@@ -233,7 +285,9 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 | ODS v1.2 | 과실 생육관찰(SCR-003) · 상세 과실 분기(SCR-004) · 열매 측정 · 추적 |
 | ODS v1.2.1 | SCR-010 영농일지 월간 (시안4 Hero 예외) |
 | **ODS v1.2.2** | **SCR-010 월간 1차 마감** (인원·시간·기상 자동·집계 freeze) |
-| 영농일지 | SCR-010 월간(Approved · 1차) · SCR-011 일간 (**UI 확정** · 기능 구현 중) |
+| **ODS v1.2.3** | 섹션 타이틀(아이콘+제목) · `OdsSectionTitle` · SCR-001 적용 |
+| **ODS v1.2.4** | 레이아웃 사이즈 스케일(thumb/dot/icon/hit) |
+| 영농일지 | SCR-010·011 **문서 1.2.3** — 준비중 Unify · 구글 Phase4 ([`WORK_LOG_SCHEDULE_UNIFY.md`](../../../docs/WORK_LOG_SCHEDULE_UNIFY.md)) |
 
 등록·사진·열매 Wizard도 공통 AppBar + Floating Bottom Action을 따른다.
 
@@ -241,11 +295,11 @@ Card의 radius/border/shadow/padding 토큰을 우회하는 임의 카드 스타
 
 | 구분 | 경로 |
 |------|------|
-| 공통 아이콘 | `mobile/src/assets/ods/common/` |
+| 공통 아이콘 | `mobile/src/assets/ods/common/` (섹션 타이틀: `icon-title-*.svg`) |
 | SCR-004 자산 | `mobile/src/assets/ods/scr004/` |
 | SCR-010 Hero | `mobile/src/assets/images/work-log/hero-*.png` |
 | SCR-010 시안 | `mobile/docs/ODS/assets/영농일지-월간시안4.png` |
 | ODS Token | `mobile/src/design-system/tokens.css` |
-| ODS Components | `mobile/src/components/ods/` |
+| ODS Components | `mobile/src/components/ods/` (`OdsSectionTitle` 포함) |
 | 시각 원본 PDF | `mobile/docs/ODS/ODS_v1.0.pdf` |
 | 과실 추적 Addendum | `mobile/docs/ODS/ODS_v1.2_SCR-003_Fruit_Track.md` |

@@ -149,12 +149,7 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
 <template>
   <div class="page">
     <main class="content ods-page-content">
-      <OdsAppBar show-back @back="goBack" />
-
-      <header class="top">
-        <h1 class="title">관찰 사진</h1>
-        <p class="sub">{{ obsId || '—' }}</p>
-      </header>
+      <OdsAppBar show-back back-mode="emit" @back="goBack" />
 
       <nav v-if="fromWizard" class="steps" aria-label="등록 단계">
         <template v-if="isFruitObs">
@@ -229,28 +224,14 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
 .content {
   /* padding/max-width -> .ods-page-content (AppBar SSOT) */
 }
-.top {
-  margin-top: var(--ods-space-8);
-}
-.title {
-  margin: 0;
-  font: var(--ods-font-title-1);
-  color: var(--ods-color-text);
-}
-.sub {
-  margin: var(--ods-space-4) 0 0;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
-  word-break: break-all;
-}
 .steps {
   display: flex;
   gap: var(--ods-space-8);
-  margin: 0 0 var(--ods-space-16);
+  margin: 0;
   flex-wrap: wrap;
 }
 .step {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-emphasis);
   font-weight: 700;
   color: var(--ods-color-gray-500);
   padding: var(--ods-space-4) var(--ods-space-8);
@@ -266,11 +247,12 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
 }
 .error {
   color: var(--ods-color-danger);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
+  font-weight: 600;
 }
 .status {
   margin: var(--ods-space-12) 0 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-primary);
   font-weight: 600;
 }
@@ -302,6 +284,6 @@ function onAiUpdated(res: ObservationAiAnalysisResponse) {
   flex: 1;
 }
 .footer-actions :deep(.ods-btn) {
-  min-height: 48px;
+  min-height: var(--ods-button-height, 48px);
 }
 </style>

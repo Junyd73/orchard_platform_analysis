@@ -21,7 +21,11 @@ defineProps<{
 }
 .ods-card__title {
   margin: 0 0 var(--ods-space-12);
-  font: var(--ods-font-headline);
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
+}
+/* 카드 안 버튼 = 하단 Floating(48)과 구분 */
+.ods-card :deep(.ods-btn) {
+  min-height: var(--ods-button-height-in-card);
 }
 </style>

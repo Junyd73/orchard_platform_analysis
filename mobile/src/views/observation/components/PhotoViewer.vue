@@ -2,11 +2,16 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { resolveMediaUrl } from '@/utils/mediaUrl'
-import type { ObservationPhotoItem } from '@/types/observation'
+
+export type PhotoViewerItem = {
+  original_url?: string | null
+  thumb_url?: string | null
+  display_nm?: string | null
+}
 
 const props = defineProps<{
   open: boolean
-  photos: ObservationPhotoItem[]
+  photos: PhotoViewerItem[]
   index: number
 }>()
 
@@ -222,7 +227,7 @@ onUnmounted(() => {
   z-index: 200;
   display: flex;
   flex-direction: column;
-  background: rgba(18, 18, 18, 0.96);
+  background: color-mix(in srgb, var(--ods-color-gray-900) 96%, transparent);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);
 }
@@ -231,24 +236,24 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-12);
-  min-height: 52px;
-  padding: var(--ods-space-8) var(--ods-space-16);
+  min-height: var(--ods-button-height);
+  padding: var(--ods-space-8) var(--ods-page-padding-x, var(--ods-space-16));
   flex: 0 0 auto;
 }
 .viewer__counter {
   margin: 0;
   color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
 }
 .viewer__close {
-  min-height: 44px;
+  min-height: var(--ods-touch-min);
   min-width: 64px;
   border: none;
   border-radius: var(--ods-radius-button);
-  background: rgba(255, 255, 255, 0.14);
+  background: color-mix(in srgb, var(--ods-color-white) 14%, transparent);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   cursor: pointer;
 }
@@ -256,7 +261,7 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: var(--ods-touch-min) 1fr var(--ods-touch-min);
   align-items: center;
   gap: var(--ods-space-4);
   padding: 0 var(--ods-space-8);
@@ -288,29 +293,29 @@ onUnmounted(() => {
   justify-content: center;
   gap: var(--ods-space-12);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   text-align: center;
   padding: var(--ods-space-16);
 }
 .viewer__fail-btn {
-  min-height: 44px;
+  min-height: var(--ods-touch-min);
   padding: 0 var(--ods-space-16);
   border: none;
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-primary);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   cursor: pointer;
 }
 .viewer__nav {
-  width: 44px;
-  height: 44px;
+  width: var(--ods-touch-min);
+  height: var(--ods-touch-min);
   border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--ods-radius-badge);
+  background: color-mix(in srgb, var(--ods-color-white) 12%, transparent);
   color: var(--ods-color-white);
-  font-size: 28px;
+  font: var(--ods-font-title-1);
   line-height: 1;
   cursor: pointer;
 }
@@ -320,9 +325,9 @@ onUnmounted(() => {
 }
 .viewer__caption {
   margin: 0;
-  padding: var(--ods-space-8) var(--ods-space-16) var(--ods-space-16);
-  color: rgba(255, 255, 255, 0.85);
-  font: var(--ods-font-caption);
+  padding: var(--ods-space-8) var(--ods-page-padding-x, var(--ods-space-16)) var(--ods-space-16);
+  color: color-mix(in srgb, var(--ods-color-white) 85%, transparent);
+  font: var(--ods-font-card-help);
   text-align: center;
   overflow: hidden;
   white-space: nowrap;

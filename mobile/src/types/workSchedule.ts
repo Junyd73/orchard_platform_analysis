@@ -8,6 +8,7 @@ export type WorkScheduleItem = {
   farm_cd: string
   sched_id: string
   work_dt: string
+  work_tm?: string | null
   work_main_cd: string
   work_mid_cd: string
   work_loc_id?: string | null
@@ -28,6 +29,7 @@ export type WorkScheduleListResponse = {
 export type WorkScheduleCreatePayload = {
   work_dt: string
   work_mid_cd: string
+  work_tm?: string | null
   work_loc_id?: string | null
   title?: string | null
   contents?: string | null
@@ -50,6 +52,7 @@ export type WorkScheduleConvertResponse = {
       work_dt: string
       work_mid_cd: string
       work_loc_id?: string | null
+      start_tm?: string | null
       memo: string
     }
   }

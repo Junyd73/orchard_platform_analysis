@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import re
+
 # 사용자 안내용 안전 메시지
 SAFE_MESSAGES: dict[str, str] = {
     "AI_AUTH": "AI 인증에 실패했습니다. API 키를 확인해 주세요.",
@@ -67,6 +69,24 @@ _LEGACY_PSIS = {
     "FAIL": "INTERNAL",
 }
 
+# 화면 진단용 — 예외 클래스명만 허용 (메시지·키·URL 금지)
+_SAFE_EXC_CLASS_RE = re.compile(r"\(([A-Za-z_][A-Za-z0-9_]{0,80})\)\s*$")
+_BARE_EXC_CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,80}$")
+
+
+def append_safe_exc_diag(base_msg: str, diag: str | None) -> str:
+    """안전 문구 뒤에 (ExcClass) 만 유지·부착."""
+    base = str(base_msg or "").strip()
+    raw = str(diag or "").strip()
+    if not raw:
+        return base
+    m = _SAFE_EXC_CLASS_RE.search(raw)
+    if m:
+        return f"{base} ({m.group(1)})"
+    if _BARE_EXC_CLASS_RE.fullmatch(raw):
+        return f"{base} ({raw})"
+    return base
+
 
 def normalize_error_code(code: str | None, *, domain: str = "AI") -> str:
     raw = str(code or "").strip().upper()
@@ -105,7 +125,7 @@ def classify_ai_exception(exc: BaseException) -> tuple[str, str]:
     else:
         code = "AI_PROVIDER"
     safe_log(code, name, where="openai")
-    return code, safe_user_message(code, domain="AI")
+    return code, append_safe_exc_diag(safe_user_message(code, domain="AI"), name)
 
 
 def classify_psis_exception(exc: BaseException) -> tuple[str, str]:
@@ -123,7 +143,7 @@ def classify_psis_exception(exc: BaseException) -> tuple[str, str]:
     else:
         code = "PSIS_NETWORK"
     safe_log(code, name, where="psis")
-    return code, safe_user_message(code, domain="PSIS")
+    return code, append_safe_exc_diag(safe_user_message(code, domain="PSIS"), name)
 
 
 def safe_log(code: str, exc_class: str, *, where: str = "", request_id: int | None = None) -> None:
@@ -136,5 +156,5 @@ def safe_log(code: str, exc_class: str, *, where: str = "", request_id: int | No
 
 def sanitize_stored_error(code: str | None, message: str | None, *, domain: str = "AI") -> tuple[str, str]:
     n = normalize_error_code(code, domain=domain)
-    # 저장·표시용 메시지는 항상 안전 문구 (원본 예외 문자열 저장 금지)
-    return n, safe_user_message(n, domain=domain)
+    # 본문은 안전 문구만. (ExcClass) 진단 접미사만 유지.
+    return n, append_safe_exc_diag(safe_user_message(n, domain=domain), message)

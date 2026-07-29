@@ -3,9 +3,11 @@ export const MSG_AI_RISK_EMPTY = '최근 7일 위험 관찰이 없습니다.'
 export const MSG_RECENT_AI_EMPTY = '최근 7일 AI 분석이 없습니다.'
 export const MSG_AI_RISK_LOADING = '위험 관찰을 확인하는 중…'
 export const MSG_RECENT_AI_LOADING = '최근 7일 AI 분석을 확인하는 중…'
-export const LABEL_AI_RISK = 'AI 위험 감지'
+/** 상위 섹션 타이틀 (위험·최근 분석 묶음) */
+export const LABEL_AI_SECTION = 'AI 분석'
+export const LABEL_AI_RISK = '위험 감지'
 export const LABEL_AI_RISK_BADGE = '위험'
-export const LABEL_RECENT_AI = '최근 AI 분석(최근7일)'
+export const LABEL_RECENT_AI = '최근 분석(7일)'
 export const LABEL_RECENT_AI_ALL = '전체 보기'
 
 /** AI 위험 감지 카드 */

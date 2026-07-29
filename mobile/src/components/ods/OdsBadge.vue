@@ -18,7 +18,7 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 24px;
+  min-height: var(--ods-icon-2xl);
   padding: 0 var(--ods-space-8);
   border-radius: var(--ods-radius-badge);
   font: var(--ods-font-caption);

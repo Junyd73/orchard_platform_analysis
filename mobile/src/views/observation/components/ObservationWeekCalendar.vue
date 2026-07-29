@@ -172,11 +172,11 @@ function onSelect(iso: string) {
   flex-direction: column;
   gap: var(--ods-space-12);
   margin: 0;
-  padding: var(--ods-space-16);
+  padding: var(--ods-card-padding, var(--ods-space-16));
   border-radius: var(--ods-radius-card);
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-gray-100);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--ods-shadow-card);
 }
 .obs-cal__head {
   display: flex;
@@ -186,28 +186,24 @@ function onSelect(iso: string) {
 }
 .obs-cal__title {
   margin: 0;
-  font: var(--ods-font-headline);
-  font-size: 15px;
-  font-weight: 800;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
-  letter-spacing: -0.02em;
 }
 .obs-cal__nav {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--ods-space-4);
 }
 .obs-cal__nav-btn {
-  width: 32px;
-  height: 32px;
+  width: var(--ods-hit-sm);
+  height: var(--ods-hit-sm);
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--ods-radius-button);
   background: transparent;
-  font-size: 20px;
+  font: var(--ods-font-title-2);
   font-weight: 600;
-  line-height: 1;
   color: var(--ods-color-text-secondary);
   cursor: pointer;
 }
@@ -217,24 +213,24 @@ function onSelect(iso: string) {
 .obs-cal__month {
   min-width: 6.5em;
   text-align: center;
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   color: var(--ods-color-text);
 }
 .obs-cal__week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
+  gap: var(--ods-space-4);
 }
 .obs-cal__cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   margin: 0;
-  padding: 8px 2px 6px;
+  padding: var(--ods-space-8) var(--ods-space-4) var(--ods-space-8);
   border: 1.5px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--ods-radius-button);
   background: transparent;
   cursor: pointer;
   min-width: 0;
@@ -253,9 +249,8 @@ function onSelect(iso: string) {
   display: block;
   width: 100%;
   text-align: center;
-  font-size: 11px;
+  font: var(--ods-font-card-meta);
   font-weight: 600;
-  line-height: 1.2;
   color: var(--ods-color-text-secondary);
 }
 .obs-cal__wd--rest {
@@ -265,17 +260,14 @@ function onSelect(iso: string) {
   display: block;
   width: 100%;
   text-align: center;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
 }
 .obs-cal__dots {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: var(--ods-space-4);
   width: 100%;
   box-sizing: border-box;
 }
@@ -283,24 +275,23 @@ function onSelect(iso: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: var(--ods-space-4);
   min-width: 0;
 }
 .obs-cal__dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
+  width: var(--ods-dot-sm);
+  height: var(--ods-dot-sm);
+  border-radius: var(--ods-radius-badge);
   flex: 0 0 auto;
   display: block;
 }
 .obs-cal__dot--leg {
-  width: 6px;
-  height: 6px;
+  width: var(--ods-dot-md);
+  height: var(--ods-dot-md);
 }
 .obs-cal__n {
-  font-size: 10px;
+  font: var(--ods-font-card-meta);
   font-weight: 700;
-  line-height: 1;
   color: var(--ods-color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -315,7 +306,7 @@ function onSelect(iso: string) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  gap: var(--ods-space-4) var(--ods-space-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -325,22 +316,20 @@ function onSelect(iso: string) {
 .obs-cal__leg {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font: var(--ods-font-caption);
+  gap: var(--ods-space-4);
+  font: var(--ods-font-card-help);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
 }
 .obs-cal__detail-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   margin: 0;
-  padding: 4px 0;
+  padding: var(--ods-space-4) 0;
   border: none;
   background: transparent;
-  font: var(--ods-font-caption);
-  font-size: 12px;
-  font-weight: 700;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-primary);
   cursor: pointer;
   flex: 0 0 auto;
@@ -350,7 +339,7 @@ function onSelect(iso: string) {
   opacity: 0.7;
 }
 .obs-cal__detail-chev {
-  font-size: 10px;
+  font: var(--ods-font-card-meta);
   line-height: 1;
 }
 </style>

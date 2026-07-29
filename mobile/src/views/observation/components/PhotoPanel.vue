@@ -519,7 +519,7 @@ defineExpose({ reload: loadPhotos })
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-card);
-  padding: var(--ods-space-16);
+  padding: var(--ods-card-padding, var(--ods-space-16));
   box-shadow: var(--ods-shadow-card);
   width: 100%;
   min-width: 0;
@@ -534,12 +534,12 @@ defineExpose({ reload: loadPhotos })
 }
 .title {
   margin: 0;
-  font: var(--ods-font-headline);
-  color: var(--ods-color-text);
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-primary);
 }
 .count {
   margin: 0;
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   color: var(--ods-color-primary);
 }
@@ -547,19 +547,20 @@ defineExpose({ reload: loadPhotos })
   color: var(--ods-color-danger);
 }
 .hint {
-  margin: var(--ods-space-8) 0 0;
-  font: var(--ods-font-caption);
+  margin: var(--ods-form-label-gap, var(--ods-space-8)) 0 0;
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ods-space-8);
-  margin-top: var(--ods-space-16);
+  margin-top: var(--ods-space-12);
 }
 .actions :deep(.ods-btn) {
   flex: 1 1 140px;
   min-width: 0;
+  min-height: var(--ods-button-height-in-card);
 }
 .sr-only {
   position: absolute;
@@ -575,7 +576,7 @@ defineExpose({ reload: loadPhotos })
 .error,
 .empty {
   margin: var(--ods-space-12) 0 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
 }
 .status {
   color: var(--ods-color-text-secondary);
@@ -596,7 +597,7 @@ defineExpose({ reload: loadPhotos })
   border: none;
   background: transparent;
   color: var(--ods-color-primary);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   text-decoration: underline;
   cursor: pointer;
@@ -616,11 +617,11 @@ defineExpose({ reload: loadPhotos })
 }
 .item {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: var(--ods-thumb-lg) minmax(0, 1fr);
   gap: var(--ods-space-12);
   padding: var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
-  border-radius: 12px;
+  border-radius: var(--ods-radius-button);
   background: var(--ods-color-bg-muted);
   width: 100%;
   min-width: 0;
@@ -630,34 +631,33 @@ defineExpose({ reload: loadPhotos })
 }
 .thumb-wrap {
   position: relative;
-  width: 96px;
-  height: 96px;
+  width: var(--ods-thumb-lg);
+  height: var(--ods-thumb-lg);
   padding: 0;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--ods-radius-button);
   overflow: hidden;
   background: var(--ods-color-gray-100);
   cursor: pointer;
-  flex: 0 0 96px;
+  flex: 0 0 var(--ods-thumb-lg);
 }
 .thumb {
-  width: 96px;
-  height: 96px;
+  width: var(--ods-thumb-lg);
+  height: var(--ods-thumb-lg);
   object-fit: cover;
   display: block;
 }
 .rep {
   position: absolute;
-  left: 4px;
-  top: 4px;
-  height: 22px;
-  line-height: 22px;
-  padding: 0 6px;
-  border-radius: 4px;
+  left: var(--ods-space-4);
+  top: var(--ods-space-4);
+  height: var(--ods-icon-xl);
+  line-height: var(--ods-icon-xl);
+  padding: 0 var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
   background: color-mix(in srgb, var(--ods-color-primary) 82%, transparent);
   color: var(--ods-color-white);
-  font: var(--ods-font-caption);
-  font-size: 11px;
+  font: var(--ods-font-card-meta);
   font-weight: 700;
   pointer-events: none;
 }
@@ -674,8 +674,8 @@ defineExpose({ reload: loadPhotos })
   max-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font: var(--ods-font-body-2);
+  gap: var(--ods-space-4);
+  font: var(--ods-font-card-body);
   font-weight: 600;
   color: var(--ods-color-text);
 }
@@ -688,29 +688,28 @@ defineExpose({ reload: loadPhotos })
   text-overflow: ellipsis;
 }
 .file-name__secondary {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
 }
 .item-actions {
   display: flex;
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: var(--ods-space-4);
   flex: 0 0 auto;
   min-width: 0;
 }
 .icon-btn {
   box-sizing: border-box;
-  min-height: 44px;
-  min-width: 44px;
-  height: 44px;
+  min-height: var(--ods-touch-min);
+  min-width: var(--ods-touch-min);
+  height: var(--ods-touch-min);
   padding: 0 var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white);
   color: var(--ods-color-text);
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-card-emphasis);
   cursor: pointer;
   flex: 0 0 auto;
 }
@@ -729,32 +728,31 @@ defineExpose({ reload: loadPhotos })
 }
 
 .panel--scr004 {
-  padding: var(--ods-space-20);
+  padding: var(--ods-card-padding, var(--ods-space-16));
 }
 .panel--scr004 .title {
   display: flex;
   align-items: center;
   gap: var(--ods-space-8);
-  font-size: 18px;
-  font-weight: 700;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-primary);
 }
 .title-icon {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   flex: 0 0 auto;
 }
 .panel--scr004 .count {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-size: 14px;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-form-value);
   color: var(--ods-color-text-secondary);
   font-weight: 600;
 }
 .count-chev {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
   opacity: 0.55;
 }
 /* SCR-004: horizontal swipe strip (~2.75 visible) */
@@ -787,7 +785,7 @@ defineExpose({ reload: loadPhotos })
   aspect-ratio: 1;
   padding: 0;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--ods-radius-button);
   overflow: hidden;
   cursor: pointer;
   background: var(--ods-color-gray-100);
@@ -803,30 +801,30 @@ defineExpose({ reload: loadPhotos })
 }
 .strip__rep {
   position: absolute;
-  left: 3px;
-  top: 3px;
-  padding: 0 5px;
-  height: 18px;
-  line-height: 18px;
-  border-radius: 4px;
+  left: var(--ods-space-4);
+  top: var(--ods-space-4);
+  padding: 0 var(--ods-space-4);
+  height: var(--ods-icon-lg);
+  line-height: var(--ods-icon-lg);
+  border-radius: var(--ods-radius-button);
   background: var(--ods-color-primary);
   color: var(--ods-color-white);
-  font-size: 10px;
+  font: var(--ods-font-card-meta);
   font-weight: 700;
   pointer-events: none;
 }
 .strip__del {
   position: absolute;
-  right: 3px;
-  top: 3px;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
+  right: var(--ods-space-4);
+  top: var(--ods-space-4);
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
+  border-radius: var(--ods-radius-badge);
   background: var(--ods-color-white);
   color: var(--ods-color-gray-700);
   border: 1px solid var(--ods-color-border);
-  box-shadow: 0 1px 2px rgba(33, 33, 33, 0.08);
-  font-size: 14px;
+  box-shadow: var(--ods-shadow-card);
+  font: var(--ods-font-form-value);
   line-height: 20px;
   text-align: center;
   font-weight: 600;
@@ -834,7 +832,7 @@ defineExpose({ reload: loadPhotos })
 }
 .empty--scr004 {
   margin: var(--ods-space-16) 0 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .actions--scr004 {
@@ -843,10 +841,9 @@ defineExpose({ reload: loadPhotos })
 }
 .actions--scr004 :deep(.ods-btn) {
   flex: 1 1 0;
-  min-height: var(--ods-touch-min);
+  min-height: var(--ods-button-height-in-card);
   padding: 0 var(--ods-space-12);
-  font: var(--ods-font-body-2);
-  font-weight: 600;
+  font: var(--ods-font-card-section);
 }
 .btn-inner {
   display: inline-flex;
@@ -855,8 +852,8 @@ defineExpose({ reload: loadPhotos })
   gap: var(--ods-space-4);
 }
 .btn-icon {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -874,8 +871,8 @@ defineExpose({ reload: loadPhotos })
   }
   .thumb-wrap,
   .thumb {
-    width: 88px;
-    height: 88px;
+    width: calc(var(--ods-thumb-lg) - var(--ods-space-8));
+    height: calc(var(--ods-thumb-lg) - var(--ods-space-8));
   }
   .thumb-wrap {
     flex-basis: 88px;

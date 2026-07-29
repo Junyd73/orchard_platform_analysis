@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, inject, type Ref } from 'vue'
+
 withDefaults(
   defineProps<{
     label?: string
@@ -12,20 +14,31 @@ withDefaults(
 const emit = defineEmits<{
   click: []
 }>()
+
+/** 메인 탭 캐러셀 transform 안에서는 fixed가 깨지므로 body로 탈출 + 활성 탭만 표시 */
+const panelIndex = inject<Ref<number> | null>('mainTabPanelIndex', null)
+const activeIndex = inject<Ref<number> | null>('mainTabActiveIndex', null)
+const visible = computed(() => {
+  if (panelIndex == null || activeIndex == null) return true
+  return panelIndex.value === activeIndex.value
+})
 </script>
 
 <template>
-  <button
-    type="button"
-    class="ods-fab"
-    :aria-label="ariaLabel"
-    @click="emit('click')"
-  >
-    <span class="ods-fab__icon">
-      <slot />
-    </span>
-    <span v-if="label" class="ods-fab__label">{{ label }}</span>
-  </button>
+  <Teleport to="body">
+    <button
+      v-show="visible"
+      type="button"
+      class="ods-fab"
+      :aria-label="ariaLabel"
+      @click="emit('click')"
+    >
+      <span class="ods-fab__icon">
+        <slot />
+      </span>
+      <span v-if="label" class="ods-fab__label">{{ label }}</span>
+    </button>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -85,8 +98,8 @@ const emit = defineEmits<{
   height: var(--ods-space-24);
 }
 .ods-fab__icon :deep(img) {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
   filter: brightness(0) invert(1);
 }
 .ods-fab__label {

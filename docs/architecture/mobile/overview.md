@@ -1,6 +1,6 @@
 # Mobile Architecture Overview
 
-> 문서 버전: **v1.2.2** · 기준일: 2026-07-18 · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
+> 문서 버전: **v1.2.2** · 기준일: 2026-07-21 · SSOT: [`../VERSIONS.md`](../VERSIONS.md) · 영농일지 Unify 반영
 
 ## 목적
 
@@ -36,7 +36,8 @@ mobile/
     ├── features/            # 화면·기능 단위
     │   ├── home/
     │   ├── observation/     # 생육관찰 (SCR-001~004)
-    │   ├── work-log/        # 영농일지 (SCR-010 1차 · SCR-011 UI 확정)
+    │   ├── work-log/        # 영농일지 (SCR-010/011 · Unify · 구글 Phase4)
+    │   ├── pesticide/       # 농약 재고 (SCR-020 · PST-001)
     │   └── orders/
     ├── shared/              # layouts · stores · constants · lib
     ├── router/
@@ -61,4 +62,4 @@ mobile/
 | 영역 | 상태 |
 |------|------|
 | `features/observation` | SCR-001~004 (ODS v1.2). SCR-001 **1.3.6** Phase 2 실데이터 · OS01 위험도 등록/AI확정 |
-| `features/work-log` | **SCR-010 월간 1차 마감** (ODS v1.2.2) · SCR-011 **UI 확정** · 기능 구현 중 |
+| `features/work-log` | **SCR-010** 월간(1차·Unify 1.2.3) · **SCR-011** 일간(준비중·구글 Phase4) |

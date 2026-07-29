@@ -12,6 +12,9 @@ export type WorkLogMonthSummary = {
 export type WorkLogDayWorkItem = {
   work_mid_cd: string
   work_mid_nm: string
+  status_cd?: string | null
+  /** 작업 메모 — 기타작업 캘린더 표시 */
+  rmk?: string | null
 }
 
 export type WorkLogDayCell = {
@@ -73,6 +76,8 @@ export type WorkLogWorkItem = {
   end_tm?: string | null
   status_cd?: string | null
   status_nm?: string | null
+  google_event_id?: string | null
+  sync_status?: string | null
 }
 
 export type WorkLogDailyResponse = {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, inject, nextTick, onMounted, ref, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
@@ -10,14 +10,15 @@ import {
 } from '@/api/observations'
 import { ApiClientError } from '@/api/client'
 import iconCamera from '@/assets/ods/scr004/icon-camera.svg'
+import iconTitleObservation from '@/assets/ods/common/icon-title-observation.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
-import ObservationAiRiskSection from '@/views/observation/components/ObservationAiRiskSection.vue'
+import OdsSectionTitle from '@/components/ods/OdsSectionTitle.vue'
+import ObservationAiHomeSection from '@/views/observation/components/ObservationAiHomeSection.vue'
 import ObservationFilters from '@/views/observation/components/ObservationFilters.vue'
 import ObservationHero from '@/views/observation/components/ObservationHero.vue'
 import type { ObservationHeroKpiKey } from '@/views/observation/components/ObservationHero.vue'
 import ObservationListCard from '@/views/observation/components/ObservationListCard.vue'
-import ObservationRecentAiSection from '@/views/observation/components/ObservationRecentAiSection.vue'
 import ObservationWeekCalendar from '@/views/observation/components/ObservationWeekCalendar.vue'
 import {
   aggregateObsCalendar,
@@ -67,6 +68,14 @@ const sites = ref<FarmSiteSummary[]>([])
 const listAnchor = ref<HTMLElement | null>(null)
 const showFabChoice = ref(false)
 
+/** 메인 탭 캐러셀 안 fixed FAB — body Teleport + 활성 탭만 표시 */
+const mainTabPanelIndex = inject<Ref<number> | null>('mainTabPanelIndex', null)
+const mainTabActiveIndex = inject<Ref<number> | null>('mainTabActiveIndex', null)
+const fabVisible = computed(() => {
+  if (mainTabPanelIndex == null || mainTabActiveIndex == null) return true
+  return mainTabPanelIndex.value === mainTabActiveIndex.value
+})
+
 const calRangeStart = ref(pastRangeStart(todayIso()))
 const calSelectedDt = ref(todayIso())
 const calDays = ref<Record<string, ObsCalDayCounts>>({})
@@ -98,25 +107,29 @@ const recentAiItems = computed(() =>
   mapHomeRecentAiItems(homeWeekItems.value, todayIso()),
 )
 
-const resultStatus = computed(() => {
+const listTitle = computed(() => {
+  const from = appliedDateFrom.value || pastRangeStart(todayIso())
+  const to = appliedDateTo.value || todayIso()
+  const weekTitle = isDefaultHomeWeekRange(from, to, todayIso())
+    ? LABEL_HOME_WEEK_LIST
+    : formatObsListRangeLabel(from, to)
+  if (hasExtraFilter.value && appliedKeyword.value) {
+    return `「${appliedKeyword.value}」 ${weekTitle}`
+  }
+  return weekTitle
+})
+
+const listHint = computed(() => {
   if (loading.value) {
     return hasExtraFilter.value || keyword.value.trim() || siteId.value
       ? '검색 중…'
       : '목록 불러오는 중…'
   }
   if (errorMessage.value) return ''
-  const from = appliedDateFrom.value || pastRangeStart(todayIso())
-  const to = appliedDateTo.value || todayIso()
-  const weekTitle = isDefaultHomeWeekRange(from, to, todayIso())
-    ? LABEL_HOME_WEEK_LIST
-    : formatObsListRangeLabel(from, to)
   if (!items.value.length) {
     return hasExtraFilter.value ? MSG_LIST_EMPTY_FILTER : MSG_LIST_EMPTY
   }
-  if (hasExtraFilter.value && appliedKeyword.value) {
-    return `「${appliedKeyword.value}」 ${weekTitle}`
-  }
-  return weekTitle
+  return ''
 })
 
 async function loadSites() {
@@ -327,17 +340,13 @@ onMounted(async () => {
         @select="onKpiSelect"
       />
 
-      <ObservationAiRiskSection
-        :items="riskItems"
+      <ObservationAiHomeSection
+        :risk-items="riskItems"
+        :recent-items="recentAiItems"
         :loading="homeWeekLoading"
-        @open="goDetail"
-      />
-
-      <ObservationRecentAiSection
-        :items="recentAiItems"
-        :loading="homeWeekLoading"
+        @open-risk="goDetail"
+        @open-recent="goDetail"
         @open-all="onOpenRecentAiAll"
-        @select="goDetail"
       />
 
       <ObservationWeekCalendar
@@ -372,14 +381,20 @@ onMounted(async () => {
 
       <section class="lookup" aria-label="관찰내역">
         <div ref="listAnchor" class="list-anchor">
+          <OdsSectionTitle
+            v-if="!errorMessage"
+            class="lookup__title"
+            :title="listTitle"
+            :icon="iconTitleObservation"
+          />
           <p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
           <p
-            v-else
+            v-else-if="listHint"
             class="status"
             :class="{ 'status--loading': loading }"
             role="status"
           >
-            {{ resultStatus }}
+            {{ listHint }}
           </p>
 
           <div
@@ -397,50 +412,55 @@ onMounted(async () => {
       </section>
     </main>
 
-    <button
-      type="button"
-      class="fab"
-      :aria-label="MSG_FAB_NEW"
-      @click="onFabClick"
-    >
-      <img class="fab__ico" :src="iconCamera" alt="" >
-      {{ MSG_FAB_NEW }}
-    </button>
+    <Teleport to="body">
+      <button
+        v-show="fabVisible"
+        type="button"
+        class="fab"
+        :aria-label="MSG_FAB_NEW"
+        @click="onFabClick"
+      >
+        <img class="fab__ico" :src="iconCamera" alt="" >
+        {{ MSG_FAB_NEW }}
+      </button>
+    </Teleport>
 
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
 
-    <div
-      v-if="showFabChoice"
-      class="sheet"
-      role="dialog"
-      aria-modal="true"
-      aria-label="작성 중 관찰 선택"
-    >
-      <div class="sheet__panel">
-        <p class="sheet__title">작성 중인 관찰이 있습니다</p>
-        <p class="sheet__desc">
-          이어서 작성하거나 새 관찰을 시작할 수 있습니다. 기존 초안은 자동으로
-          이어쓰거나 삭제하지 않습니다.
-        </p>
-        <button
-          type="button"
-          class="sheet__btn sheet__btn--primary"
-          @click="goResume(drafts[0].obs_id)"
-        >
-          ① 이어쓰기
-        </button>
-        <button type="button" class="sheet__btn" @click="goNewBlank">
-          ② 새 관찰
-        </button>
-        <button
-          type="button"
-          class="sheet__btn sheet__btn--ghost"
-          @click="showFabChoice = false"
-        >
-          닫기
-        </button>
+    <Teleport to="body">
+      <div
+        v-if="showFabChoice && fabVisible"
+        class="sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label="작성 중 관찰 선택"
+      >
+        <div class="sheet__panel">
+          <p class="sheet__title">작성 중인 관찰이 있습니다</p>
+          <p class="sheet__desc">
+            이어서 작성하거나 새 관찰을 시작할 수 있습니다. 기존 초안은 자동으로
+            이어쓰거나 삭제하지 않습니다.
+          </p>
+          <button
+            type="button"
+            class="sheet__btn sheet__btn--primary"
+            @click="goResume(drafts[0].obs_id)"
+          >
+            ① 이어쓰기
+          </button>
+          <button type="button" class="sheet__btn" @click="goNewBlank">
+            ② 새 관찰
+          </button>
+          <button
+            type="button"
+            class="sheet__btn sheet__btn--ghost"
+            @click="showFabChoice = false"
+          >
+            닫기
+          </button>
+        </div>
       </div>
-    </div>
+    </Teleport>
 
     <OdsBottomNav />
   </div>
@@ -453,44 +473,45 @@ onMounted(async () => {
   padding-bottom: calc(140px + env(safe-area-inset-bottom));
 }
 .content {
-  /* padding/max-width/gap -> .ods-page-content (AppBar SSOT) */
+  /* AppBar↔다음 블록: ODS 공통 */
+  --ods-page-content-gap: var(--ods-space-16);
 }
 .lookup {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-12);
+  gap: var(--ods-card-block-gap, var(--ods-space-16));
 }
 .lookup-filters {
   min-width: 0;
   /* sticky AppBar 아래로 맞춰 scrollIntoView 가림 방지 */
   scroll-margin-top: calc(
-    env(safe-area-inset-top, 0px) + 56px + var(--ods-space-8)
+    env(safe-area-inset-top, 0px) + var(--ods-space-56) + var(--ods-space-8)
   );
 }
 .list-anchor {
   margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-form-label-gap, var(--ods-space-8));
   scroll-margin-top: calc(
-    env(safe-area-inset-top, 0px) + 56px + var(--ods-space-8)
+    env(safe-area-inset-top, 0px) + var(--ods-space-56) + var(--ods-space-8)
   );
 }
+.lookup__title {
+  display: inline-flex;
+}
 .status {
-  margin: 0 0 var(--ods-space-12);
-  font: var(--ods-font-headline);
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.35;
-  letter-spacing: -0.02em;
-  color: var(--ods-color-text);
+  margin: 0;
+  font: var(--ods-font-form-help);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
 }
 .status--loading {
-  font: var(--ods-font-body-2);
-  font-weight: 600;
-  letter-spacing: 0;
   color: var(--ods-color-ai);
 }
 .error {
-  margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-body-2);
+  margin: 0;
+  font: var(--ods-font-form-help);
   color: var(--ods-color-danger);
 }
 .list {
@@ -500,42 +521,42 @@ onMounted(async () => {
 }
 .fab {
   position: fixed;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: calc(72px + env(safe-area-inset-bottom));
+  right: max(var(--ods-space-16), env(safe-area-inset-right));
+  bottom: calc(var(--ods-space-64) + var(--ods-space-8) + env(safe-area-inset-bottom));
   z-index: 40;
-  min-height: 52px;
-  padding: 0 18px;
+  min-height: var(--ods-button-height);
+  padding: 0 var(--ods-space-16);
   border: none;
-  border-radius: 999px;
+  border-radius: var(--ods-radius-badge);
   background: var(--ods-color-primary);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
-  box-shadow: var(--ods-shadow-card);
+  box-shadow: var(--ods-shadow-fab, var(--ods-shadow-card));
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ods-space-8);
 }
 .fab__ico {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   filter: brightness(0) invert(1);
 }
 .sheet {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(0, 0, 0, 0.45);
+  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
   display: flex;
   align-items: flex-end;
   justify-content: center;
 }
 .sheet__panel {
   width: 100%;
-  max-width: 480px;
+  max-width: var(--ods-page-content-max, 480px);
   background: var(--ods-color-white);
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--ods-radius-card) var(--ods-radius-card) 0 0;
   padding: var(--ods-space-16) var(--ods-space-16)
     calc(var(--ods-space-16) + env(safe-area-inset-bottom));
   display: flex;
@@ -544,20 +565,20 @@ onMounted(async () => {
 }
 .sheet__title {
   margin: 0;
-  font: var(--ods-font-headline);
-  font-weight: 700;
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-text);
 }
 .sheet__desc {
   margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
 .sheet__btn {
-  min-height: 48px;
+  min-height: var(--ods-button-height);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   cursor: pointer;
 }
@@ -573,16 +594,16 @@ onMounted(async () => {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(var(--ods-space-64) + var(--ods-icon-2xl) + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 70;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 2 * var(--ods-space-16)));
   margin: 0;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(33, 33, 33, 0.92);
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-gray-900) 92%, transparent);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 600;
   text-align: center;
   box-shadow: var(--ods-shadow-card);

@@ -32,6 +32,7 @@ const props = defineProps<{
   farmCd: string
   stockAppliedYn?: string
   editingReplace?: boolean
+  detailLocked?: boolean
 }>()
 
 const activeTab = defineModel<DailyWorkTabKey>('activeTab', { required: true })
@@ -44,7 +45,7 @@ const pesticideRows = defineModel<DailyShellPesticideRow[]>('pesticideRows', {
 const emit = defineEmits<{
   edit: []
   copy: []
-  pending: []
+  pending: [message?: string]
   cancelPesticide: []
   editPesticide: []
   removeLaborRes: [resId: number]
@@ -56,12 +57,19 @@ const isPestWork = computed(() =>
   isPesticideWork(props.item.workMidCd || '', props.item.title),
 )
 
+const visibleTabs = computed(() =>
+  props.detailLocked
+    ? DAILY_WORK_TABS.filter((t) => t.key === DAILY_TAB_WORK)
+    : DAILY_WORK_TABS,
+)
+
 function selectTab(key: DailyWorkTabKey) {
+  if (props.detailLocked && key !== DAILY_TAB_WORK) return
   activeTab.value = key
 }
 
-function onPending() {
-  emit('pending')
+function onPending(msg?: string) {
+  emit('pending', msg)
 }
 </script>
 
@@ -95,7 +103,7 @@ function onPending() {
 
     <div class="card__tabs" role="tablist" aria-label="작업 상세 탭">
       <button
-        v-for="tab in DAILY_WORK_TABS"
+        v-for="tab in visibleTabs"
         :key="tab.key"
         type="button"
         role="tab"
@@ -112,25 +120,27 @@ function onPending() {
     <div :key="activeTab" class="card__body" role="tabpanel">
       <template v-if="activeTab === DAILY_TAB_WORK">
         <dl class="rows">
-          <div class="row">
-            <dt>작업내용</dt>
-            <dd>{{ item.title }}</dd>
-          </div>
-          <div class="row">
-            <dt>작업장소</dt>
-            <dd>{{ item.location }}</dd>
+          <div class="row row--pair">
+            <div class="row__col">
+              <dt>작업구분</dt>
+              <dd>{{ item.title }}</dd>
+            </div>
+            <div class="row__col">
+              <dt>작업장소</dt>
+              <dd>{{ item.location || '—' }}</dd>
+            </div>
           </div>
           <div class="row">
             <dt>시작 / 종료</dt>
             <dd>{{ timeRange }}</dd>
           </div>
           <div class="row">
-            <dt>상태</dt>
-            <dd>{{ item.statusLabel }}</dd>
+            <dt>메모</dt>
+            <dd class="row__memo">{{ item.rmk || '—' }}</dd>
           </div>
           <div class="row">
-            <dt>비고</dt>
-            <dd>{{ item.rmk || '—' }}</dd>
+            <dt>상태</dt>
+            <dd>{{ item.statusLabel }}</dd>
           </div>
         </dl>
       </template>
@@ -166,7 +176,8 @@ function onPending() {
       </p>
       <WorkLogDailyWorkPhotoPanel
         v-else-if="activeTab === DAILY_TAB_PHOTO"
-        @pending="onPending"
+        :farm-cd="farmCd"
+        :work-id="item.id"
       />
     </div>
   </section>
@@ -200,11 +211,11 @@ function onPending() {
 
 .card__badge {
   display: inline-block;
-  padding: 3px 8px;
+  padding: var(--ods-space-4) var(--ods-space-8);
   border-radius: var(--ods-radius-badge);
-  background: #e8f5e9;
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
   color: var(--ods-color-primary);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   font-weight: 700;
 }
 
@@ -225,20 +236,20 @@ function onPending() {
   margin: var(--ods-space-8) 0 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--ods-space-4);
 }
 
 .card__meta-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font: var(--ods-font-body-2);
+  gap: var(--ods-space-8);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
 
 .card__meta-item img {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
   opacity: 0.75;
 }
 
@@ -254,45 +265,45 @@ function onPending() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--ods-space-8) var(--ods-space-12);
   border: none;
   border-radius: var(--ods-radius-button);
   background: transparent;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-primary);
   cursor: pointer;
-  min-height: 36px;
+  min-height: var(--ods-button-height-in-card);
 }
 
 .card__edit img {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
 }
 
 .card__copy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--ods-space-8) var(--ods-space-12);
   border: none;
   border-radius: var(--ods-radius-button);
   background: transparent;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-primary);
   cursor: pointer;
-  min-height: 36px;
+  min-height: var(--ods-button-height-in-card);
   white-space: nowrap;
 }
 
 .card__copy img {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
 }
 
 .card__tabs {
@@ -323,14 +334,14 @@ function onPending() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-height: 48px;
+  gap: var(--ods-space-4);
+  min-height: var(--ods-button-height);
   margin: 0 0 -1px;
-  padding: 8px 2px 10px;
+  padding: var(--ods-space-8) var(--ods-space-4);
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text-secondary);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -343,8 +354,8 @@ function onPending() {
 }
 
 .card__tab-ico {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   pointer-events: none;
 }
 
@@ -357,11 +368,25 @@ function onPending() {
 
 .row {
   display: grid;
-  grid-template-columns: 72px 1fr;
+  grid-template-columns: var(--ods-thumb-md) 1fr;
   gap: var(--ods-space-12);
-  font: var(--ods-font-body-2);
-  padding: 10px 0;
+  font: var(--ods-font-form-help);
+  padding: var(--ods-space-8) 0;
   border-bottom: 1px solid var(--ods-color-gray-100);
+}
+
+.row--pair {
+  display: flex;
+  gap: var(--ods-space-12);
+  grid-template-columns: unset;
+}
+
+.row__col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
 }
 
 .row:last-child {
@@ -380,11 +405,16 @@ function onPending() {
   line-height: 1.45;
 }
 
+.row__memo {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .pending {
   margin: 0;
   padding: var(--ods-space-20);
   text-align: center;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
   background: var(--ods-color-bg-muted);
   border-radius: var(--ods-radius-button);

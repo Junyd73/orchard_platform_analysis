@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router'
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 
 import navHome from '@/assets/ods/common/nav-home.svg'
 import navHomeFilled from '@/assets/ods/common/nav-home-filled.svg'
@@ -8,8 +8,8 @@ import navObservation from '@/assets/ods/common/nav-observation.svg'
 import navObservationFilled from '@/assets/ods/common/nav-observation-filled.svg'
 import navWorklog from '@/assets/ods/common/nav-worklog.svg'
 import navWorklogFilled from '@/assets/ods/common/nav-worklog-filled.svg'
-import navOrders from '@/assets/ods/common/nav-orders.svg'
-import navOrdersFilled from '@/assets/ods/common/nav-orders-filled.svg'
+import navPesticide from '@/assets/ods/common/nav-pesticide.svg'
+import navPesticideFilled from '@/assets/ods/common/nav-pesticide-filled.svg'
 import navProfile from '@/assets/ods/common/nav-profile.svg'
 import navProfileFilled from '@/assets/ods/common/nav-profile-filled.svg'
 
@@ -24,6 +24,10 @@ type NavItem = {
 
 const route = useRoute()
 const profileHint = ref('')
+
+/** 메인 탭 캐러셀 패널 안에서는 숨김 — App 바깥 단일 네비 사용(fixed+transform 충돌 방지) */
+const suppressBottomNav = inject<boolean>('mainTabSuppressBottomNav', false)
+const showNav = computed(() => !suppressBottomNav)
 
 const items: NavItem[] = [
   { to: '/', label: '홈', name: 'home', ready: true, icon: navHome, iconActive: navHomeFilled },
@@ -44,12 +48,12 @@ const items: NavItem[] = [
     iconActive: navWorklogFilled,
   },
   {
-    to: '/orders',
-    label: '주문관리',
-    name: 'orders',
+    to: '/pesticide',
+    label: '농약관리',
+    name: 'pesticide',
     ready: true,
-    icon: navOrders,
-    iconActive: navOrdersFilled,
+    icon: navPesticide,
+    iconActive: navPesticideFilled,
   },
   {
     label: '내정보',
@@ -65,6 +69,12 @@ const activePath = computed(() => route.path)
 function isActive(item: NavItem): boolean {
   if (!item.to) return false
   if (item.to === '/') return activePath.value === '/'
+  if (item.name === 'pesticide') {
+    return (
+      activePath.value === '/pesticide'
+      || activePath.value.startsWith('/pesticide/')
+    )
+  }
   return activePath.value === item.to || activePath.value.startsWith(`${item.to}/`)
 }
 
@@ -77,7 +87,7 @@ function onProfileClick() {
 </script>
 
 <template>
-  <nav class="ods-nav" aria-label="하단 메뉴">
+  <nav v-if="showNav" class="ods-nav" aria-label="하단 메뉴">
     <template v-for="item in items" :key="item.name">
       <RouterLink
         v-if="item.ready && item.to"
@@ -104,7 +114,7 @@ function onProfileClick() {
       </button>
     </template>
   </nav>
-  <p v-if="profileHint" class="ods-nav__toast" role="status">{{ profileHint }}</p>
+  <p v-if="showNav && profileHint" class="ods-nav__toast" role="status">{{ profileHint }}</p>
 </template>
 
 <style scoped>
@@ -142,9 +152,19 @@ function onProfileClick() {
   cursor: pointer;
 }
 .ods-nav__icon {
-  width: 24px;
-  height: 24px;
+  width: var(--ods-icon-2xl);
+  height: var(--ods-icon-2xl);
   color: currentColor;
+}
+.ods-nav__label {
+  max-width: 100%;
+  padding: 0 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
 }
 .ods-nav__item.is-active {
   color: var(--ods-color-primary);
@@ -156,7 +176,7 @@ function onProfileClick() {
 .ods-nav__toast {
   position: fixed;
   left: 50%;
-  bottom: calc(72px + env(safe-area-inset-bottom));
+  bottom: calc(var(--ods-space-64) + var(--ods-space-8) + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 60;
   margin: 0;

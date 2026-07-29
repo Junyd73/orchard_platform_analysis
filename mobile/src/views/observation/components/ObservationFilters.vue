@@ -154,15 +154,16 @@ function onQuick(days: number) {
   flex: 1;
 }
 .field__label {
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-card-section);
+  color: var(--ods-color-text-label, var(--ods-color-text-secondary));
 }
 .select {
-  height: 44px;
+  height: var(--ods-control-height);
+  min-height: var(--ods-control-height);
   padding: 0 var(--ods-space-12);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-value);
   background: var(--ods-color-white);
   color: var(--ods-color-text);
 }
@@ -179,7 +180,7 @@ function onQuick(days: number) {
 .dates__tilde {
   flex-shrink: 0;
   color: var(--ods-color-text-secondary);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
 }
 .quick {
   display: flex;
@@ -187,12 +188,11 @@ function onQuick(days: number) {
 }
 .quick__btn {
   margin: 0;
-  padding: 6px 12px;
+  padding: var(--ods-space-4) var(--ods-space-12);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-badge);
   background: var(--ods-color-bg-muted);
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text);
   cursor: pointer;
 }
@@ -210,17 +210,19 @@ function onQuick(days: number) {
   min-width: 0;
 }
 .search-row :deep(.ods-input) {
-  height: 44px;
+  height: var(--ods-control-height);
+  min-height: var(--ods-control-height);
 }
 .search-btn {
-  height: 44px;
-  min-width: 72px;
+  height: var(--ods-control-height);
+  min-height: var(--ods-control-height);
+  min-width: var(--ods-thumb-md);
   padding: 0 var(--ods-space-16);
   border: none;
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-primary);
   color: var(--ods-color-white);
-  font: var(--ods-font-body-1);
+  font: var(--ods-font-form-value);
   font-weight: 600;
   cursor: pointer;
 }

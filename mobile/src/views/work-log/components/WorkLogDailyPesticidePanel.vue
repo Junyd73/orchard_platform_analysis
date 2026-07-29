@@ -1,37 +1,59 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import {
   fetchWorkLogPesticideItems,
   type WorkLogPesticideItemOption,
 } from '@/api/workLogs'
+import iconEdit from '@/assets/ods/scr004/icon-edit.svg'
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
+import iconTrash from '@/assets/ods/scr004/icon-trash.svg'
 import WorkLogDailyPickSheet from '@/views/work-log/components/WorkLogDailyPickSheet.vue'
 import {
+  loadRecentPurposes,
+  MSG_STOCK_LINK,
+  PLACEHOLDER_PURPOSE,
+} from '@/views/pesticide/pesticideConstants'
+import {
+  availablePesticideQty,
   createEmptyPesticideRow,
   MSG_PESTICIDE_EMPTY,
   MSG_PESTICIDE_HINT,
   MSG_PESTICIDE_NOT_TARGET,
+  MSG_PESTICIDE_REMOVE_CONFIRM,
+  msgPesticideStockShort,
   PLACEHOLDER_SELECT,
   type DailyShellPesticideRow,
 } from '@/views/work-log/workLogConstants'
 
 const listed = defineModel<DailyShellPesticideRow[]>({ default: () => [] })
 
-const props = defineProps<{
-  farmCd: string
-  /** 방제/약제살포 작업일 때만 빈문구·추가 노출 */
-  isPesticideWork?: boolean
-  stockAppliedYn?: string
-  readOnly?: boolean
-  editingReplace?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    farmCd: string
+    /** 방제/약제살포 작업일 때만 빈문구·추가 노출 */
+    isPesticideWork?: boolean
+    stockAppliedYn?: string
+    readOnly?: boolean
+    editingReplace?: boolean
+    /** 재고 보기 링크 (홈 간략등록 모달 등에서는 숨김) */
+    showStockLink?: boolean
+  }>(),
+  {
+    // Boolean prop 미전달 시 Vue가 false로 캐스팅하므로 기본 true
+    isPesticideWork: true,
+    showStockLink: true,
+  },
+)
 
 const emit = defineEmits<{
-  pending: []
+  pending: [message?: string]
   cancelUse: []
   editBegin: []
 }>()
+
+const router = useRouter()
 
 const isPestTarget = computed(() => props.isPesticideWork !== false)
 
@@ -43,9 +65,18 @@ const canEditLines = computed(
 )
 
 const draft = ref<DailyShellPesticideRow | null>(null)
+/** 수정 중인 목록 행 id (null이면 신규 추가) */
+const editingId = ref<string | null>(null)
 const items = ref<WorkLogPesticideItemOption[]>([])
 const pickOpen = ref(false)
 let seq = 0
+
+const isEditing = computed(() => editingId.value != null)
+
+/** 확정(재고 차감) 건을 화면에서 수정 중이면 목록 수량을 가용 재고에 환원 */
+const stockCommitted = computed(
+  () => props.stockAppliedYn === 'Y' || !!props.editingReplace,
+)
 
 const itemOptions = computed(() =>
   items.value.map((it) => ({
@@ -56,6 +87,16 @@ const itemOptions = computed(() =>
   })),
 )
 
+const recentPurposes = computed(() => loadRecentPurposes(props.farmCd))
+
+function goStock() {
+  void router.push({ name: 'pesticide' })
+}
+
+function applyPurpose(purpose: string) {
+  if (draft.value) draft.value.purpose = purpose
+}
+
 onMounted(async () => {
   try {
     items.value = (await fetchWorkLogPesticideItems(props.farmCd)) || []
@@ -64,13 +105,34 @@ onMounted(async () => {
   }
 })
 
+function clearDraft() {
+  draft.value = null
+  editingId.value = null
+  pickOpen.value = false
+}
+
 function onAdd() {
   if (draft.value) {
-    draft.value = null
+    clearDraft()
     return
   }
   seq += 1
+  editingId.value = null
   draft.value = createEmptyPesticideRow(`pest-draft-${seq}`)
+}
+
+function onEditRow(row: DailyShellPesticideRow) {
+  if (!canEditLines.value) return
+  editingId.value = row.id
+  draft.value = { ...row }
+  pickOpen.value = false
+}
+
+function onRemoveRow(row: DailyShellPesticideRow) {
+  if (!canEditLines.value) return
+  if (!window.confirm(MSG_PESTICIDE_REMOVE_CONFIRM)) return
+  if (editingId.value === row.id) clearDraft()
+  listed.value = listed.value.filter((r) => r.id !== row.id)
 }
 
 function onPickItem(value: string, _label: string) {
@@ -95,8 +157,33 @@ function confirmDraft() {
     emit('pending')
     return
   }
-  listed.value = [...listed.value, row]
-  draft.value = null
+  const catalog = items.value.find((x) => Number(x.item_id) === iid)
+  if (!catalog) {
+    emit('pending', '선택한 농약 품목을 찾을 수 없습니다.')
+    return
+  }
+  const available = availablePesticideQty({
+    stockQty: Number(catalog.qty_piece || 0),
+    listed: listed.value,
+    itemId: iid,
+    editingId: editingId.value,
+    stockCommitted: stockCommitted.value,
+  })
+  if (qty > available) {
+    emit(
+      'pending',
+      msgPesticideStockShort(row.itemNm || catalog.item_nm, available, qty),
+    )
+    return
+  }
+  if (editingId.value) {
+    listed.value = listed.value.map((r) =>
+      r.id === editingId.value ? { ...row, id: r.id } : r,
+    )
+  } else {
+    listed.value = [...listed.value, row]
+  }
+  clearDraft()
 }
 </script>
 
@@ -106,7 +193,17 @@ function confirmDraft() {
       <p class="panel__empty">{{ MSG_PESTICIDE_NOT_TARGET }}</p>
     </template>
     <template v-else>
-      <p class="panel__hint">{{ MSG_PESTICIDE_HINT }}</p>
+      <div class="panel__top">
+        <p class="panel__hint">{{ MSG_PESTICIDE_HINT }}</p>
+        <button
+          v-if="showStockLink"
+          type="button"
+          class="panel__stock"
+          @click="goStock"
+        >
+          {{ MSG_STOCK_LINK }}
+        </button>
+      </div>
       <p v-if="stockAppliedYn === 'Y' && !editingReplace" class="panel__applied">
         재고 확정됨 — 「수정」은 저장 시에만 반영됩니다. 「사용 취소」는 즉시 복원합니다.
       </p>
@@ -132,12 +229,43 @@ function confirmDraft() {
       </div>
 
       <ul v-if="listed.length > 0" class="list" aria-label="등록 농약">
-        <li v-for="row in listed" :key="row.id" class="list__item">
-          <p class="list__title">{{ row.itemNm || `품목#${row.itemId}` }}</p>
-          <p class="list__meta">
-            {{ row.spec || '규격 —' }} · 수량 {{ row.useQty }}
-            <template v-if="row.purpose"> · {{ row.purpose }}</template>
-          </p>
+        <li
+          v-for="row in listed"
+          :key="row.id"
+          class="list__item"
+          :class="{ 'list__item--on': editingId === row.id }"
+        >
+          <button
+            type="button"
+            class="list__body"
+            :aria-label="`${row.itemNm || '농약'} 수정`"
+            :disabled="!canEditLines"
+            @click="onEditRow(row)"
+          >
+            <p class="list__title">{{ row.itemNm || `품목#${row.itemId}` }}</p>
+            <p class="list__meta">
+              {{ row.spec || '규격 —' }} · 수량 {{ row.useQty }}
+              <template v-if="row.purpose"> · {{ row.purpose }}</template>
+            </p>
+          </button>
+          <template v-if="canEditLines">
+            <button
+              type="button"
+              class="list__edit"
+              :aria-label="`${row.itemNm || '농약'} 수정`"
+              @click="onEditRow(row)"
+            >
+              <img :src="iconEdit" alt="" />
+            </button>
+            <button
+              type="button"
+              class="list__del"
+              :aria-label="`${row.itemNm || '농약'} 삭제`"
+              @click="onRemoveRow(row)"
+            >
+              <img :src="iconTrash" alt="" />
+            </button>
+          </template>
         </li>
       </ul>
       <p v-else class="panel__empty">{{ MSG_PESTICIDE_EMPTY }}</p>
@@ -146,15 +274,20 @@ function confirmDraft() {
         <button
           type="button"
           class="panel__add"
-          :class="{ 'panel__add--on': !!draft }"
+          :class="{ 'panel__add--on': !!draft && !isEditing }"
           :aria-expanded="!!draft"
           @click="onAdd"
         >
           <img :src="iconPlus" alt="" />
-          {{ draft ? '입력 닫기' : '농약추가' }}
+          {{ draft && !isEditing ? '입력 닫기' : '농약추가' }}
         </button>
 
-        <article v-if="draft" class="row-card" aria-label="농약 입력">
+        <article
+          v-if="draft"
+          class="row-card"
+          :aria-label="isEditing ? '농약 수정' : '농약 입력'"
+        >
+          <p v-if="isEditing" class="row-card__badge">수정 중</p>
           <label class="field">
             <span class="field__label">농약명</span>
             <button type="button" class="field__select" @click="pickOpen = true">
@@ -183,11 +316,37 @@ function confirmDraft() {
           </label>
           <label class="field">
             <span class="field__label">용도</span>
-            <input v-model="draft.purpose" class="field__input" type="text" />
+            <input
+              v-model="draft.purpose"
+              class="field__input"
+              type="text"
+              :placeholder="PLACEHOLDER_PURPOSE"
+            />
           </label>
-          <button type="button" class="panel__confirm" @click="confirmDraft">
-            농약 등록
-          </button>
+          <div v-if="recentPurposes.length" class="purpose-chips">
+            <button
+              v-for="p in recentPurposes"
+              :key="p"
+              type="button"
+              class="purpose-chips__btn"
+              @click="applyPurpose(p)"
+            >
+              {{ p }}
+            </button>
+          </div>
+          <div class="row-card__actions">
+            <button
+              v-if="isEditing"
+              type="button"
+              class="panel__cancel-edit"
+              @click="clearDraft"
+            >
+              취소
+            </button>
+            <button type="button" class="panel__confirm" @click="confirmDraft">
+              {{ isEditing ? '농약 수정' : '농약 등록' }}
+            </button>
+          </div>
         </article>
       </template>
 
@@ -206,68 +365,107 @@ function confirmDraft() {
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ods-space-12);
   min-width: 0;
   max-width: 100%;
+}
+.panel__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+}
+.panel__stock {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  min-height: var(--ods-hit-sm);
+  font: var(--ods-font-form-help);
+  font-weight: 700;
+  color: var(--ods-color-primary);
+  cursor: pointer;
+}
+.purpose-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ods-space-8);
+}
+.purpose-chips__btn {
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-badge);
+  background: var(--ods-color-white);
+  padding: var(--ods-space-4) var(--ods-space-8);
+  font: var(--ods-font-card-section);
+  color: var(--ods-color-text);
+  cursor: pointer;
 }
 .panel__hint,
 .panel__empty,
 .panel__applied {
   margin: 0;
-  font-size: 13px;
-  color: #8a8074;
+  font: var(--ods-font-form-help);
+  color: var(--ods-color-text-secondary);
   overflow-wrap: anywhere;
 }
 .panel__applied {
-  color: #c62828;
+  color: var(--ods-color-danger);
   font-weight: 600;
 }
 .panel__add,
 .panel__cancel,
 .panel__edit,
-.panel__confirm {
+.panel__confirm,
+.panel__cancel-edit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 40px;
-  border-radius: 10px;
-  font-size: 14px;
+  gap: var(--ods-space-8);
+  min-height: var(--ods-button-height-in-card);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-form-value);
   font-weight: 600;
 }
 .panel__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--ods-space-8);
 }
 .panel__edit {
-  border: 1px solid #c5b8a4;
-  background: #fff;
-  color: #5c5346;
-  padding: 0 14px;
+  border: 1px solid var(--ods-color-border);
+  background: var(--ods-color-white);
+  color: var(--ods-color-text);
+  padding: 0 var(--ods-space-12);
 }
 .panel__add {
-  border: 1px dashed #c5b8a4;
-  background: #fff;
-  color: #5c5348;
+  border: 1px dashed var(--ods-color-border);
+  background: var(--ods-color-white);
+  color: var(--ods-color-text);
 }
 .panel__add--on {
   border-style: solid;
-  background: #f7f2ea;
+  background: var(--ods-color-gray-100);
 }
 .panel__add img {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
 }
 .panel__cancel {
-  border: 1px solid #c62828;
-  background: #fff;
-  color: #c62828;
+  border: 1px solid var(--ods-color-danger);
+  background: var(--ods-color-white);
+  color: var(--ods-color-danger);
+}
+.panel__cancel-edit {
+  flex: 1;
+  border: 1px solid var(--ods-color-border);
+  background: var(--ods-color-white);
+  color: var(--ods-color-text);
 }
 .panel__confirm {
+  flex: 1;
   border: none;
-  background: #2e7d4f;
-  color: #fff;
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
 }
 .list {
   list-style: none;
@@ -275,75 +473,130 @@ function confirmDraft() {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--ods-space-8);
   min-width: 0;
 }
 .list__item {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #f7f2ea;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  padding: var(--ods-space-8) var(--ods-space-8) var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-gray-100);
   min-width: 0;
+  border: 2px solid transparent;
+}
+.list__item--on {
+  border-color: var(--ods-color-primary);
+  background: color-mix(in srgb, var(--ods-color-primary) 8%, white);
+}
+.list__body {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.list__body:disabled {
+  cursor: default;
 }
 .list__title {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 0 0 var(--ods-space-4);
+  font: var(--ods-font-form-value);
   font-weight: 600;
+  color: var(--ods-color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .list__meta {
   margin: 0;
-  font-size: 12px;
-  color: #6b6358;
+  font: var(--ods-font-card-section);
+  color: var(--ods-color-text-secondary);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.list__edit,
+.list__del {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ods-button-height-in-card);
+  height: var(--ods-button-height-in-card);
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--ods-radius-button);
+  background: transparent;
+  cursor: pointer;
+}
+.list__edit img,
+.list__del img {
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
+  opacity: 0.7;
 }
 .row-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e8e0d4;
+  gap: var(--ods-space-12);
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  border: 1px solid var(--ods-color-border);
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
 }
+.row-card__badge {
+  margin: 0;
+  font: var(--ods-font-card-section);
+  font-weight: 700;
+  color: var(--ods-color-primary);
+}
+.row-card__actions {
+  display: flex;
+  gap: var(--ods-space-8);
+}
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--ods-space-4);
   min-width: 0;
 }
 .field__label {
-  font-size: 12px;
-  color: #6b6358;
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-text-label, var(--ods-color-text));
 }
 .field__input,
 .field__select {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid #d9d0c3;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 14px;
+  height: var(--ods-control-height);
+  min-height: var(--ods-control-height);
+  padding: 0 var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  font: var(--ods-font-form-value);
+  color: var(--ods-color-text);
   text-align: left;
 }
 .field__input--ro {
-  background: #f7f2ea;
-  color: #6b6358;
+  background: var(--ods-color-gray-100);
+  color: var(--ods-color-text-secondary);
 }
 .field__select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--ods-space-8);
 }
 .field__select span:first-child {
   overflow: hidden;
@@ -353,6 +606,6 @@ function confirmDraft() {
 }
 .field__chev {
   flex-shrink: 0;
-  color: #a39a8c;
+  color: var(--ods-color-gray-500);
 }
 </style>

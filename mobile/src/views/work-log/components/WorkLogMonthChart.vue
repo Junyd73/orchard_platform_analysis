@@ -32,10 +32,10 @@ const bars = computed(() => {
 
 const isEmpty = computed(() => bars.value.every((b) => b.count === 0))
 
-const axisLabels = computed(() => {
+const axisLabels = computed((): number[] => {
   const last = daysInMonth(props.year, props.month)
-  const labels = [...AXIS]
-  if (!labels.includes(last as (typeof AXIS)[number])) labels.push(last)
+  const labels: number[] = [...AXIS]
+  if (!labels.includes(last)) labels.push(last)
   return labels
 })
 
@@ -116,12 +116,12 @@ function clearTip() {
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-gray-900);
   color: var(--ods-color-white);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   font-weight: 600;
 }
 .chart__plot {
   position: relative;
-  height: 80px;
+  height: calc(var(--ods-space-64) + var(--ods-space-16));
 }
 .chart__grid {
   position: absolute;
@@ -141,8 +141,8 @@ function clearTip() {
   z-index: 1;
   display: flex;
   align-items: flex-end;
-  gap: 3px;
-  height: 80px;
+  gap: var(--ods-space-4);
+  height: calc(var(--ods-space-64) + var(--ods-space-16));
 }
 .chart__bar {
   flex: 1;
@@ -170,7 +170,7 @@ function clearTip() {
   display: flex;
   justify-content: space-between;
   margin-top: var(--ods-space-8);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 </style>

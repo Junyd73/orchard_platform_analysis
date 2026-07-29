@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,13 +46,22 @@ WORK_MAIN_CD = "WK01"
 # m_common_code WK01 — 모바일 캘린더·요약 필터와 동일
 WORK_MID_CD_PESTICIDE = "WK010200"  # 방제/약제살포
 WORK_MID_CD_FERTILIZER = "WK010800"  # 비료/영양제작업
+WORK_MID_CD_OTHER = "WK010600"  # 기타작업
 MSG_FUTURE = "영농일지는 오늘까지만 작성할 수 있습니다."
+MSG_FUTURE_DETAIL = (
+    "미래 일자의 인력·경비·농약·최종승인은 할 수 없습니다. "
+    "기본정보만 준비중으로 등록해 주세요."
+)
+MSG_FUTURE_STATUS = "미래 일자는 준비중(WO010100) 상태만 저장할 수 있습니다."
 MSG_FARM_LOCATION_MISSING = (
     "농장의 위도·경도·격자 정보가 없습니다. "
     "과수원 관리에서 위치를 먼저 저장해 주세요."
 )
 MSG_WEATHER_FETCH_FAILED = "날씨 데이터를 가져오지 못했습니다."
+STATUS_PREPARING_CD = "WO010100"
 STATUS_IN_PROGRESS_CD = "WO010200"
+STATUS_DONE_CD = "WO010300"
+STATUS_CANCEL_CD = "WO010400"
 # PC WeatherManager.PARTNER / _dashboard_weather_text 와 동일 (core import 회피)
 WEATHER_NM_BY_CD = {
     "WT010100": "맑음",
@@ -112,6 +121,58 @@ def _ensure_not_future(work_dt: str) -> None:
         raise BusinessRuleError(MSG_FUTURE)
 
 
+def _ensure_date(work_dt: str) -> str:
+    dt = _norm_dt(work_dt)
+    if not _DATE_RE.match(dt):
+        raise BusinessRuleError("작업일은 YYYY-MM-DD 형식이어야 합니다.")
+    return dt
+
+
+def _is_future_dt(work_dt: str) -> bool:
+    return work_dt > date.today().isoformat()
+
+
+def _normalize_status_for_date(work_dt: str, status_cd: str | None) -> str | None:
+    """미래일은 준비중만 허용. 없으면 준비중 기본."""
+    st = _s(status_cd) or None
+    if _is_future_dt(work_dt):
+        if st and st != STATUS_PREPARING_CD:
+            raise BusinessRuleError(MSG_FUTURE_STATUS)
+        return STATUS_PREPARING_CD
+    return st
+
+
+def _calendar_grid_range(year: int, month: int) -> tuple[str, str, str, str]:
+    """월간 캘린더(일~토) 그리드 범위 + 해당 월 범위.
+
+    Returns:
+        grid_start, grid_end_excl, month_start, month_end_excl (YYYYMMDD)
+    """
+    first = date(year, month, 1)
+    # Python weekday Mon=0..Sun=6 → 일요일 시작 인덱스
+    sun0 = (first.weekday() + 1) % 7
+    grid_start = first - timedelta(days=sun0)
+    if month == 12:
+        month_end = date(year + 1, 1, 1)
+    else:
+        month_end = date(year, month + 1, 1)
+    last = month_end - timedelta(days=1)
+    last_sun0 = (last.weekday() + 1) % 7
+    pad = (6 - last_sun0) % 7
+    grid_end = last + timedelta(days=pad + 1)
+    return (
+        grid_start.strftime("%Y%m%d"),
+        grid_end.strftime("%Y%m%d"),
+        first.strftime("%Y%m%d"),
+        month_end.strftime("%Y%m%d"),
+    )
+
+
+def _dt_in_month_keys(dt: str, month_start: str, month_end: str) -> bool:
+    key = dt.replace("-", "")[:8]
+    return month_start <= key < month_end
+
+
 def _classify_in_progress(status_cd: str, status_nm: str) -> bool:
     nm = _s(status_nm)
     cd = _s(status_cd).upper()
@@ -134,6 +195,14 @@ def _is_fertilizer_work(mid_cd: str, mid_nm: str) -> bool:
         return True
     nm = _s(mid_nm)
     return "비료" in nm or "영양제" in nm
+
+
+def _is_other_work(mid_cd: str, mid_nm: str) -> bool:
+    cd = _s(mid_cd).upper()
+    if cd == WORK_MID_CD_OTHER:
+        return True
+    nm = _s(mid_nm)
+    return "기타작업" in nm or nm == "기타"
 
 
 def _weather_nm_fallback(weather_cd: str) -> str:
@@ -332,6 +401,69 @@ class WorkLogService:
             return None
         return data if isinstance(data, dict) and data else None
 
+    def _load_weather_cache_range(
+        self, farm_cd: str, start_key: str, end_key: str
+    ) -> dict[str, dict[str, Any]]:
+        """그리드 구간 t_weather_cache 일괄 조회. 테이블 없으면 빈 dict."""
+        wk = _dt_key_sql("weather_dt")
+        try:
+            with get_sqlite_connection(self._db_path) as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT weather_dt, weather_json
+                    FROM t_weather_cache
+                    WHERE farm_cd = ?
+                      AND ({wk}) >= ? AND ({wk}) < ?
+                    """,
+                    (farm_cd, start_key, end_key),
+                ).fetchall()
+        except sqlite3.Error:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows or []:
+            dt = _norm_dt(row["weather_dt"])
+            if not dt:
+                continue
+            raw = row["weather_json"] if isinstance(row, sqlite3.Row) else row[1]
+            try:
+                data = json.loads(_s(raw) or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict) and data:
+                out[dt] = data
+        return out
+
+    def _enrich_monthly_days_from_weather_cache(
+        self,
+        farm: str,
+        days: dict[str, WorkLogDayCell],
+        *,
+        start_key: str,
+        end_key: str,
+    ) -> None:
+        """일간과 동일: master 기상 우선, 없으면 t_weather_cache로 보강."""
+        for dt, payload in self._load_weather_cache_range(
+            farm, start_key, end_key
+        ).items():
+            cd = _s(payload.get("weather_cd"))
+            label = _weather_label_from_cache(payload)
+            if not cd and not label:
+                continue
+            cell = days.get(dt)
+            if cell is None:
+                days[dt] = WorkLogDayCell(
+                    work_dt=dt,
+                    weather_cd=cd,
+                    weather_nm=label or "-",
+                )
+                continue
+            if _s(cell.weather_cd):
+                continue
+            cell.weather_cd = cd
+            nm = _s(cell.weather_nm)
+            if not nm or nm == "-":
+                cell.weather_nm = label or "-"
+
     def get_monthly(
         self, farm_cd: str, *, year: int, month: int
     ) -> WorkLogMonthlyResponse:
@@ -345,11 +477,12 @@ class WorkLogService:
         if year < 1 or month < 1 or month > 12:
             return empty
 
-        start_key = f"{year:04d}{month:02d}01"
-        if month == 12:
-            end_key = f"{year + 1:04d}0101"
-        else:
-            end_key = f"{year:04d}{month + 1:02d}01"
+        # days: 캘린더 그리드(앞·뒷달 패딩 포함) · summary: 해당 월만
+        grid_start, grid_end, month_start, month_end = _calendar_grid_range(
+            year, month
+        )
+        start_key = grid_start
+        end_key = grid_end
 
         mk = _dt_key_sql("m.work_dt")
         wk = _dt_key_sql("d.work_dt")
@@ -375,6 +508,7 @@ class WorkLogService:
                 f"""
                 SELECT
                     d.work_id, d.work_dt, d.work_mid_cd, d.status_cd,
+                    COALESCE(d.rmk, '') AS rmk,
                     COALESCE(st.code_nm, '') AS status_nm,
                     COALESCE(NULLIF(TRIM(mid.code_nm), ''), TRIM(d.work_mid_cd), '-')
                         AS work_mid_nm,
@@ -449,6 +583,7 @@ class WorkLogService:
             dt = _norm_dt(row["work_dt"])
             if not dt:
                 continue
+            in_month = _dt_in_month_keys(dt, month_start, month_end)
             cell = days.get(dt)
             if cell is None:
                 cell = WorkLogDayCell(work_dt=dt)
@@ -457,21 +592,39 @@ class WorkLogService:
             cell.work_count += 1
             mid_cd = _s(row["work_mid_cd"])
             nm = _s(row["work_mid_nm"]) or "-"
+            rmk = _s(row["rmk"]) or None
             if nm not in cell.work_names:
                 cell.work_names.append(nm)
-            if not any(
+            status_cd = _s(row["status_cd"]) or None
+            # 기타작업은 메모별로 각각 표시 · 그 외 mid는 이름 중복 제거
+            if _is_other_work(mid_cd, nm):
+                cell.work_items.append(
+                    WorkLogDayWorkItem(
+                        work_mid_cd=mid_cd,
+                        work_mid_nm=nm,
+                        status_cd=status_cd,
+                        rmk=rmk,
+                    )
+                )
+            elif not any(
                 it.work_mid_cd == mid_cd and it.work_mid_nm == nm
                 for it in cell.work_items
             ):
                 cell.work_items.append(
-                    WorkLogDayWorkItem(work_mid_cd=mid_cd, work_mid_nm=nm)
+                    WorkLogDayWorkItem(
+                        work_mid_cd=mid_cd,
+                        work_mid_nm=nm,
+                        status_cd=status_cd,
+                        rmk=rmk,
+                    )
                 )
             cell.labor_sum += float(row["labor_sum"] or 0)
             cell.expense_sum += float(row["expense_sum"] or 0)
-            if _is_pesticide_work(mid_cd, nm):
-                pesticide_count += 1
-            elif _is_fertilizer_work(mid_cd, nm):
-                fertilizer_count += 1
+            if in_month:
+                if _is_pesticide_work(mid_cd, nm):
+                    pesticide_count += 1
+                elif _is_fertilizer_work(mid_cd, nm):
+                    fertilizer_count += 1
             if _classify_in_progress(
                 _s(row["status_cd"]), _s(row["status_nm"])
             ):
@@ -492,8 +645,14 @@ class WorkLogService:
                 days[dt] = cell
             cell.resource_count += 1
             cell.labor_hour_sum = float(cell.labor_hour_sum or 0) + hours
-            month_emp_ids.add(emp)
-            labor_hour_sum += hours
+            if _dt_in_month_keys(dt, month_start, month_end):
+                month_emp_ids.add(emp)
+                labor_hour_sum += hours
+
+        # 일간과 동일: 영농일지 없는 날도 t_weather_cache 기상 표시
+        self._enrich_monthly_days_from_weather_cache(
+            farm, days, start_key=start_key, end_key=end_key
+        )
 
         work_day_count = 0
         work_count = 0
@@ -506,7 +665,9 @@ class WorkLogService:
             cell.work_names = names
             cell.total_cost = float(cell.labor_sum or 0) + float(cell.expense_sum or 0)
             cell.labor_hour_sum = round(float(cell.labor_hour_sum or 0), 1)
-            if cell.has_work:
+            if cell.has_work and _dt_in_month_keys(
+                cell.work_dt, month_start, month_end
+            ):
                 work_day_count += 1
                 work_count += int(cell.work_count or 0)
                 labor_sum += float(cell.labor_sum or 0)
@@ -619,6 +780,16 @@ class WorkLogService:
                 end_tm=_s(r["end_tm"]) or None,
                 status_cd=_s(r["status_cd"]) or None,
                 status_nm=_s(r["status_nm"]) or None,
+                google_event_id=(
+                    (_s(r["google_event_id"]) or None)
+                    if "google_event_id" in r.keys()
+                    else None
+                ),
+                sync_status=(
+                    (_s(r["sync_status"]) or None)
+                    if "sync_status" in r.keys()
+                    else None
+                ),
             )
             for r in rows
         ]
@@ -777,7 +948,8 @@ class WorkLogService:
         dt = _norm_dt(work_dt)
         if not _DATE_RE.match(dt):
             raise BusinessRuleError("작업일은 YYYY-MM-DD 형식이어야 합니다.")
-        _ensure_not_future(dt)
+        if _is_future_dt(dt):
+            raise BusinessRuleError(MSG_FUTURE_DETAIL)
         uid = _s(user_id) or "MOBILE"
 
         master_req = body.master
@@ -1175,8 +1347,7 @@ class WorkLogService:
         )
 
         farm = self._ensure_farm(farm_cd)
-        dt = _norm_dt(work_dt)
-        _ensure_not_future(dt)
+        dt = _ensure_date(work_dt)
         uid = _s(user_id) or "MOBILE"
         items = list(body.works or [])
         digits = dt.replace("-", "")
@@ -1193,6 +1364,7 @@ class WorkLogService:
                 raise BusinessRuleError("시작 시각은 HH:MM 형식이어야 합니다.")
             if end and not _TIME_RE.match(end):
                 raise BusinessRuleError("종료 시각은 HH:MM 형식이어야 합니다.")
+            status = _normalize_status_for_date(dt, item.status_cd)
             wid = _s(item.work_id) or f"{digits}-{i + 1:02d}"
             if not wid.startswith(digits):
                 wid = f"{digits}-{i + 1:02d}"
@@ -1205,7 +1377,7 @@ class WorkLogService:
                     rmk=_s(item.rmk) or None,
                     start_tm=start,
                     end_tm=end,
-                    status_cd=_s(item.status_cd) or None,
+                    status_cd=status,
                     pesticide_lines=[],
                 )
             )
@@ -1276,9 +1448,15 @@ class WorkLogService:
         if not wid:
             raise BusinessRuleError("삭제할 작업이 없습니다.")
         with get_sqlite_write_connection(self._db_path) as conn:
+            cols = {
+                str(r[1]) for r in conn.execute("PRAGMA table_info(t_work_detail)")
+            }
+            select_cols = "work_dt"
+            if "google_event_id" in cols:
+                select_cols = "work_dt, google_event_id"
             row = conn.execute(
-                """
-                SELECT work_dt FROM t_work_detail
+                f"""
+                SELECT {select_cols} FROM t_work_detail
                 WHERE farm_cd = ? AND work_id = ?
                 """,
                 (farm, wid),
@@ -1286,6 +1464,11 @@ class WorkLogService:
             if not row:
                 raise EntityNotFoundError("Work not found")
             dt = _norm_dt(row["work_dt"])
+            google_eid = (
+                _s(row["google_event_id"])
+                if "google_event_id" in cols
+                else ""
+            )
             self._assert_can_delete_work(conn, farm, wid)
             conn.execute(
                 "DELETE FROM t_work_detail WHERE farm_cd = ? AND work_id = ?",
@@ -1303,6 +1486,17 @@ class WorkLogService:
             except Exception:  # noqa: BLE001
                 pass
             conn.commit()
+        if google_eid:
+            try:
+                from app.services.google_calendar_service import (  # noqa: WPS433
+                    GoogleCalendarService,
+                )
+
+                GoogleCalendarService(self._db_path).delete_work_event(
+                    farm, wid, google_event_id=google_eid
+                )
+            except Exception:  # noqa: BLE001
+                pass
         return WorkLogSaveResponse(
             work_dt=dt, farm_cd=farm, message="작업이 삭제되었습니다."
         )

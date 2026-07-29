@@ -5,6 +5,7 @@ import iconClipboard from '@/assets/ods/work-log/icon-clipboard.svg'
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 import {
   MSG_TIMELINE_EMPTY,
+  BTN_GOOGLE_IMPORT,
   type DailyTimelineItem,
 } from '@/views/work-log/workLogConstants'
 
@@ -19,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: string]
   add: []
+  importGoogle: []
 }>()
 
 const isEmpty = computed(() => props.items.length === 0)
@@ -74,15 +76,23 @@ const showMoreHint = computed(
   <section class="tl" aria-label="작업 타임라인">
     <div class="tl__head">
       <h2 class="tl__title">작업 타임라인</h2>
-      <button
-        v-if="!isEmpty"
-        type="button"
-        class="tl__add"
-        @click="emit('add')"
-      >
-        <img :src="iconPlus" alt="" />
-        작업 추가
-      </button>
+      <div class="tl__actions">
+        <button
+          type="button"
+          class="tl__action"
+          @click="emit('importGoogle')"
+        >
+          {{ BTN_GOOGLE_IMPORT }}
+        </button>
+        <button
+          type="button"
+          class="tl__action"
+          @click="emit('add')"
+        >
+          <img :src="iconPlus" alt="" />
+          작업 추가
+        </button>
+      </div>
     </div>
 
     <div v-if="isEmpty" class="tl__empty">
@@ -151,32 +161,45 @@ const showMoreHint = computed(
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--ods-space-8);
 }
 
 .tl__title {
   margin: 0;
-  font: var(--ods-font-headline);
-  font-size: 16px;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-.tl__add {
+.tl__actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.tl__action {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--ods-space-4);
   margin: 0;
   padding: var(--ods-space-4);
   border: none;
   background: transparent;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-emphasis);
   font-weight: 700;
   color: var(--ods-color-primary);
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.tl__add img {
-  width: 13px;
-  height: 13px;
+.tl__action img {
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
 }
 
 .tl__empty {
@@ -189,14 +212,14 @@ const showMoreHint = computed(
 }
 
 .tl__empty-ico {
-  width: 56px;
-  height: 56px;
+  width: var(--ods-thumb-sm);
+  height: var(--ods-thumb-sm);
 }
 
 .tl__empty-msg {
   margin: 0;
   max-width: 280px;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
   line-height: 1.55;
   white-space: pre-line;
@@ -223,13 +246,13 @@ const showMoreHint = computed(
   -webkit-mask-image: linear-gradient(
     to right,
     #000 0%,
-    #000 calc(100% - 24px),
+    #000 calc(100% - var(--ods-icon-2xl)),
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
     #000 0%,
-    #000 calc(100% - 24px),
+    #000 calc(100% - var(--ods-icon-2xl)),
     transparent 100%
   );
 }
@@ -242,7 +265,7 @@ const showMoreHint = computed(
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--ods-space-12);
   min-width: max-content;
   padding: 0;
 }
@@ -255,7 +278,7 @@ const showMoreHint = computed(
   bottom: 7px;
   height: 2px;
   border-radius: 1px;
-  background: #d0d0d0;
+  background: var(--ods-color-gray-300);
   pointer-events: none;
   z-index: 0;
 }
@@ -268,7 +291,7 @@ const showMoreHint = computed(
   display: block;
   margin: 0;
   /* 칩(76) + 도트 영역(16) */
-  padding: 0 0 16px;
+  padding: 0 0 var(--ods-space-16);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -279,11 +302,11 @@ const showMoreHint = computed(
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  gap: 2px;
+  gap: var(--ods-space-4);
   width: 80px;
   height: 76px;
-  padding: 8px 5px 6px;
-  border-radius: 14px;
+  padding: var(--ods-space-8) var(--ods-space-4);
+  border-radius: var(--ods-radius-button);
   box-sizing: border-box;
   overflow: hidden;
   transition:
@@ -293,16 +316,19 @@ const showMoreHint = computed(
 }
 
 .tl__node--mint .tl__chip {
-  background: color-mix(in srgb, #81c784 14%, #ffffff);
+  background: color-mix(in srgb, var(--ods-color-secondary) 14%, var(--ods-color-white));
 }
 .tl__node--forest .tl__chip {
-  background: color-mix(in srgb, var(--ods-color-primary) 7%, #ffffff);
+  background: color-mix(in srgb, var(--ods-color-primary) 7%, var(--ods-color-white));
 }
 .tl__node--gold .tl__chip {
-  background: color-mix(in srgb, #ffca28 16%, #ffffff);
+  background: color-mix(in srgb, var(--ods-color-accent) 16%, var(--ods-color-white));
 }
 .tl__node--violet .tl__chip {
-  background: color-mix(in srgb, #9575cd 11%, #ffffff);
+  background: color-mix(in srgb, var(--ods-color-ai) 11%, var(--ods-color-white));
+}
+.tl__node--sky .tl__chip {
+  background: color-mix(in srgb, var(--ods-color-ai) 14%, var(--ods-color-white));
 }
 
 .tl__node--on .tl__chip {
@@ -312,7 +338,7 @@ const showMoreHint = computed(
 
 .tl__node--on .tl__name,
 .tl__node--on .tl__time {
-  color: #fff;
+  color: var(--ods-color-white);
 }
 
 .tl__node--on .tl__ico {
@@ -321,8 +347,8 @@ const showMoreHint = computed(
 
 .tl__ico {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
 }
 
 .tl__name {
@@ -330,7 +356,7 @@ const showMoreHint = computed(
   width: 100%;
   min-height: 0;
   margin: 0;
-  font-size: 11px;
+  font: var(--ods-font-card-meta);
   font-weight: 700;
   line-height: 1.25;
   color: var(--ods-color-text);
@@ -346,7 +372,7 @@ const showMoreHint = computed(
   flex: 0 0 auto;
   width: 100%;
   margin: 0;
-  font-size: 11px;
+  font: var(--ods-font-card-meta);
   font-weight: 600;
   line-height: 1.2;
   color: var(--ods-color-text-secondary);
@@ -372,19 +398,23 @@ const showMoreHint = computed(
 }
 
 .tl__node--gold .tl__dot {
-  background: #f9a825;
-  border-color: #f9a825;
+  background: var(--ods-color-accent);
+  border-color: var(--ods-color-accent);
 }
 .tl__node--violet .tl__dot {
-  background: #7e57c2;
-  border-color: #7e57c2;
+  background: var(--ods-color-ai);
+  border-color: var(--ods-color-ai);
+}
+.tl__node--sky .tl__dot {
+  background: var(--ods-color-ai);
+  border-color: var(--ods-color-ai);
 }
 
 /* 선택 시에도 크기 고정 — 링만 강조 */
 .tl__node--on .tl__dot {
   width: 10px;
   height: 10px;
-  background: #fff;
+  background: var(--ods-color-white);
   border: 2.5px solid var(--ods-color-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ods-color-primary) 35%, transparent);
 }
@@ -396,7 +426,7 @@ const showMoreHint = computed(
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   height: 76px;
   box-sizing: border-box;
   user-select: none;
@@ -405,10 +435,10 @@ const showMoreHint = computed(
 
 .tl__more-dot {
   display: block;
-  width: 5px;
-  height: 5px;
+  width: var(--ods-dot-sm);
+  height: var(--ods-dot-sm);
   border-radius: 50%;
-  background: #616161;
+  background: var(--ods-color-gray-700);
 }
 
 .tl__more-dot:nth-child(1) {

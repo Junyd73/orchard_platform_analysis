@@ -61,10 +61,14 @@ class ObservationPhotoService:
         return uid or self._default_user_id
 
     def _require_user_id(self, user_id: str | None) -> str:
+        """업로드용. 헤더 없으면 DEFAULT_USER_ID (스테이징 Auth 전)."""
         uid = str(user_id or "").strip()
-        if not uid:
-            raise BusinessRuleError("사용자 세션 정보가 없습니다.")
-        return uid
+        if uid:
+            return uid
+        fallback = self._default_user_id
+        if fallback:
+            return fallback
+        raise BusinessRuleError("사용자 세션 정보가 없습니다.")
 
     def _urls(self, farm_cd: str, obs_id: str, photo_id: str) -> tuple[str, str]:
         """VITE_API_BASE_URL(/api/v1)에 붙일 상대경로. /api/v1 중복 금지."""

@@ -159,9 +159,9 @@ def ai_env():
     if not (_has_farm("OR001") and _has_ai_table()):
         pytest.skip("OR001 또는 AI 테이블 없음")
     try:
-        import PyQt6  # noqa: F401
+        import PIL  # noqa: F401
     except ImportError:
-        pytest.skip("서버 venv 에 PyQt6 필요 (공통 AI 엔진)")
+        pytest.skip("서버 venv 에 Pillow 필요 (AI 사진 전처리)")
     oid, pid = _create_obs_with_photo()
     yield {"farm_cd": "OR001", "obs_id": oid, "photo_id": pid}
     _cleanup("OR001", oid)

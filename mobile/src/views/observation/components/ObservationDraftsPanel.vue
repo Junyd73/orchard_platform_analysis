@@ -79,7 +79,7 @@ function siteLabel(d: ObservationDraftItem): string {
 <style scoped>
 .drafts {
   margin: 0 0 var(--ods-space-12);
-  padding: var(--ods-space-8) var(--ods-space-10);
+  padding: var(--ods-space-8) var(--ods-space-12);
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-card);
@@ -94,9 +94,7 @@ function siteLabel(d: ObservationDraftItem): string {
 }
 .title {
   margin: 0;
-  font: var(--ods-font-headline);
-  font-size: 16px;
-  line-height: 1.25;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text);
 }
 .list {
@@ -110,9 +108,9 @@ function siteLabel(d: ObservationDraftItem): string {
 .item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 8px;
+  gap: var(--ods-space-4);
+  padding: var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
   background: var(--ods-color-bg-muted);
   min-width: 0;
 }
@@ -121,13 +119,12 @@ function siteLabel(d: ObservationDraftItem): string {
 }
 .date {
   margin: 0;
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text);
 }
 .summary {
-  margin: 2px 0 0;
-  font: var(--ods-font-body-2);
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-card-body);
   font-weight: 600;
   color: var(--ods-color-text);
   overflow: hidden;
@@ -135,13 +132,13 @@ function siteLabel(d: ObservationDraftItem): string {
   white-space: nowrap;
 }
 .dot {
-  margin: 0 4px;
+  margin: 0 var(--ods-space-4);
   color: var(--ods-color-text-secondary);
   font-weight: 400;
 }
 .sub {
-  margin: 2px 0 0;
-  font: var(--ods-font-caption);
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -150,14 +147,13 @@ function siteLabel(d: ObservationDraftItem): string {
 .actions {
   display: flex;
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: var(--ods-space-4);
 }
 .btn {
   flex: 1;
-  min-height: 44px;
+  min-height: var(--ods-button-height-in-card);
   border-radius: var(--ods-radius-button);
-  font: var(--ods-font-body-2);
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   cursor: pointer;
   border: 1px solid var(--ods-color-border);
   background: var(--ods-color-white);

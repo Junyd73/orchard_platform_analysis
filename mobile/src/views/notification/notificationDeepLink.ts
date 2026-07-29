@@ -10,6 +10,8 @@ const ROUTE_ALIAS: Record<string, string> = {
   observation: 'observation',
   'work-log-daily': 'work-log-daily',
   'work-log': 'work-log',
+  'pesticide-smart-spray': 'pesticide-smart-spray',
+  'smart_spray_briefing': 'pesticide-smart-spray',
 }
 
 /**
@@ -60,6 +62,10 @@ export function resolveNotificationDeepLink(
 
   if (name === 'observation' || name === 'work-log' || name === 'observation-new') {
     return { name }
+  }
+
+  if (name === 'pesticide-smart-spray') {
+    return { name: 'pesticide-smart-spray' }
   }
 
   return { name }

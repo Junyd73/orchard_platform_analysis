@@ -233,7 +233,7 @@ REST: `POST /api/v1/farms/{farm_cd}/observations/{obs_id}/candidates/confirm`
 
 1. **모바일 미구현** — API·동기화·업로드 레이어 없음.
 2. **PC 로컬 파일 의존** — 사진은 노트북 `%LOCALAPPDATA%`에만 존재. 폰·서버와 공유 불가.
-3. **PyQt 이미지 처리** — `QImage` 기반 sanitize/thumbnail. 서버·모바일은 재구현 필요.
+3. **이미지 처리** — AI sanitize·업로드 저장 모두 **Pillow** (`core/ai/image_sanitize.py`, `core/observation_photo_files.py`). headless 서버 호환.
 4. **카메라 없음** — 현장 촬영 UX가 데스크톱에 없음.
 5. **Soft delete 고아 파일** — 디스크 잔존·용량 관리 정책 부재.
 6. **API 키 클라이언트 보유 위험** — OpenAI/PSIS 키를 모바일 앱에 넣으면 유출. **서버 프록시 필수**.

@@ -1,6 +1,6 @@
 # Mobile API Notes
 
-> 문서 버전: **v1.2.4** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
+> 문서 버전: **v1.2.8** · SSOT: [`../VERSIONS.md`](../VERSIONS.md)
 
 ## 사용 중
 
@@ -110,34 +110,262 @@
 | LOW | OS010200 관심 |
 | 없음 | OS010100 정상 |
 
-### 영농일지 (SCR-010 / SCR-011) — ODS v1.2.2
+### 영농일지 (SCR-010 / SCR-011) — ODS v1.2.2 · WLS Unify
 
 | 메서드 | 경로 | 용도 |
 |--------|------|------|
 | GET | `/api/v1/farms/{farm_cd}/work-logs/monthly?year=&month=` | 월간 overview |
 | GET | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}` | 일간 마스터+작업 |
 | PUT | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/master` | 기상·이슈 UPSERT |
-| PUT | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/works` | 작업행 일괄 저장 |
+| PUT | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/works` | 작업행 임시 저장(작업-only) |
+| PUT | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/integrated` | 통합 저장(장부·농약) |
 | DELETE | `/api/v1/farms/{farm_cd}/work-logs/works/{work_id}` | 작업 삭제 |
 | POST | `/api/v1/farms/{farm_cd}/work-logs/daily/{work_dt}/weather/fetch` | 날씨 조회(캐시·외부 API). 마스터 자동 저장 없음 |
 
-- `work_dt` · 미래일 저장 불가 (오늘 이하)
 - `work_id` = `YYYYMMDD-NN` (PC와 동일)
+- **미래일:** `PUT .../works` 허용 · 상태 `WO010100`(준비중) 강제 · `integrated`/기상 master는 거부
+- **월간 `days`:** 캘린더 그리드(앞·뒷달 패딩) 포함 · **`summary`는 해당 월만**
 - **월간 집계 (1차):**
   - `resource_count`: 일/월 **고유** `emp_cd` (동일인 다작업=1명)
   - `labor_hour_sum`: `man_hour` 합산
   - `pesticide_count` / `fertilizer_count`: 작업 mid `WK010200` / `WK010800` 건수
-- **일간 MVP:** 인력·경비·전표 CRUD 미포함. 자식 행이 있으면 작업 삭제 거부
+  - `work_items[].status_cd`: 준비중 필터용
+- 통합 SSOT: [`docs/WORK_LOG_SCHEDULE_UNIFY.md`](../../docs/WORK_LOG_SCHEDULE_UNIFY.md)
 
-### 영농 일정 Schedule (WLS-001 Phase1)
+### 영농 일정 Schedule — **폐기 (410)**
 
-- Spec: [`docs/WORK_SCHEDULE_PHASE1_SPEC.md`](../../docs/WORK_SCHEDULE_PHASE1_SPEC.md)
-- 스키마: `t_work_schedule` + `WS01` (`core/work_schedule_schema.py`)
-- Base: `/api/v1/farms/{farm_cd}/work-schedules` — CRUD + `convert-to-draft`
-- 일정은 미래일 가능 · **실적 전환은 당일/과거만** · `integrated`/Google 동기화는 비범위
+- 과거 Spec: [`docs/WORK_SCHEDULE_PHASE1_SPEC.md`](../../docs/WORK_SCHEDULE_PHASE1_SPEC.md) (Historical)
+- `/api/v1/farms/{farm_cd}/work-schedules/*` → **410 Gone**
+- 기동 시 `t_work_schedule` PENDING → `t_work_detail`(준비중) 이관
+
+### 구글 캘린더 (WLS-001 Phase4 · work only)
+
+- Spec: [`docs/WORK_SCHEDULE_GOOGLE_PHASE3.md`](../../docs/WORK_SCHEDULE_GOOGLE_PHASE3.md)
+- `works/{id}/push` · `import-preview` · `import-confirm` (항상 work · 미래=준비중)
+- `schedules/{id}/push` → **410**
+- OAuth 콜백: `GET /api/v1/google-calendar/oauth/callback`
+- 종일·시간 일정 · 인력/경비 제외
+- `.env`: `GOOGLE_OAUTH_CLIENT_ID` · `SECRET` · `REDIRECT_URI` · `SUCCESS_REDIRECT`
+
+### 농약 재고 (SCR-020 · PST-001 · **1차 통과 · 2026-07-22**)
+
+- 설계: [`docs/PESTICIDE_MOBILE_PHASE1.md`](../../docs/PESTICIDE_MOBILE_PHASE1.md)
+- 화면: [`screens/SCR-020.md`](../screens/SCR-020.md) **1.2.0**
+- Core: `core/pesticide_manager.py` · `core/pesticide_constants.py`
+- PC: MN12 재고 · MN13 사용 · 모바일은 조회 + 입고/출고/품목 수정
+
+| 메서드 | 경로 | 용도 |
+|--------|------|------|
+| GET | `/api/v1/farms/{farm_cd}/pesticide/items` | 재고 목록 + 요약 |
+| GET | `/api/v1/farms/{farm_cd}/pesticide/usage/recent` | 농장 최근 사용(일자별 집계) |
+| GET | `/api/v1/farms/{farm_cd}/pesticide/items/{item_id}` | 품목 상세 + 최근 사용 이력 |
+| GET | `/api/v1/farms/{farm_cd}/pesticide/items/{item_id}/usage` | 사용 이력 페이징 |
+| GET | `.../pesticide/stats/yearly` | 연간 사용 통계 |
+| GET | `.../pesticide/info` · `/info/{info_id}` | 농약 사전(로컬) |
+| GET | `.../pesticide/suppliers` | 공급자 |
+| GET/POST/PUT/DELETE | `.../pesticide/receipts*` | 입고 CRUD · `.../apply` 재고 반영 |
+| PUT/DELETE | `.../pesticide/items/{item_id}` | 품목 수정·삭제 |
+| POST | `.../pesticide/items/{item_id}/stock-out` | **출고(판매)** |
+| GET | `.../pesticide/items/{item_id}/stock-hist` | 재고·입고 변동 이력 |
+
+#### `GET .../pesticide/items`
+
+**Query**
+
+| 파라미터 | 타입 | 기본 | 설명 |
+|----------|------|------|------|
+| `keyword` | string | — | 품목명·사전명·분류·성분 **또는** 형제 info 대상병해충 부분 일치 |
+| `low_only` | bool | false | `is_low=true` 만 |
+| `sort` | string | `low_first` | `low_first` \| `name` |
+
+**Response `200`**
+
+```json
+{
+  "summary": {
+    "total_count": 12,
+    "low_count": 2,
+    "default_warn_piece_below": 1,
+    "last_spray_dt": "2026-07-18"
+  },
+  "items": [
+    {
+      "item_id": 1,
+      "item_nm": "○○살충제",
+      "spec_nm": "500ml",
+      "pest_category_nm": "살충제",
+      "qty_piece": 0,
+      "warn_piece_below": null,
+      "warn_threshold": 1,
+      "warn_source": "default",
+      "is_low": true,
+      "info_id": 42,
+      "info_pesticide_nm": "○○유제",
+      "ingredient_nm": "이미다클로프리드 10%",
+      "pest_target_nm": "깍지벌레, 진딧물"
+    }
+  ]
+}
+```
+
+- `ingredient_nm`: `m_pesticide_info` 성분명
+- `pest_target_nm`: 연결 info와 **동일 `pesticide_nm`·`maker_nm`** 형제 행의 `m_pesticide_pest_map` 합집합 (`GROUP_CONCAT` DISTINCT)
+- `last_spray_dt`: 확정 사용 중 최신 `use_dt` (없으면 null)
+- `warn_threshold`: 실제 판정에 쓴 값 (`warn_piece_below ?? default`)
+- `warn_source`: `item` | `default`
+- `use_yn != 'Y'` 품목 제외
+
+#### `GET .../pesticide/usage/recent`
+
+| 파라미터 | 타입 | 기본 | 설명 |
+|----------|------|------|------|
+| `days` | int | 30 | 조회 기간(1~90) |
+| `max_days` | int | 10 | 일자 행 상한(1~30) |
+
+**Response `200`**
+
+```json
+{
+  "last_spray_dt": "2026-07-18",
+  "days": [
+    {
+      "use_dt": "2026-07-18",
+      "lines": [
+        { "item_nm": "노블레스", "use_qty": 15, "unit": "개" },
+        { "item_nm": "다이센엠45", "use_qty": 10, "unit": "개" }
+      ]
+    }
+  ]
+}
+```
+
+- 확정(`stock_applied_yn='Y'`) · 미취소 건만
+- 동일 일자·품목은 `use_qty` 합산
+- `unit`은 현재 고정 `"개"` (낱개)
+
+#### `GET .../pesticide/items/{item_id}`
+
+**Response `200`**
+
+```json
+{
+  "item": {
+    "item_id": 1,
+    "item_nm": "○○살충제",
+    "spec_nm": "500ml",
+    "pest_category_nm": "살충제",
+    "qty_piece": 0,
+    "warn_piece_below": null,
+    "warn_threshold": 1,
+    "warn_source": "default",
+    "is_low": true,
+    "info_id": 42,
+    "info_pesticide_nm": "○○유제",
+    "ingredient_nm": "이미다클로프리드 10%",
+    "pest_target_nm": "깍지벌레, 진딧물",
+    "rmk": ""
+  },
+  "recent_usage": [
+    {
+      "use_id": 100,
+      "use_line_id": 201,
+      "use_dt": "2026-07-15",
+      "use_qty": 2,
+      "purpose_nm": "깍지벌레",
+      "work_id": "20260715-02",
+      "worker_nm": "홍길동",
+      "site_nm": "1번지"
+    }
+  ]
+}
+```
+
+- `recent_usage` 기본 **20건**, `cancel_yn='Y'` · 미확정(`stock_applied_yn!='Y'`) 제외
+- `404`: 품목 없음 또는 타 농장
+
+#### `GET .../pesticide/items/{item_id}/usage`
+
+**Query**
+
+| 파라미터 | 타입 | 기본 | 설명 |
+|----------|------|------|------|
+| `date_from` | string | — | `YYYY-MM-DD` |
+| `date_to` | string | — | `YYYY-MM-DD` |
+| `offset` | int | 0 | |
+| `limit` | int | 20 | max 100 |
+
+**Response `200`**
+
+```json
+{
+  "item_id": 1,
+  "total": 47,
+  "offset": 0,
+  "limit": 20,
+  "rows": [ /* recent_usage 와 동일 항목 */ ]
+}
+```
+
+#### `POST .../pesticide/items/{item_id}/stock-out`
+
+개인 판매 등 **수동 출고**. 살포(SCR-011)와 분리.
+
+**Body**
+
+```json
+{ "qty": 3, "buyer_nm": "A농가", "rmk": "현금" }
+```
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `qty` | Y | 1 이상 · 현재고 이하 |
+| `buyer_nm` | 조건부 | 구매처 · `rmk`와 **둘 중 하나 이상** |
+| `rmk` | 조건부 | 비고 |
+
+**Response `200`**
+
+```json
+{
+  "item_id": 2,
+  "qty": 3,
+  "qty_after": 2,
+  "message": "출고 3개 반영 (잔량 2)"
+}
+```
+
+- 재고 차감 + `t_pesticide_stock_hist` `trans_type=OUT` · `ref_table=manual_out`
+- 재고 부족·필수값 누락 → `400`
+
+#### `GET .../pesticide/items/{item_id}/stock-hist`
+
+| 파라미터 | 타입 | 기본 | 설명 |
+|----------|------|------|------|
+| `limit` | int | 100 | max 300 |
+
+- `trans_type`: `IN` · `USE` · `OUT` · `ADJ` · `CANCEL`
+- 입고 조인: `receipt_dt` · `supplier_nm`
+- hist 없는 입고 명세도 표시(가상 행) · `qty_after` 누락 시 현재고로 역추적 보강
+
+#### 기존 영농일지 농약 API (유지 · SCR-011)
+
+| 메서드 | 경로 | 용도 |
+|--------|------|------|
+| GET | `/api/v1/farms/{farm_cd}/work-logs/masters/pesticide-items` | 일지 입력 피커 (경량, `is_low` 없음) |
+| POST | `.../work-logs/daily/{work_dt}/pesticide/cancel` | 사용 취소 |
+| POST | `.../pesticide/cancel-all` | 작업 연결 전건 취소 |
+| POST | `.../pesticide/replace` | 확정 수정 |
+
+- SCR-020 전용 API와 **역할 분리** (피커 vs 재고·이력·입고·출고)
+
+#### 후속 비범위
+
+- 발주 추천 · 푸시
+- PSIS 사전 실호출 (SCR-021)
+- 방제 예정일 스케줄 소스
 
 ## 향후 (미구현)
 
 GPS 고도화·영농일지 Phase 2(일간 인력/경비 CRUD·전표·시간별 예보) 등은 후속. 모바일 번들에 API 키 금지.  
 관찰 완료·AI·PSIS·과실 추적 API는 Project A에서 사용 중(위 표·절 참고).  
-날씨 자동조회(`weather/fetch`)는 SCR-010/011에서 **구현됨**.
+날씨 자동조회(`weather/fetch`)는 SCR-010/011에서 **구현됨**.  
+농약 재고(SCR-020) **1차 통과** (2026-07-22) — 조회·입고·출고·통계·사전 포함.

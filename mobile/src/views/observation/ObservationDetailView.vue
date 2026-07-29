@@ -12,7 +12,6 @@ import { ApiClientError } from '@/api/client'
 import heroIllustration from '@/assets/ods/scr004/hero-illustration.svg'
 import aiIllustration from '@/assets/ods/scr004/ai-illustration.svg'
 import psisIllustration from '@/assets/ods/scr004/psis-illustration.svg'
-import badgeCheck from '@/assets/ods/scr004/badge-check.svg'
 import badgeRobot from '@/assets/ods/scr004/badge-robot.svg'
 import iconAi from '@/assets/ods/scr004/icon-ai.svg'
 import iconCalendar from '@/assets/ods/scr004/icon-calendar.svg'
@@ -114,15 +113,22 @@ const locationChips = computed(() => {
   const d = detail.value
   if (!d) return []
   const items = [
-    { label: '필지', value: d.site_nm || d.site_id },
+    { label: '관찰장소', value: d.site_nm || d.site_id },
     { label: '구역', value: d.zone_nm },
     { label: '열', value: d.row_no },
     { label: '나무', value: d.tree_no },
     { label: '표본', value: d.sample_no },
   ]
   return items
-    .map((item) => ({ ...item, text: String(item.value || '').trim() }))
+    .map((item) => ({
+      ...item,
+      text: String(item.value || '').trim(),
+    }))
     .filter((item) => item.text)
+    .map((item) => ({
+      key: item.label,
+      display: `${item.label} : ${item.text}`,
+    }))
 })
 
 const hasContent = computed(() => Boolean((detail.value?.obs_content || '').trim()))
@@ -318,12 +324,6 @@ function goList(toast?: string) {
   })
 }
 
-/** 항상 관찰 목록으로 이동 (수정 화면 등 history 중간 진입점 회피) */
-function goBack() {
-  if (busy.value) return
-  goList()
-}
-
 function goEdit() {
   void router.push({
     name: 'observation-new',
@@ -402,14 +402,14 @@ watch(showDeleteDlg, async (open) => {
 
 <template>
   <div class="page">
-    <main class="content">
-      <OdsAppBar show-back @back="goBack" />
+    <main class="content ods-page-content">
+      <OdsAppBar show-back back-fallback="observation" />
 
       <p v-if="loading" class="status">불러오는 중…</p>
       <p v-else-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
 
       <template v-else-if="detail">
-        <section class="card hero" aria-label="관찰 요약">
+        <OdsCard class="detail-card hero" aria-label="관찰 요약">
           <div class="hero__body">
             <p class="hero__ctx">
               <img class="hero__ctx-icon" :src="iconLeaf" alt="" aria-hidden="true">
@@ -417,10 +417,13 @@ watch(showDeleteDlg, async (open) => {
             </p>
             <h2 class="hero__title">{{ headline }}</h2>
             <div class="hero__badges">
-              <OdsBadge :tone="severityTone(detail.severity_cd)" class="hero__badge">
-                <img class="badge-icon" :src="badgeCheck" alt="" aria-hidden="true">
-                {{ severityLabel(detail) }}
-              </OdsBadge>
+              <p class="hero__severity">
+                <span class="hero__severity-label">위험도 :</span>
+                <span
+                  class="hero__severity-value"
+                  :class="`hero__severity-value--${severityTone(detail.severity_cd)}`"
+                >{{ severityLabel(detail) }}</span>
+              </p>
               <OdsBadge
                 v-if="!isFruitObs"
                 :tone="aiTone(detail.ai_status)"
@@ -431,9 +434,8 @@ watch(showDeleteDlg, async (open) => {
               </OdsBadge>
             </div>
             <ul v-if="locationChips.length" class="hero__chips">
-              <li v-for="chip in locationChips" :key="chip.label" class="hero__chip">
-                <span class="hero__chip-k">{{ chip.label }}</span>
-                <span class="hero__chip-v">{{ chip.text }}</span>
+              <li v-for="chip in locationChips" :key="chip.key" class="hero__chip">
+                {{ chip.display }}
               </li>
             </ul>
             <div class="hero__meta">
@@ -452,7 +454,7 @@ watch(showDeleteDlg, async (open) => {
             </div>
           </div>
           <img class="hero__illus" :src="heroIllustration" alt="" aria-hidden="true">
-        </section>
+        </OdsCard>
 
         <OdsCard v-if="hasContent" class="detail-card" aria-label="관찰 내용">
           <h2 class="card-title">
@@ -672,31 +674,18 @@ watch(showDeleteDlg, async (open) => {
   padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
 }
 .content {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--ods-space-12) var(--ods-page-padding-x) var(--ods-space-16);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
-}
-.card {
-  background: var(--ods-color-white);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-card);
-  padding: var(--ods-space-20);
-  box-shadow: var(--ods-shadow-card);
+  /* 카드↔카드: ODS 페이지 스택 16px (--ods-page-content-gap / --ods-card-block-gap) */
+  --ods-page-content-gap: var(--ods-card-block-gap, var(--ods-space-16));
 }
 :deep(.detail-card.ods-card) {
-  padding: var(--ods-space-20);
+  padding: var(--ods-card-padding, var(--ods-space-16));
 }
 .card-title {
-  margin: 0 0 var(--ods-space-12);
+  margin: 0 0 var(--ods-space-8);
   display: flex;
   align-items: center;
   gap: var(--ods-space-8);
-  font-size: 18px;
-  line-height: 1.35;
-  font-weight: 700;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-primary);
 }
 .card-title--ai {
@@ -709,8 +698,8 @@ watch(showDeleteDlg, async (open) => {
   color: var(--ods-color-ai);
 }
 .card-title__icon {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   flex: 0 0 auto;
 }
 .hero {
@@ -722,7 +711,7 @@ watch(showDeleteDlg, async (open) => {
     color-mix(in srgb, var(--ods-color-secondary) 22%, white)
   );
   padding-right: 108px;
-  min-height: 168px;
+  min-height: 0;
 }
 .hero__body {
   position: relative;
@@ -731,10 +720,10 @@ watch(showDeleteDlg, async (open) => {
 }
 .hero__illus {
   position: absolute;
-  right: 8px;
+  right: var(--ods-space-8);
   top: 50%;
   transform: translateY(-50%);
-  width: 108px;
+  width: var(--ods-thumb-lg);
   height: auto;
   pointer-events: none;
 }
@@ -742,20 +731,18 @@ watch(showDeleteDlg, async (open) => {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-form-value);
   font-weight: 700;
   color: var(--ods-color-primary);
 }
 .hero__ctx-icon {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
 }
 .hero__title {
   margin: var(--ods-space-8) 0 0;
-  font-size: 23px;
-  line-height: 1.25;
-  font-weight: 600;
+  font: var(--ods-font-title-2);
   color: var(--ods-color-text);
   word-break: break-word;
   display: -webkit-box;
@@ -766,70 +753,84 @@ watch(showDeleteDlg, async (open) => {
 .hero__badges {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--ods-space-8);
-  margin-top: var(--ods-space-12);
+  margin-top: var(--ods-space-8);
+}
+.hero__severity {
+  margin: 0;
+  font: var(--ods-font-form-help);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+}
+.hero__severity-label {
+  color: var(--ods-color-text-secondary);
+  font-weight: 600;
+}
+.hero__severity-value--ok {
+  color: var(--ods-color-primary);
+}
+.hero__severity-value--caution {
+  color: var(--ods-color-caution);
+}
+.hero__severity-value--danger {
+  color: var(--ods-color-danger);
+}
+.hero__severity-value--neutral {
+  color: var(--ods-color-text-secondary);
 }
 .hero__badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 14px;
-  font-size: 13px;
+  gap: var(--ods-space-4);
+  min-height: var(--ods-control-height);
+  padding: 0 var(--ods-space-12);
+  font: var(--ods-font-form-help);
   font-weight: 700;
 }
 .badge-icon {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
 }
 .hero__chips {
   list-style: none;
-  margin: var(--ods-space-12) 0 0;
+  margin: var(--ods-space-8) 0 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--ods-space-8);
 }
 .hero__chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--ods-color-primary) 8%, white);
-  border: 1px solid color-mix(in srgb, var(--ods-color-primary) 18%, var(--ods-color-border));
-  font-size: 12px;
+  font: var(--ods-font-form-help);
   line-height: 1.3;
-}
-.hero__chip-k {
   color: var(--ods-color-text-secondary);
   font-weight: 600;
-}
-.hero__chip-v {
-  color: var(--ods-color-text);
-  font-weight: 700;
 }
 .hero__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--ods-space-12);
-  margin-top: var(--ods-space-16);
-  font-size: 13px;
+  gap: var(--ods-space-8) var(--ods-space-12);
+  margin-top: var(--ods-space-8);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
 .hero__meta-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
 }
 .hero__meta-item img {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
   opacity: 0.85;
 }
 .body-text {
   margin: 0;
-  font-size: 16px;
+  font: var(--ods-font-form-value);
   line-height: 1.55;
   color: var(--ods-color-text);
   white-space: pre-wrap;
@@ -848,52 +849,15 @@ watch(showDeleteDlg, async (open) => {
   margin: 0;
 }
 .card__illus {
-  width: 72px;
+  width: var(--ods-thumb-md);
   height: auto;
-  flex: 0 0 72px;
+  flex: 0 0 var(--ods-thumb-md);
   align-self: flex-start;
 }
-.ext-lead {
-  margin: 0;
-  font-size: 20px;
-  line-height: 1.3;
-  font-weight: 700;
-  color: var(--ods-color-text);
-}
 .ext-hint {
-  margin: var(--ods-space-8) 0 0;
-  font-size: 13px;
-  line-height: 1.45;
+  margin: var(--ods-form-label-gap, var(--ods-space-8)) 0 0;
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
-}
-.detail-dl {
-  margin: var(--ods-space-12) 0 0;
-}
-.detail-dl__row {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: var(--ods-space-8);
-  margin-bottom: 6px;
-  font-size: 14px;
-}
-.detail-dl__row dt {
-  color: var(--ods-color-text-secondary);
-  font-weight: 600;
-}
-.detail-dl__row dd {
-  margin: 0;
-  color: var(--ods-color-text);
-}
-.reanalyze {
-  margin-top: var(--ods-space-12);
-}
-.card--ai {
-  border-color: color-mix(in srgb, var(--ods-color-ai) 28%, var(--ods-color-border));
-  background: linear-gradient(
-    135deg,
-    var(--ods-color-white) 70%,
-    color-mix(in srgb, var(--ods-color-ai) 8%, white)
-  );
 }
 :deep(.detail-card--ai.ods-card) {
   border-color: color-mix(in srgb, var(--ods-color-ai) 28%, var(--ods-color-border));
@@ -903,14 +867,6 @@ watch(showDeleteDlg, async (open) => {
     color-mix(in srgb, var(--ods-color-ai) 8%, white)
   );
 }
-.card--psis {
-  border-color: color-mix(in srgb, var(--ods-color-ai) 22%, var(--ods-color-border));
-  background: linear-gradient(
-    135deg,
-    var(--ods-color-white) 70%,
-    color-mix(in srgb, var(--ods-color-ai) 6%, white)
-  );
-}
 :deep(.detail-card--psis.ods-card) {
   border-color: color-mix(in srgb, var(--ods-color-ai) 22%, var(--ods-color-border));
   background: linear-gradient(
@@ -918,10 +874,6 @@ watch(showDeleteDlg, async (open) => {
     var(--ods-color-white) 70%,
     color-mix(in srgb, var(--ods-color-ai) 6%, white)
   );
-}
-.ext-hint--api {
-  color: var(--ods-color-text-secondary);
-  font-weight: 600;
 }
 .ext-hint--guide {
   margin: 0 0 var(--ods-space-12);
@@ -933,9 +885,7 @@ watch(showDeleteDlg, async (open) => {
 }
 .guide-block__title {
   margin: 0 0 var(--ods-space-12);
-  font-size: 15px;
-  line-height: 1.35;
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   color: var(--ods-color-text);
 }
 .guide-sec {
@@ -946,9 +896,7 @@ watch(showDeleteDlg, async (open) => {
 }
 .guide-sec__h {
   margin: 0 0 var(--ods-space-8);
-  font-size: 13px;
-  line-height: 1.4;
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   color: var(--ods-color-primary);
 }
 .guide-list {
@@ -957,17 +905,17 @@ watch(showDeleteDlg, async (open) => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  line-height: 1.45;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-card-body);
+  font-weight: 400;
   color: var(--ods-color-text);
 }
 .guide-list__item {
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
   border: 1px solid color-mix(in srgb, var(--ods-color-border) 80%, white);
-  background: #fff;
+  background: var(--ods-color-white);
   cursor: pointer;
   text-align: left;
 }
@@ -982,7 +930,7 @@ watch(showDeleteDlg, async (open) => {
 }
 .guide-sec__empty {
   margin: 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .guide-sec__empty--pending {
@@ -990,8 +938,7 @@ watch(showDeleteDlg, async (open) => {
 }
 .guide-usage__pick {
   margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-primary);
 }
 .guide-usage {
@@ -1009,12 +956,13 @@ watch(showDeleteDlg, async (open) => {
   align-items: start;
 }
 .guide-usage__k {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-meta);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
 }
 .guide-usage__v {
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-body);
+  font-weight: 400;
   color: var(--ods-color-text);
   word-break: break-word;
 }
@@ -1035,8 +983,8 @@ watch(showDeleteDlg, async (open) => {
   color: var(--ods-color-text-secondary);
 }
 .meta-toggle__chev {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   transition: transform 220ms ease;
 }
 .meta-toggle__chev--open {
@@ -1055,14 +1003,17 @@ watch(showDeleteDlg, async (open) => {
   min-height: 0;
 }
 .meta-panel--open .meta-inner {
-  padding-top: var(--ods-space-12);
+  padding-top: var(--ods-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-card-block-gap, var(--ods-space-16));
 }
 .row {
   display: grid;
   grid-template-columns: 88px 1fr;
   gap: var(--ods-space-8);
-  margin: 0 0 var(--ods-space-8);
-  font-size: 14px;
+  margin: 0;
+  font: var(--ods-font-form-value);
   line-height: 1.45;
 }
 .row:last-child {
@@ -1070,7 +1021,7 @@ watch(showDeleteDlg, async (open) => {
 }
 .k {
   color: var(--ods-color-text-secondary);
-  font-weight: 600;
+  font: var(--ods-font-card-section);
 }
 .v {
   color: var(--ods-color-text);
@@ -1081,26 +1032,26 @@ watch(showDeleteDlg, async (open) => {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--ods-space-8);
+  font: var(--ods-font-card-body);
+  font-weight: 400;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
 }
 .copy {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   border: 1px solid var(--ods-color-border);
   background: var(--ods-color-white);
-  border-radius: 8px;
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 700;
+  border-radius: var(--ods-radius-button);
+  min-height: var(--ods-control-height);
+  padding: 0 var(--ods-space-8);
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-primary);
   cursor: pointer;
 }
 .copy img {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
 }
 .footer-actions {
   position: fixed;
@@ -1110,7 +1061,7 @@ watch(showDeleteDlg, async (open) => {
   z-index: 30;
   display: flex;
   gap: var(--ods-space-8);
-  max-width: 480px;
+  max-width: var(--ods-page-content-max, 480px);
   margin: 0 auto;
   padding: var(--ods-space-8) var(--ods-page-padding-x)
     calc(var(--ods-space-8) + env(safe-area-inset-bottom, 0px));
@@ -1121,7 +1072,7 @@ watch(showDeleteDlg, async (open) => {
   flex: 1;
 }
 .footer-actions :deep(.footer-btn.ods-btn--secondary) {
-  background: #e8f5e9;
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
   color: var(--ods-color-primary);
   border: 1px solid color-mix(in srgb, var(--ods-color-primary) 20%, white);
 }
@@ -1132,18 +1083,30 @@ watch(showDeleteDlg, async (open) => {
   gap: var(--ods-space-8);
 }
 .footer-btn__inner img {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
 }
 .footer-actions :deep(.ods-btn) {
-  min-height: 48px;
+  min-height: var(--ods-button-height, 48px);
 }
 .status {
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
 }
 .error {
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
+  font-weight: 600;
   color: var(--ods-color-danger);
+}
+:deep(.panel--scr004.ods-card) {
+  padding: var(--ods-card-padding, var(--ods-space-16));
+}
+:deep(.panel--scr004 .title) {
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-primary);
+}
+:deep(.panel--scr004 .title-icon) {
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
 }
 </style>

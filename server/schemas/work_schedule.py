@@ -10,6 +10,7 @@ class WorkScheduleItem(BaseModel):
     farm_cd: str
     sched_id: str
     work_dt: str
+    work_tm: str | None = None
     work_main_cd: str = "WK01"
     work_mid_cd: str
     work_loc_id: str | None = None
@@ -30,6 +31,7 @@ class WorkScheduleListResponse(BaseModel):
 class WorkScheduleCreateRequest(BaseModel):
     work_dt: str
     work_mid_cd: str
+    work_tm: str | None = None
     work_loc_id: str | None = None
     title: str | None = None
     contents: str | None = None
@@ -37,6 +39,7 @@ class WorkScheduleCreateRequest(BaseModel):
 
 class WorkScheduleUpdateRequest(BaseModel):
     work_dt: str | None = None
+    work_tm: str | None = None
     work_mid_cd: str | None = None
     work_loc_id: str | None = None
     title: str | None = None
@@ -53,6 +56,7 @@ class WorkScheduleConvertPrefill(BaseModel):
     work_dt: str
     work_mid_cd: str
     work_loc_id: str | None = None
+    start_tm: str | None = None
     memo: str = ""
 
 

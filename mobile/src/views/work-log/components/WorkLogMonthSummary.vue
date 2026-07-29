@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   detail: []
+  stock: []
 }>()
 
 const PLACEHOLDER = '—'
@@ -79,13 +80,20 @@ const range = () => monthRangeLabel(props.year, props.month)
         </p>
         <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
       </article>
-      <article class="sum__card">
-        <img class="sum__ico" :src="iconPesticide" alt="" />
-        <p class="sum__label">농약 사용</p>
-        <p class="sum__value">
-          {{ summary ? `${summary.pesticide_count ?? 0}건` : PLACEHOLDER }}
-        </p>
-        <p class="sum__sub">{{ SUB_CUMULATIVE }}</p>
+      <article class="sum__card sum__card--pesticide">
+        <button
+          type="button"
+          class="sum__card-btn"
+          aria-label="농약 재고 보기"
+          @click="emit('stock')"
+        >
+          <img class="sum__ico" :src="iconPesticide" alt="" />
+          <p class="sum__label">농약 사용</p>
+          <p class="sum__value">
+            {{ summary ? `${summary.pesticide_count ?? 0}건` : PLACEHOLDER }}
+          </p>
+          <p class="sum__sub">재고 보기</p>
+        </button>
       </article>
       <article class="sum__card">
         <img class="sum__ico" :src="iconFertilizer" alt="" />
@@ -127,7 +135,7 @@ const range = () => monthRangeLabel(props.year, props.month)
   color: var(--ods-color-text);
 }
 .sum__range {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .sum__link {
@@ -136,14 +144,14 @@ const range = () => monthRangeLabel(props.year, props.month)
   background: transparent;
   padding: 0;
   min-height: var(--ods-touch-min);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-primary);
   cursor: pointer;
 }
 .sum__hint {
   margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .sum__grid {
@@ -152,7 +160,7 @@ const range = () => monthRangeLabel(props.year, props.month)
   gap: var(--ods-space-8);
 }
 .sum__card {
-  min-height: 96px;
+  min-height: var(--ods-thumb-lg);
   padding: var(--ods-space-12) var(--ods-space-8) var(--ods-space-12);
   border-radius: var(--ods-radius-card);
   background: var(--ods-color-white);
@@ -167,37 +175,52 @@ const range = () => monthRangeLabel(props.year, props.month)
 .sum__card:hover {
   box-shadow: var(--ods-shadow-elevated);
 }
+.sum__card-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.sum__card--pesticide .sum__sub {
+  color: var(--ods-color-primary);
+  font-weight: 700;
+}
 .sum__ico {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
   margin: 0 auto var(--ods-space-4);
   display: block;
 }
 .sum__label {
   margin: 0;
-  font-size: 10px;
-  line-height: 1.25;
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .sum__value {
   margin: var(--ods-space-4) 0 0;
-  font-size: 17px;
+  font: var(--ods-font-title-2);
   font-weight: 800;
   color: var(--ods-color-text);
-  line-height: 1.2;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .sum__value--sm {
-  font-size: 12px;
+  font: var(--ods-font-card-section);
+  font-weight: 800;
   letter-spacing: -0.03em;
 }
 .sum__sub {
   margin: var(--ods-space-4) 0 0;
-  font-size: 10px;
-  line-height: 1.2;
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .anim-fade {

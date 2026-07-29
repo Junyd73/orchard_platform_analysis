@@ -54,7 +54,7 @@ defineProps<{
   background: var(--ods-color-white);
   border: 1px solid var(--ods-color-border);
   box-shadow: var(--ods-shadow-card);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
   text-align: center;
 }
@@ -83,8 +83,8 @@ defineProps<{
   border-color: color-mix(in srgb, var(--ods-color-primary) 28%, transparent);
 }
 .sum__card--fertilizer {
-  background: color-mix(in srgb, #7e57c2 12%, var(--ods-color-white));
-  border-color: color-mix(in srgb, #7e57c2 28%, transparent);
+  background: color-mix(in srgb, var(--ods-color-secondary) 14%, var(--ods-color-white));
+  border-color: color-mix(in srgb, var(--ods-color-secondary) 32%, transparent);
 }
 .sum__top {
   display: flex;
@@ -93,20 +93,19 @@ defineProps<{
   margin-bottom: var(--ods-space-8);
 }
 .sum__ico {
-  width: 20px;
-  height: 20px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
 }
 .sum__label {
   margin: 0;
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   color: var(--ods-color-text-secondary);
 }
 .sum__lines {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--ods-space-4);
 }
 .sum__line {
   display: flex;
@@ -116,13 +115,13 @@ defineProps<{
 }
 .sum__line dt {
   margin: 0;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
   flex-shrink: 0;
 }
 .sum__line dd {
   margin: 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-text);
   text-align: right;

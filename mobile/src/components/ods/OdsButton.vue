@@ -41,7 +41,7 @@ withDefaults(
 
 <style scoped>
 .ods-btn {
-  min-height: var(--ods-control-height);
+  min-height: var(--ods-button-height, var(--ods-control-height));
   padding: 0 var(--ods-space-16);
   border: none;
   border-radius: var(--ods-radius-button);

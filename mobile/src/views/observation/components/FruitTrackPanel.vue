@@ -41,20 +41,39 @@ const isCompleted = computed(
   () => String(props.detail.observation_status || '').toUpperCase() === 'COMPLETED',
 )
 
-/** 타임라인 위치 (0=1차, 1=2차, 2=3차…) */
-const currentTrackIndex = computed(() => {
-  const id = String(props.detail.obs_id || '').trim()
-  const idx = trackItems.value.findIndex((x) => x.obs_id === id)
-  return idx >= 0 ? idx : 0
+/** 1차(root) — parent 없음 · root_obs_id === obs_id */
+const isRootObs = computed(() => {
+  const d = props.detail
+  if (String(d.parent_obs_id || '').trim()) return false
+  const id = String(d.obs_id || '').trim()
+  const root = String(d.root_obs_id || '').trim()
+  return !root || root === id
 })
 
-/** 1차(최초)에서만 다음 추적(2차~) 등록 — 2차 이상은 버튼 미표시 */
-const canStartTrack = computed(
-  () => isCompleted.value && currentTrackIndex.value === 0,
-)
+/** 최초 관찰 ID — 추적 등록 parent 로 항상 사용 */
+const rootObsId = computed(() => {
+  const d = props.detail
+  const fromDetail = String(d.root_obs_id || '').trim()
+  if (fromDetail) return fromDetail
+  if (isRootObs.value) return String(d.obs_id || '').trim()
+  const fromTrack = String(
+    trackItems.value[0]?.root_obs_id || trackItems.value[0]?.obs_id || '',
+  ).trim()
+  return fromTrack || String(d.obs_id || '').trim()
+})
 
-/** 추적관찰 버튼 영역: 1차 상세에서만 노출 */
-const showTrackAction = computed(() => currentTrackIndex.value === 0)
+/**
+ * N차 상세 모두 「추적관찰」 노출.
+ * 클릭 시 최초(root) 기준으로 다음 차수 등록.
+ * 1차 미완료일 때만 비활성.
+ */
+const showTrackAction = computed(() => Boolean(rootObsId.value))
+const canStartTrack = computed(() => {
+  if (!rootObsId.value) return false
+  if (isRootObs.value) return isCompleted.value
+  // 2차+ 가 존재하면 1차는 이미 완료된 상태
+  return true
+})
 
 function roundLabel(index: number): string {
   return `${index + 1}차`
@@ -150,10 +169,12 @@ async function loadAll() {
 
 function goTrackObservation() {
   if (!canStartTrack.value) return
+  const parentId = rootObsId.value
+  if (!parentId) return
   void router.push({
     name: 'observation-new',
     query: {
-      parent_obs_id: props.detail.obs_id,
+      parent_obs_id: parentId,
       from: 'fruit-track',
     },
   })
@@ -255,7 +276,7 @@ defineExpose({ reload: loadAll })
       >
         추적관찰
       </OdsButton>
-      <p v-if="!isCompleted" class="hint hint--gate">
+      <p v-if="isRootObs && !isCompleted" class="hint hint--gate">
         1차 관찰을 확정 저장한 뒤 추적관찰(2차)을 시작할 수 있습니다.
       </p>
     </div>
@@ -274,12 +295,11 @@ defineExpose({ reload: loadAll })
 .fruit-track {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-16);
+  gap: var(--ods-card-block-gap, var(--ods-space-16));
 }
 .block__title {
-  margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-body-2);
-  font-weight: 700;
+  margin: 0 0 var(--ods-form-label-gap, var(--ods-space-8));
+  font: var(--ods-font-card-section);
   color: var(--ods-color-text);
 }
 .meta,
@@ -289,22 +309,22 @@ defineExpose({ reload: loadAll })
 .timeline__delta,
 .timeline__title {
   margin: 0;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-meta);
   color: var(--ods-color-text-secondary);
 }
 .summary {
-  margin-top: var(--ods-space-8);
-  font-weight: 600;
+  margin-top: var(--ods-form-label-gap, var(--ods-space-8));
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text);
 }
 .error {
   margin: 0;
   color: var(--ods-color-danger);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-section);
 }
 .timeline {
   list-style: none;
-  margin: var(--ods-space-8) 0 0;
+  margin: var(--ods-form-label-gap, var(--ods-space-8)) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -314,8 +334,8 @@ defineExpose({ reload: loadAll })
   margin: 0;
   padding: 0;
   border: 1px solid var(--ods-color-border);
-  border-radius: 8px;
-  background: #fff;
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
   overflow: hidden;
   display: flex;
   align-items: stretch;
@@ -340,7 +360,7 @@ defineExpose({ reload: loadAll })
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ods-space-4);
   padding: var(--ods-space-8);
   border: none;
   background: transparent;
@@ -349,12 +369,12 @@ defineExpose({ reload: loadAll })
   color: inherit;
 }
 .timeline__thumb {
-  width: 56px;
-  height: 56px;
+  width: var(--ods-thumb-sm);
+  height: var(--ods-thumb-sm);
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--ods-radius-button);
   flex-shrink: 0;
-  background: var(--ods-color-gray-100, #f3f4f6);
+  background: var(--ods-color-gray-100);
 }
 .timeline__thumb--empty {
   display: inline-flex;
@@ -364,28 +384,28 @@ defineExpose({ reload: loadAll })
   font-weight: 700;
 }
 .timeline__dt {
-  font: var(--ods-font-body-2);
-  font-weight: 700;
+  font: var(--ods-font-card-body);
   color: var(--ods-color-text);
 }
 .timeline__round {
   display: inline-block;
-  margin-right: 6px;
-  padding: 0 6px;
-  border-radius: 4px;
+  margin-right: var(--ods-space-4);
+  padding: 0 var(--ods-space-8);
+  border-radius: var(--ods-radius-badge);
   background: color-mix(in srgb, var(--ods-color-primary) 14%, white);
   color: var(--ods-color-primary);
-  font-size: 11px;
+  font: var(--ods-font-card-help);
   font-weight: 700;
   vertical-align: 1px;
 }
 .timeline__badge {
-  margin-left: 6px;
-  font-size: 11px;
+  margin-left: var(--ods-space-4);
+  font: var(--ods-font-card-help);
+  font-weight: 700;
   color: var(--ods-color-primary);
 }
 .timeline__title {
-  font-weight: 600;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text);
 }
 .actions {
@@ -394,7 +414,13 @@ defineExpose({ reload: loadAll })
   flex-direction: column;
   gap: var(--ods-space-8);
 }
+.actions :deep(.ods-btn) {
+  min-height: var(--ods-button-height-in-card);
+}
+.hint {
+  font: var(--ods-font-card-help);
+}
 .hint--gate {
-  color: var(--ods-color-caution, #b45309);
+  color: var(--ods-color-caution);
 }
 </style>

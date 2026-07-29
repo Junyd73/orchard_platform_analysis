@@ -106,27 +106,29 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 function parseFlowRows(raw: unknown): FlowRow[] {
   if (!Array.isArray(raw)) return []
-  return raw
-    .map((row) => {
-      const r = asRecord(row)
-      if (!r) return null
-      const valuesRaw = Array.isArray(r.values) ? r.values : []
-      const values: FlowCell[] = valuesRaw.map((cell) => {
-        const c = asRecord(cell)
-        const price = c?.price == null ? null : Number(c.price)
-        return {
-          date: String(c?.date || ''),
-          price: price != null && Number.isFinite(price) && price > 0 ? price : null,
-        }
-      })
+  const out: FlowRow[] = []
+  for (const row of raw) {
+    const r = asRecord(row)
+    if (!r) continue
+    const valuesRaw = Array.isArray(r.values) ? r.values : []
+    const values: FlowCell[] = valuesRaw.map((cell) => {
+      const c = asRecord(cell)
+      const price = c?.price == null ? null : Number(c.price)
       return {
-        corp_name: String(r.corp_name || '—'),
-        values,
-        today_price: r.today_price == null ? null : Number(r.today_price),
-        pct_vs_prev: r.pct_vs_prev == null ? null : Number(r.pct_vs_prev),
+        date: String(c?.date || ''),
+        price: price != null && Number.isFinite(price) && price > 0 ? price : null,
       }
     })
-    .filter((x): x is FlowRow => x != null)
+    const todayRaw = r.today_price == null ? null : Number(r.today_price)
+    const pctRaw = r.pct_vs_prev == null ? null : Number(r.pct_vs_prev)
+    out.push({
+      corp_name: String(r.corp_name || '—'),
+      values,
+      today_price: todayRaw != null && Number.isFinite(todayRaw) ? todayRaw : null,
+      pct_vs_prev: pctRaw != null && Number.isFinite(pctRaw) ? pctRaw : null,
+    })
+  }
+  return out
 }
 
 const isSignalView = computed(() => {
@@ -228,25 +230,25 @@ const corpRows = computed((): CorpRow[] => {
   const market = asRecord(payload.market)
   const raw = (market?.corps ?? payload.corps) as unknown
   if (!Array.isArray(raw)) return []
-  return raw
-    .map((row) => {
-      const r = asRecord(row)
-      if (!r) return null
-      return {
-        corp_name: String(r.corp_name || '—'),
-        box_qty: Number(r.box_qty) || 0,
-        qty_kg: r.qty_kg == null ? undefined : Number(r.qty_kg),
-        max_price: Number(r.max_price) || 0,
-        avg_price: Number(r.avg_price) || 0,
-        max_price_origin: String(r.max_price_origin || '').trim() || '—',
-        max_price_box_qty:
-          r.max_price_box_qty == null ? undefined : Number(r.max_price_box_qty),
-        max_price_kg: r.max_price_kg == null ? undefined : Number(r.max_price_kg),
-        qty_change_vs_prev:
-          r.qty_change_vs_prev == null ? undefined : Number(r.qty_change_vs_prev),
-      }
+  const out: CorpRow[] = []
+  for (const row of raw) {
+    const r = asRecord(row)
+    if (!r) continue
+    out.push({
+      corp_name: String(r.corp_name || '—'),
+      box_qty: Number(r.box_qty) || 0,
+      qty_kg: r.qty_kg == null ? undefined : Number(r.qty_kg),
+      max_price: Number(r.max_price) || 0,
+      avg_price: Number(r.avg_price) || 0,
+      max_price_origin: String(r.max_price_origin || '').trim() || '—',
+      max_price_box_qty:
+        r.max_price_box_qty == null ? undefined : Number(r.max_price_box_qty),
+      max_price_kg: r.max_price_kg == null ? undefined : Number(r.max_price_kg),
+      qty_change_vs_prev:
+        r.qty_change_vs_prev == null ? undefined : Number(r.qty_change_vs_prev),
     })
-    .filter((x): x is CorpRow => x != null)
+  }
+  return out
 })
 
 function parseWeatherSummary(src: Record<string, unknown> | null): WeatherSummary | null {

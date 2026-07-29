@@ -51,15 +51,35 @@
 
   /*
    * Mobile form readability (Project A 적용 규칙 — ODS PDF 원본 비변경)
-   * 확정: 현장·야외 시인성 / SCR-002 기본정보
+   * 확정 소폭조정(2026-07-26): 라벨 15 / 입력 14 / 필드 35 / 필드간격 18 / 하단버튼 48
+   * 레퍼런스: SCR-002 ObservationNewView · 열매 ObservationFruitMeasureView
    */
   --ods-color-text-label: #2d3748;
-  --ods-font-form-label: 700 16px/1.4 var(--ods-font-family);
-  --ods-font-form-value: 500 17px/1.45 var(--ods-font-family);
-  --ods-font-form-placeholder: 400 16px/1.45 var(--ods-font-family);
+  --ods-font-form-label: 700 15px/1.4 var(--ods-font-family);
+  --ods-font-form-value: 500 14px/1.45 var(--ods-font-family);
+  --ods-font-form-placeholder: 400 14px/1.45 var(--ods-font-family);
   --ods-font-form-help: 400 13px/1.45 var(--ods-font-family);
   --ods-form-label-gap: var(--ods-space-8);
-  --ods-form-field-gap: var(--ods-space-24);
+  --ods-form-field-gap: 18px;
+
+  /*
+   * Card interior (조회 카드 내부 — 페이지/폼보다 한 단 작게)
+   * 카드 바깥 제목(15)과 구분. 레퍼런스: 과실 추적 카드
+   * 카드 내 표: th=section(13 Bold) > 본문 항목=emphasis/meta(11) — MOBILE_FORM_READABILITY §3
+   */
+  --ods-font-card-section: 700 13px/1.45 var(--ods-font-family);
+  --ods-font-card-body: 700 13px/1.45 var(--ods-font-family);
+  --ods-font-card-meta: 400 11px/1.4 var(--ods-font-family);
+  --ods-font-card-emphasis: 600 11px/1.4 var(--ods-font-family);
+  --ods-font-card-help: 400 11px/1.4 var(--ods-font-family);
+  --ods-card-block-gap: var(--ods-space-16);
+
+  /*
+   * Section title (페이지 스택 섹션 제목 — 아이콘 + 텍스트)
+   * 레퍼런스: SCR-001 AI 분석 · 관찰 내역 / Home 카드 헤드
+   * 아이콘 크기: --ods-section-title-icon (= --ods-icon-lg) — Layout size scale 참조
+   */
+  --ods-section-title-gap: var(--ods-space-8);
 
   --ods-page-padding-x: var(--ods-space-16);
   --ods-card-padding: var(--ods-space-16);
@@ -74,13 +94,33 @@
   --ods-page-content-gap: var(--ods-space-16);
   --ods-page-content-max: 480px;
 
-  /* AppBar 세로 크롬: 상단 패딩 = 다음 블록(Hero 등)과의 간격 */
+  /* AppBar 세로 크롬: 내부 pad-y만 사용. 다음 블록과의 추가 간격 = 0 */
   --ods-appbar-pad-y: var(--ods-space-4);
-  --ods-appbar-content-gap: var(--ods-appbar-pad-y);
+  --ods-appbar-content-gap: 0px;
 
-  /* Control sizes */
-  --ods-control-height: 52px;
+  /* Control sizes — 폼 필드 35 / 카드 안 버튼 40 / 하단 Floating 48 */
+  --ods-control-height: 35px;
+  --ods-select-height: 35px;
+  --ods-button-height-in-card: 40px;
+  --ods-button-height: 48px;
   --ods-touch-min: 44px;
+
+  /*
+   * Layout size scale (썸네일 · 점 · 아이콘 · 소형 히트)
+   * 4px 그리드 준수. 레퍼런스: SCR-001 목록/캘린더 · PhotoPanel · AppBar
+   */
+  --ods-thumb-sm: var(--ods-space-56); /* 56 — AI 위험·추적·타임라인 */
+  --ods-thumb-md: 72px; /* 목록 카드 */
+  --ods-thumb-lg: 96px; /* 사진 그리드 */
+  --ods-dot-sm: var(--ods-space-4); /* 캘린더 기본 점 */
+  --ods-dot-md: var(--ods-space-8); /* 선택·강조 점 */
+  --ods-icon-sm: 14px;
+  --ods-icon-md: 16px;
+  --ods-icon-lg: 18px;
+  --ods-icon-xl: 22px; /* AppBar */
+  --ods-icon-2xl: 24px; /* BottomNav · Hero KPI well */
+  --ods-hit-sm: 32px; /* 캘린더 prev/next · 인라인 › */
+  --ods-section-title-icon: var(--ods-icon-lg);
 
   /* Radius & shadow */
   --ods-radius-card: 16px;

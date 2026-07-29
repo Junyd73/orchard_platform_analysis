@@ -8,6 +8,7 @@ import {
   CALENDAR_KIND_COLOR,
   CALENDAR_KIND_ICON,
   daysInMonth,
+  displayWeatherNm,
   firstWeekdaySun0,
   isFutureDate,
   isRestDay,
@@ -15,8 +16,10 @@ import {
   pad2,
   shiftMonth,
   todayIso,
+  weatherIconSrc,
   WEEKDAY_LABELS,
   WORK_FILTER_OPTIONS,
+  WORK_FILTER_WEATHER,
   type CalendarScheduleHint,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
@@ -81,8 +84,24 @@ type CalCell = {
   isRest: boolean
   cell: WorkLogDayCell | null
   hasSchedule: boolean
+  weatherIcon: string | null
+  weatherLabel: string
   lines: ReturnType<typeof buildCalendarLines>['lines']
   extra: number
+}
+
+function cellWeatherIcon(
+  cell: WorkLogDayCell | null,
+  showWeather: boolean,
+): { icon: string | null; label: string } {
+  if (!showWeather || !cell) return { icon: null, label: '' }
+  const label = displayWeatherNm(cell.weather_cd, cell.weather_nm)
+  const has = Boolean(String(cell.weather_cd || '').trim()) || Boolean(label)
+  if (!has) return { icon: null, label: '' }
+  return {
+    icon: weatherIconSrc(cell.weather_cd, cell.weather_nm),
+    label: label || '기상',
+  }
 }
 
 const cells = computed((): CalCell[] => {
@@ -90,13 +109,30 @@ const cells = computed((): CalCell[] => {
   const start = firstWeekdaySun0(props.year, props.month)
   const out: CalCell[] = []
   const selected = selectedIso.value
+  const showWeather = Boolean(props.filters[WORK_FILTER_WEATHER])
+
+  function pushCell(partial: Omit<CalCell, 'lines' | 'extra' | 'weatherIcon' | 'weatherLabel' | 'hasSchedule'> & {
+    hasSchedule?: boolean
+  }) {
+    const sched = props.schedulesByDt?.[partial.iso] || []
+    const built = buildCalendarLines(partial.cell, props.filters, sched)
+    const wx = cellWeatherIcon(partial.cell, showWeather)
+    out.push({
+      ...partial,
+      hasSchedule: sched.length > 0,
+      weatherIcon: wx.icon,
+      weatherLabel: wx.label,
+      lines: built.lines,
+      extra: built.extra,
+    })
+  }
 
   const prev = shiftMonth(props.year, props.month, -1)
   const prevTotal = daysInMonth(prev.year, prev.month)
   for (let i = start - 1; i >= 0; i -= 1) {
     const d = prevTotal - i
     const iso = `${prev.year}-${pad2(prev.month)}-${pad2(d)}`
-    out.push({
+    pushCell({
       key: `p-${iso}`,
       day: d,
       iso,
@@ -105,19 +141,13 @@ const cells = computed((): CalCell[] => {
       isToday: false,
       isSelected: false,
       isRest: isRestDay(iso),
-      cell: null,
-      hasSchedule: false,
-      lines: [],
-      extra: 0,
+      cell: props.days[iso] || null,
     })
   }
 
   for (let d = 1; d <= total; d += 1) {
     const iso = `${props.year}-${pad2(props.month)}-${pad2(d)}`
-    const cell = props.days[iso] || null
-    const sched = props.schedulesByDt?.[iso] || []
-    const built = buildCalendarLines(cell, props.filters, sched)
-    out.push({
+    pushCell({
       key: iso,
       day: d,
       iso,
@@ -126,10 +156,7 @@ const cells = computed((): CalCell[] => {
       isToday: iso === today,
       isSelected: iso === selected,
       isRest: isRestDay(iso),
-      cell,
-      hasSchedule: sched.length > 0,
-      lines: built.lines,
-      extra: built.extra,
+      cell: props.days[iso] || null,
     })
   }
 
@@ -137,7 +164,7 @@ const cells = computed((): CalCell[] => {
   let n = 1
   while (out.length % 7 !== 0) {
     const iso = `${next.year}-${pad2(next.month)}-${pad2(n)}`
-    out.push({
+    pushCell({
       key: `n-${iso}`,
       day: n,
       iso,
@@ -146,10 +173,7 @@ const cells = computed((): CalCell[] => {
       isToday: false,
       isSelected: false,
       isRest: isRestDay(iso),
-      cell: null,
-      hasSchedule: false,
-      lines: [],
-      extra: 0,
+      cell: props.days[iso] || null,
     })
     n += 1
   }
@@ -223,16 +247,7 @@ function onTap(c: CalCell) {
     didSwipe.value = false
     return
   }
-  if (!c.inMonth) {
-    if (c.iso < `${props.year}-${pad2(props.month)}-01`) emit('prev-month')
-    else emit('next-month')
-    return
-  }
-  if (c.future) {
-    // 미래일도 일정 확인·등록을 위해 일간 진입 허용 (실적 저장은 일간에서 차단)
-    emit('select', c.iso)
-    return
-  }
+  // 앞·뒷달 패딩 칸도 해당 일자 일간으로 진입 (월 전환만 하지 않음)
   emit('select', c.iso)
 }
 </script>
@@ -255,6 +270,7 @@ function onTap(c: CalCell) {
 
     <div
       class="cal-gesture"
+      data-no-tab-swipe
       @pointerdown="onPointerDown"
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
@@ -292,7 +308,6 @@ function onTap(c: CalCell) {
               'cal__cell--today': c.isToday && !c.isSelected,
               'cal__cell--selected': c.inMonth && c.isSelected,
               'cal__cell--work':
-                c.inMonth &&
                 (c.cell?.has_work || c.hasSchedule) &&
                 !c.isSelected &&
                 !c.isToday,
@@ -300,31 +315,40 @@ function onTap(c: CalCell) {
             @click="onTap(c)"
           >
             <span
-              class="cal__day"
-              :class="{
-                'cal__day--rest': c.isRest && c.inMonth,
-                'cal__day--today': c.isToday,
-              }"
+              class="cal__day-row"
             >
-              {{ c.day }}
+              <span
+                class="cal__day"
+                :class="{
+                  'cal__day--rest': c.isRest && c.inMonth,
+                  'cal__day--today': c.isToday,
+                }"
+              >
+                {{ c.day }}
+              </span>
+              <img
+                v-if="c.weatherIcon"
+                class="cal__wx"
+                :src="c.weatherIcon"
+                :alt="c.weatherLabel"
+                :title="c.weatherLabel"
+              />
             </span>
-            <template v-if="c.inMonth">
-              <div class="cal__events">
-                <p
-                  v-for="(line, idx) in c.lines"
-                  :key="`${c.iso}-${idx}`"
-                  class="cal__line"
+            <div class="cal__events">
+              <p
+                v-for="(line, idx) in c.lines"
+                :key="`${c.iso}-${idx}`"
+                class="cal__line"
+              >
+                <span
+                  class="cal__line-text"
+                  :style="{ color: CALENDAR_KIND_COLOR[line.kind] }"
                 >
-                  <span
-                    class="cal__line-text"
-                    :style="{ color: CALENDAR_KIND_COLOR[line.kind] }"
-                  >
-                    {{ line.text }}
-                  </span>
-                </p>
-                <p v-if="c.extra > 0" class="cal__more">+{{ c.extra }}</p>
-              </div>
-            </template>
+                  {{ line.text }}
+                </span>
+              </p>
+              <p v-if="c.extra > 0" class="cal__more">+{{ c.extra }}</p>
+            </div>
           </button>
         </div>
       </div>
@@ -334,7 +358,7 @@ function onTap(c: CalCell) {
       v-if="showEmpty && !loading && !hasAnyWork"
       class="cal-empty"
       compact
-      title="이 달의 작업·예정이 없습니다"
+      title="이 달의 작업이 없습니다"
       description="날짜를 눌러 영농일지 또는 일정을 등록해 보세요."
     />
 
@@ -381,8 +405,8 @@ function onTap(c: CalCell) {
   min-width: 0;
 }
 .cal-card__cal-ico {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   color: var(--ods-color-primary);
 }
 .cal-card__title {
@@ -396,13 +420,11 @@ function onTap(c: CalCell) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
+  min-height: var(--ods-hit-sm);
   padding: 0 var(--ods-space-12);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-badge);
-  font: var(--ods-font-caption);
-  font-weight: 600;
-  line-height: 1;
+  font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text);
   cursor: pointer;
   white-space: nowrap;
@@ -475,7 +497,7 @@ function onTap(c: CalCell) {
 }
 .cal__wd {
   text-align: center;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   font-weight: 700;
   color: var(--ods-color-text-secondary);
   padding: var(--ods-space-4) 0;
@@ -488,10 +510,10 @@ function onTap(c: CalCell) {
   border-left: 1px solid var(--ods-color-border);
 }
 .cal__cell {
-  min-height: 66px;
-  height: 66px;
+  min-height: calc(var(--ods-space-64) + var(--ods-space-4));
+  height: calc(var(--ods-space-64) + var(--ods-space-4));
   margin: 0;
-  padding: 3px 4px;
+  padding: var(--ods-space-4);
   border: none;
   border-right: 1px solid var(--ods-color-border);
   border-bottom: 1px solid var(--ods-color-border);
@@ -510,7 +532,10 @@ function onTap(c: CalCell) {
 }
 .cal__cell--out {
   background: color-mix(in srgb, var(--ods-color-gray-100) 70%, white);
-  opacity: 0.55;
+  opacity: 0.72;
+}
+.cal__cell--out.cal__cell--work {
+  opacity: 0.9;
 }
 .cal__cell--future {
   opacity: 0.5;
@@ -519,17 +544,30 @@ function onTap(c: CalCell) {
   background: color-mix(in srgb, var(--ods-color-primary) 5%, white);
 }
 .cal__cell--selected {
-  background: var(--ods-color-primary-soft);
-  box-shadow: inset 0 0 0 1.5px var(--ods-color-primary);
+  background: color-mix(in srgb, var(--ods-color-primary) 10%, white);
+  box-shadow: inset 0 0 0 2px var(--ods-color-primary);
 }
 .cal__cell--work:not(.cal__cell--selected):not(.cal__cell--today) {
   background: color-mix(in srgb, var(--ods-color-primary) 4%, white);
 }
+.cal__day-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-4);
+  margin: 0 0 var(--ods-space-4);
+  min-width: 0;
+}
 .cal__day {
-  font-size: 10px;
+  margin: 0;
+  font: var(--ods-font-card-help);
   font-weight: 700;
-  line-height: 1.1;
-  margin: 0 0 2px;
+}
+.cal__wx {
+  width: var(--ods-space-12);
+  height: var(--ods-space-12);
+  flex-shrink: 0;
+  object-fit: contain;
 }
 .cal__day--rest {
   color: var(--ods-color-danger);
@@ -540,15 +578,14 @@ function onTap(c: CalCell) {
 .cal__events {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--ods-space-4);
   min-height: 0;
   flex: 1;
 }
 .cal__line {
   margin: 0;
   min-width: 0;
-  font-size: 11px;
-  line-height: 1.35;
+  font: var(--ods-font-card-meta);
 }
 .cal__line-text {
   display: block;
@@ -560,7 +597,7 @@ function onTap(c: CalCell) {
 }
 .cal__more {
   margin: 0;
-  font-size: 10px;
+  font: var(--ods-font-card-help);
   font-weight: 700;
   color: var(--ods-color-primary);
 }
@@ -590,10 +627,10 @@ function onTap(c: CalCell) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-width: 40px;
+  gap: var(--ods-space-4);
+  min-width: var(--ods-space-40);
   margin: 0;
-  padding: 6px 8px;
+  padding: var(--ods-space-4) var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-badge);
   background: var(--ods-color-bg-muted);
@@ -610,15 +647,13 @@ function onTap(c: CalCell) {
   border-color: color-mix(in srgb, var(--ods-color-primary) 28%, var(--ods-color-border));
 }
 .cal__leg-ico {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
   flex-shrink: 0;
 }
 .cal__leg-text {
-  font: var(--ods-font-caption);
-  font-size: 10px;
+  font: var(--ods-font-card-help);
   font-weight: 700;
-  line-height: 1.2;
   white-space: nowrap;
   text-align: center;
 }

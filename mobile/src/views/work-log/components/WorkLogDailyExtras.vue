@@ -242,7 +242,7 @@ function thumbSrc(ph: ObservationPhotoItem): string {
   padding: 0;
   border: none;
   background: transparent;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   font-weight: 700;
   color: var(--ods-color-primary);
   cursor: pointer;
@@ -251,7 +251,7 @@ function thumbSrc(ph: ObservationPhotoItem): string {
 
 .obs-card__empty {
   margin: 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
   text-align: center;
   padding: var(--ods-space-8) 0;
@@ -289,7 +289,7 @@ function thumbSrc(ph: ObservationPhotoItem): string {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: var(--ods-space-4);
   margin: 0;
   padding: var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
@@ -307,7 +307,7 @@ function thumbSrc(ph: ObservationPhotoItem): string {
 }
 
 .obs-list__title {
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 700;
   color: var(--ods-color-text);
   display: -webkit-box;
@@ -318,7 +318,7 @@ function thumbSrc(ph: ObservationPhotoItem): string {
 }
 
 .obs-list__meta {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -345,12 +345,12 @@ function thumbSrc(ph: ObservationPhotoItem): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
   text-align: center;
   padding: var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
-  border-radius: 8px;
+  border-radius: var(--ods-radius-button);
   background: var(--ods-color-bg-muted);
   box-sizing: border-box;
 }
@@ -361,7 +361,7 @@ function thumbSrc(ph: ObservationPhotoItem): string {
   min-height: 0;
   margin: 0;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--ods-radius-button);
   overflow: hidden;
   border: 1px solid var(--ods-color-border);
   background: var(--ods-color-bg-muted);
@@ -385,14 +385,14 @@ function thumbSrc(ph: ObservationPhotoItem): string {
 
 .photos__badge {
   position: absolute;
-  top: 4px;
-  left: 4px;
-  padding: 1px 6px;
+  top: var(--ods-space-4);
+  left: var(--ods-space-4);
+  padding: var(--ods-space-4) var(--ods-space-8);
   border-radius: var(--ods-radius-badge);
   background: var(--ods-color-primary);
   color: var(--ods-color-white);
-  font: var(--ods-font-caption);
-  font-size: 9px;
+  font: var(--ods-font-card-help);
+  font: var(--ods-font-card-help);
   font-weight: 700;
   pointer-events: none;
 }

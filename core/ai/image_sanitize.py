@@ -1,14 +1,25 @@
 # -*- coding: utf-8 -*-
-"""관찰 사진 AI 전송 전 안전 처리: EXIF 제거·축소·JPEG 변환(메모리)."""
+"""관찰 사진 AI 전송 전 안전 처리: EXIF 제거·축소·JPEG 변환(메모리).
+
+PC·FastAPI 공통. Pillow 사용( headless 서버에서 PyQt6 불필요 ).
+"""
 
 from __future__ import annotations
 
 import base64
+import io
 from pathlib import Path
 
 MAX_PHOTOS_PER_ANALYSIS = 5
 MAX_LONG_EDGE_PX = 1600
 JPEG_QUALITY = 85
+
+MSG_FILE_MISSING = "파일이 없습니다."
+MSG_IMAGE_UNREADABLE = "이미지를 읽을 수 없습니다."
+MSG_JPEG_FAIL = "JPEG 변환에 실패했습니다."
+MSG_JPEG_EMPTY = "변환 결과가 비어 있습니다."
+MSG_DEPENDENCY = "pillow 패키지가 설치되지 않았습니다."
+MSG_SELECT_PHOTOS = "분석할 사진을 선택해 주세요."
 
 
 def sanitize_image_to_jpeg_bytes(
@@ -18,52 +29,44 @@ def sanitize_image_to_jpeg_bytes(
     quality: int = JPEG_QUALITY,
 ) -> tuple[bool, str, bytes | None]:
     """EXIF/GPS 제거 후 긴 변 축소 JPEG 바이트 반환."""
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QImage, QImageReader
-
     path = Path(src_path)
     if not path.is_file():
-        return False, "파일이 없습니다.", None
+        return False, MSG_FILE_MISSING, None
 
-    reader = QImageReader(str(path))
-    reader.setAutoTransform(True)
-    img = reader.read()
-    if img.isNull():
-        return False, "이미지를 읽을 수 없습니다.", None
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return False, MSG_DEPENDENCY, None
 
-    # 메타 없는 새 이미지로 복사(EXIF 제거)
-    clean = QImage(img.size(), QImage.Format.Format_RGB32)
-    clean.fill(0)
-    from PyQt6.QtGui import QPainter
+    try:
+        with Image.open(path) as opened:
+            img = ImageOps.exif_transpose(opened)
+            # EXIF 없는 새 버퍼용 복사
+            img = img.copy()
+        if img.mode != "RGB":
+            img = img.convert("RGB")
 
-    painter = QPainter(clean)
-    painter.drawImage(0, 0, img)
-    painter.end()
+        w, h = img.size
+        if w <= 0 or h <= 0:
+            return False, MSG_IMAGE_UNREADABLE, None
 
-    w, h = clean.width(), clean.height()
-    long_edge = max(w, h)
-    if long_edge > max_long_edge and long_edge > 0:
-        scale = max_long_edge / float(long_edge)
-        nw = max(1, int(w * scale))
-        nh = max(1, int(h * scale))
-        clean = clean.scaled(
-            nw,
-            nh,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        long_edge = max(w, h)
+        if long_edge > max_long_edge > 0:
+            scale = max_long_edge / float(long_edge)
+            nw = max(1, int(w * scale))
+            nh = max(1, int(h * scale))
+            img = img.resize((nw, nh), Image.Resampling.LANCZOS)
 
-    from PyQt6.QtCore import QBuffer, QIODevice
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=int(quality), optimize=True)
+        data = buf.getvalue()
+    except OSError:
+        return False, MSG_IMAGE_UNREADABLE, None
+    except Exception:
+        return False, MSG_JPEG_FAIL, None
 
-    qbuf = QBuffer()
-    qbuf.open(QIODevice.OpenModeFlag.WriteOnly)
-    ok = clean.save(qbuf, "JPG", quality)
-    qbuf.close()
-    if not ok:
-        return False, "JPEG 변환에 실패했습니다.", None
-    data = bytes(qbuf.data())
     if not data:
-        return False, "변환 결과가 비어 있습니다.", None
+        return False, MSG_JPEG_EMPTY, None
     return True, "", data
 
 
@@ -75,10 +78,10 @@ def to_data_url_jpeg(jpeg_bytes: bytes) -> str:
 def prepare_images_for_ai(
     paths: list[str],
 ) -> tuple[bool, str, list[dict]]:
-    """경로 목록 → [{path_label, data_url}] (최대 MAX_PHOTOS_PER_ANALYSIS장). 개인정보·절대경로 미포함."""
+    """경로 목록 → [{label, data_url, …}] (최대 MAX_PHOTOS_PER_ANALYSIS장). 절대경로 미포함."""
     selected = [p for p in (paths or []) if str(p or "").strip()][:MAX_PHOTOS_PER_ANALYSIS]
     if not selected:
-        return False, "분석할 사진을 선택해 주세요.", []
+        return False, MSG_SELECT_PHOTOS, []
     out: list[dict] = []
     for i, src in enumerate(selected, start=1):
         ok, msg, data = sanitize_image_to_jpeg_bytes(src)

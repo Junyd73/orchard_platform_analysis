@@ -127,7 +127,7 @@ const precipProbText = computed(() => {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ods-space-8);
   padding-right: 10px;
 }
 
@@ -141,7 +141,7 @@ const precipProbText = computed(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ods-space-4);
 }
 
 .wx__now {
@@ -154,7 +154,7 @@ const precipProbText = computed(() => {
 
 .wx__range {
   margin: 0;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 
@@ -171,22 +171,22 @@ const precipProbText = computed(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: var(--ods-space-8);
+  padding: 0 var(--ods-space-8);
 }
 
 .wx__row {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font: var(--ods-font-caption);
+  gap: var(--ods-space-4);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text);
   white-space: nowrap;
 }
 
 .wx__mini {
-  width: 14px;
-  height: 14px;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
   flex-shrink: 0;
 }
 
@@ -196,7 +196,7 @@ const precipProbText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--ods-space-8);
   padding-left: 10px;
 }
 
@@ -204,16 +204,16 @@ const precipProbText = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 1px;
+  gap: var(--ods-space-4);
 }
 
 .wx__precip-label {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 
 .wx__precip-val {
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-form-help);
   font-weight: 800;
   color: var(--ods-color-text);
 }

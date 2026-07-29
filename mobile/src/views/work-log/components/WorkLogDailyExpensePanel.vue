@@ -317,43 +317,43 @@ function onRemoveRow(row: DailyShellExpenseRow) {
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ods-space-12);
   min-width: 0;
   max-width: 100%;
 }
 .panel__empty {
   margin: 0;
-  font-size: 13px;
-  color: #8a8074;
+  font: var(--ods-font-form-help);
+  color: var(--ods-color-text-secondary);
 }
 .panel__add {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 40px;
-  border: 1px dashed #c5b8a4;
-  border-radius: 10px;
-  background: #fff;
-  color: #5c5348;
-  font-size: 14px;
+  gap: var(--ods-space-8);
+  min-height: var(--ods-button-height-in-card);
+  border: 1px dashed var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  color: var(--ods-color-text);
+  font: var(--ods-font-form-value);
   font-weight: 600;
 }
 .panel__add--on {
   border-style: solid;
-  background: #f7f2ea;
+  background: var(--ods-color-gray-100);
 }
 .panel__add img {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
 }
 .panel__confirm {
-  min-height: 40px;
+  min-height: var(--ods-button-height-in-card);
   border: none;
-  border-radius: 10px;
-  background: #2e7d4f;
-  color: #fff;
-  font-size: 14px;
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
+  font: var(--ods-font-form-value);
   font-weight: 600;
 }
 .list {
@@ -362,22 +362,22 @@ function onRemoveRow(row: DailyShellExpenseRow) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--ods-space-8);
   min-width: 0;
 }
 .list__item {
   display: flex;
   align-items: flex-start;
-  gap: 4px;
-  padding: 10px 8px 10px 12px;
-  border-radius: 10px;
-  background: #f7f2ea;
+  gap: var(--ods-space-4);
+  padding: var(--ods-space-8) var(--ods-space-8) var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-gray-100);
   min-width: 0;
-  border: 1.5px solid transparent;
+  border: 2px solid transparent;
 }
 .list__item--on {
-  border-color: #2e7d4f;
-  background: #eef6f1;
+  border-color: var(--ods-color-primary);
+  background: color-mix(in srgb, var(--ods-color-primary) 8%, white);
 }
 .list__body {
   flex: 1;
@@ -390,8 +390,8 @@ function onRemoveRow(row: DailyShellExpenseRow) {
   cursor: pointer;
 }
 .list__title {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 0 0 var(--ods-space-4);
+  font: var(--ods-font-form-value);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -399,8 +399,8 @@ function onRemoveRow(row: DailyShellExpenseRow) {
 }
 .list__meta {
   margin: 0;
-  font-size: 12px;
-  color: #6b6358;
+  font: var(--ods-font-card-section);
+  color: var(--ods-color-text-secondary);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -410,40 +410,40 @@ function onRemoveRow(row: DailyShellExpenseRow) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: var(--ods-button-height-in-card);
+  height: var(--ods-button-height-in-card);
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--ods-radius-button);
   background: transparent;
   cursor: pointer;
 }
 .list__edit img,
 .list__del img {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
   opacity: 0.7;
 }
 .row-card__badge {
   margin: 0;
-  font-size: 12px;
+  font: var(--ods-font-card-section);
   font-weight: 700;
-  color: #2e7d4f;
+  color: var(--ods-color-primary);
 }
 .row-card__actions {
   display: flex;
-  gap: 8px;
+  gap: var(--ods-space-8);
 }
 .panel__cancel-edit {
   flex: 0 0 auto;
-  min-height: 40px;
-  padding: 0 14px;
-  border: 1px solid #c5b8a4;
-  border-radius: 10px;
-  background: #fff;
-  color: #5c5348;
-  font-size: 14px;
+  min-height: var(--ods-button-height-in-card);
+  padding: 0 var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  color: var(--ods-color-text);
+  font: var(--ods-font-form-value);
   font-weight: 600;
 }
 .row-card__actions .panel__confirm {
@@ -452,11 +452,11 @@ function onRemoveRow(row: DailyShellExpenseRow) {
 .row-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e8e0d4;
+  gap: var(--ods-space-12);
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  border: 1px solid var(--ods-color-border);
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
@@ -465,31 +465,33 @@ function onRemoveRow(row: DailyShellExpenseRow) {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--ods-space-4);
   min-width: 0;
 }
 .field__label {
-  font-size: 12px;
-  color: #6b6358;
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-text-label, var(--ods-color-text));
 }
 .field__input,
 .field__select {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid #d9d0c3;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 14px;
+  height: var(--ods-control-height);
+  min-height: var(--ods-control-height);
+  padding: 0 var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  font: var(--ods-font-form-value);
+  color: var(--ods-color-text);
   text-align: left;
 }
 .field__select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--ods-space-8);
 }
 .field__select span:first-child {
   overflow: hidden;
@@ -499,6 +501,6 @@ function onRemoveRow(row: DailyShellExpenseRow) {
 }
 .field__chev {
   flex-shrink: 0;
-  color: #a39a8c;
+  color: var(--ods-color-gray-500);
 }
 </style>

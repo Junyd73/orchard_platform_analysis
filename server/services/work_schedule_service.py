@@ -28,15 +28,18 @@ from core.work_schedule_constants import (  # noqa: E402
     DEFAULT_WORK_MAIN_CD,
     ERR_FUTURE_CONVERT,
     MSG_FUTURE_CONVERT,
+    MSG_INVALID_WORK_TM,
     SCHED_ID_PREFIX,
     SCHED_STATUS_CANCELLED,
     SCHED_STATUS_CONVERTED,
     SCHED_STATUS_PENDING,
     SYNC_STATUS_PENDING,
+    WORK_TM_RE,
 )
 from core.work_schedule_schema import ensure_work_schedule_schema  # noqa: E402
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TIME_RE = re.compile(WORK_TM_RE)
 
 
 def _s(v: object | None) -> str:
@@ -45,6 +48,20 @@ def _s(v: object | None) -> str:
 
 def _norm_dt(work_dt: str) -> str:
     return _s(work_dt)[:10]
+
+
+def _norm_tm(work_tm: str | None) -> str | None:
+    """HH:MM 또는 None(종일). 빈 문자열은 None."""
+    tm = _s(work_tm)
+    if not tm:
+        return None
+    tm = tm[:5]
+    if not _TIME_RE.match(tm):
+        raise BusinessRuleError(MSG_INVALID_WORK_TM)
+    hh, mm = int(tm[:2]), int(tm[3:5])
+    if hh > 23 or mm > 59:
+        raise BusinessRuleError(MSG_INVALID_WORK_TM)
+    return f"{hh:02d}:{mm:02d}"
 
 
 class WorkScheduleService:
@@ -71,6 +88,7 @@ class WorkScheduleService:
             farm_cd=_s(row["farm_cd"]),
             sched_id=_s(row["sched_id"]),
             work_dt=_s(row["work_dt"]),
+            work_tm=(_s(row["work_tm"]) or None) if "work_tm" in row.keys() else None,
             work_main_cd=_s(row["work_main_cd"]) or DEFAULT_WORK_MAIN_CD,
             work_mid_cd=_s(row["work_mid_cd"]),
             work_loc_id=_s(row["work_loc_id"]) or None,
@@ -115,7 +133,7 @@ class WorkScheduleService:
                 f"""
                 SELECT * FROM t_work_schedule
                 WHERE {where}
-                ORDER BY work_dt ASC, sched_id ASC
+                ORDER BY work_dt ASC, IFNULL(work_tm, '99:99') ASC, sched_id ASC
                 """,
                 params,
             ).fetchall()
@@ -134,6 +152,7 @@ class WorkScheduleService:
         dt = _norm_dt(body.work_dt)
         if not _DATE_RE.match(dt):
             raise BusinessRuleError("일정일은 YYYY-MM-DD 형식이어야 합니다.")
+        tm = _norm_tm(body.work_tm)
         mid = _s(body.work_mid_cd)
         if not mid:
             raise BusinessRuleError("작업 유형(work_mid_cd)을 선택해 주세요.")
@@ -143,12 +162,12 @@ class WorkScheduleService:
             conn.execute(
                 """
                 INSERT INTO t_work_schedule (
-                    farm_cd, sched_id, work_dt, work_main_cd, work_mid_cd,
+                    farm_cd, sched_id, work_dt, work_tm, work_main_cd, work_mid_cd,
                     work_loc_id, title, contents, sched_status_cd,
                     converted_work_id, google_event_id, sync_status, last_synced_at,
                     reg_dt, reg_id, mod_dt, mod_id
                 ) VALUES (
-                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     NULL, NULL, ?, NULL,
                     datetime('now','localtime'), ?, datetime('now','localtime'), ?
@@ -158,6 +177,7 @@ class WorkScheduleService:
                     farm,
                     sched_id,
                     dt,
+                    tm,
                     DEFAULT_WORK_MAIN_CD,
                     mid,
                     _s(body.work_loc_id) or None,
@@ -195,6 +215,12 @@ class WorkScheduleService:
             new_dt = _norm_dt(body.work_dt) if body.work_dt is not None else _s(row["work_dt"])
             if not _DATE_RE.match(new_dt):
                 raise BusinessRuleError("일정일은 YYYY-MM-DD 형식이어야 합니다.")
+            if "work_tm" in body.model_fields_set:
+                new_tm = _norm_tm(body.work_tm)
+            elif "work_tm" in row.keys():
+                new_tm = _norm_tm(_s(row["work_tm"]) or None)
+            else:
+                new_tm = None
             mid = (
                 _s(body.work_mid_cd)
                 if body.work_mid_cd is not None
@@ -226,22 +252,26 @@ class WorkScheduleService:
                 """
                 UPDATE t_work_schedule SET
                     work_dt = ?,
+                    work_tm = ?,
                     work_mid_cd = ?,
                     work_loc_id = ?,
                     title = ?,
                     contents = ?,
                     sched_status_cd = ?,
+                    sync_status = ?,
                     mod_id = ?,
                     mod_dt = datetime('now','localtime')
                 WHERE farm_cd = ? AND sched_id = ?
                 """,
                 (
                     new_dt,
+                    new_tm,
                     mid,
                     loc or None,
                     title or None,
                     contents or None,
                     status,
+                    SYNC_STATUS_PENDING,
                     uid,
                     farm,
                     sid,
@@ -263,14 +293,34 @@ class WorkScheduleService:
     ) -> WorkScheduleMessageResponse:
         farm = self._ensure_farm(farm_cd)
         sid = _s(sched_id)
+        google_eid = ""
         with get_sqlite_write_connection(self._db_path) as conn:
-            cur = conn.execute(
+            row = conn.execute(
+                """
+                SELECT google_event_id FROM t_work_schedule
+                WHERE farm_cd = ? AND sched_id = ?
+                """,
+                (farm, sid),
+            ).fetchone()
+            if not row:
+                raise EntityNotFoundError("Schedule not found")
+            google_eid = _s(row["google_event_id"])
+            conn.execute(
                 "DELETE FROM t_work_schedule WHERE farm_cd = ? AND sched_id = ?",
                 (farm, sid),
             )
-            if cur.rowcount <= 0:
-                raise EntityNotFoundError("Schedule not found")
             conn.commit()
+        if google_eid:
+            try:
+                from app.services.google_calendar_service import (  # noqa: WPS433
+                    GoogleCalendarService,
+                )
+
+                GoogleCalendarService(self._db_path).delete_schedule_event(
+                    farm, sid, google_event_id=google_eid
+                )
+            except Exception:  # noqa: BLE001
+                pass
         return WorkScheduleMessageResponse(message="일정이 삭제되었습니다.")
 
     def convert_to_draft(
@@ -300,6 +350,9 @@ class WorkScheduleService:
             loc = _s(row["work_loc_id"]) or None
             title = _s(row["title"])
             contents = _s(row["contents"])
+            work_tm = (
+                (_s(row["work_tm"]) or None) if "work_tm" in row.keys() else None
+            )
             memo = self._build_memo(title, contents)
 
             if status == SCHED_STATUS_CANCELLED:
@@ -322,6 +375,7 @@ class WorkScheduleService:
                                 work_dt=dt,
                                 work_mid_cd=mid,
                                 work_loc_id=loc,
+                                start_tm=work_tm,
                                 memo=memo,
                             ),
                         )
@@ -343,7 +397,7 @@ class WorkScheduleService:
                     reg_id, reg_dt, mod_id, mod_dt
                 ) VALUES (
                     ?, ?, ?, ?, ?,
-                    ?, NULL, NULL, NULL, ?,
+                    ?, ?, NULL, NULL, ?,
                     ?, datetime('now','localtime'), ?, datetime('now','localtime')
                 )
                 """,
@@ -354,6 +408,7 @@ class WorkScheduleService:
                     DEFAULT_WORK_MAIN_CD,
                     mid,
                     loc,
+                    work_tm,
                     memo or None,
                     uid,
                     uid,
@@ -380,6 +435,7 @@ class WorkScheduleService:
                     work_dt=dt,
                     work_mid_cd=mid,
                     work_loc_id=loc,
+                    start_tm=work_tm,
                     memo=memo,
                 ),
             )

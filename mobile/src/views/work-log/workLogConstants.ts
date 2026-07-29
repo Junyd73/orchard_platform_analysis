@@ -27,8 +27,13 @@ export const WEATHER_PARENT_CD = 'WT01'
 export const WORK_MID_CD_PESTICIDE = 'WK010200'
 /** m_common_code WK01 — 비료/영양제작업 (= 비료 필터) */
 export const WORK_MID_CD_FERTILIZER = 'WK010800'
+/** m_common_code WK01 — 기타작업 (= 기타 필터 · 메모 미리보기) */
+export const WORK_MID_CD_OTHER = 'WK010600'
 
-export const MSG_FUTURE_WORK_LOG = '영농일지는 오늘까지만 작성할 수 있습니다.'
+export const MSG_FUTURE_WORK_LOG =
+  '미래 일자는 준비중으로만 등록할 수 있습니다. 인력·경비·농약·사진은 당일에 입력해 주세요.'
+export const MSG_FUTURE_DETAIL_LOCKED =
+  '미래 일자의 인력·경비·농약·최종승인은 할 수 없습니다.'
 export const MSG_SCHEDULE_LOAD_FAILED = '예정 일정을 불러오지 못했습니다.'
 export const MSG_SCHEDULE_SAVE_OK = '일정이 등록되었습니다.'
 export const MSG_SCHEDULE_CONVERT_OK = '일정을 불러와 임시 초안으로 넣었습니다.'
@@ -39,7 +44,17 @@ export const MSG_SCHEDULE_MID_REQUIRED = '작업 유형을 선택해 주세요.'
 export const LABEL_SCHEDULE_SECTION = '예정 일정'
 export const BTN_SCHEDULE_ADD = '일정 등록'
 export const BTN_SCHEDULE_CONVERT = '실적으로 불러오기'
-export const BTN_SCHEDULE_OPEN = '예정 일정 불러오기'
+export const BTN_SCHEDULE_OPEN = '예정 관리'
+export const BTN_GOOGLE_IMPORT = '+ 구글일정불러오기'
+export const BTN_SCHEDULE_MANAGE = '+ 예정관리'
+export const MSG_GOOGLE_IMPORT_EMPTY = '등록된 구글 일정이 없습니다.'
+export const MSG_GOOGLE_IMPORT_NEED_CONNECT =
+  '먼저 구글 캘린더를 연결해 주세요. (작업 폼의 「구글로 보내기」에서 연결)'
+export const MSG_GOOGLE_IMPORT_SAVED = '구글 일정을 불러와 수정 화면으로 이동했습니다.'
+
+/** 작업 상태 — 준비중(미래 일정 기본) */
+export const STATUS_PREPARING_CD = 'WO010100'
+
 export const MSG_DETAIL_PENDING = '준비 중입니다.'
 export const MSG_COPY_HINT =
   '인력·경비·농약·비료·사진은 복사되지 않습니다. 작업 기본정보만 저장됩니다.'
@@ -51,7 +66,7 @@ export const MSG_LOAD_DAILY_FAILED = '일간 영농일지를 불러오지 못했
 export const MSG_WEATHER_FETCH_FAILED = '날씨를 가져오지 못했습니다.'
 export const MSG_SAVE_OK = '저장되었습니다.'
 export const MSG_DRAFT_OK = '임시 저장되었습니다.'
-export const MSG_WORK_CONTENT_REQUIRED = '작업내용을 선택해 주세요.'
+export const MSG_WORK_CONTENT_REQUIRED = '작업구분을 선택해 주세요.'
 export const MSG_SAVE_FAILED = '저장에 실패했습니다.'
 /** 일간 화면 이탈 시 미저장 등록 데이터 확인 */
 export const MSG_UNSAVED_LEAVE_CONFIRM =
@@ -114,7 +129,7 @@ export type CalendarLineKind = WorkFilterKey
 
 export const WORK_FILTER_OPTIONS: ReadonlyArray<{ key: WorkFilterKey; label: string }> = [
   { key: WORK_FILTER_WORK, label: '작업' },
-  { key: WORK_FILTER_SCHEDULE, label: '예정' },
+  { key: WORK_FILTER_SCHEDULE, label: '준비중' },
   { key: WORK_FILTER_LABOR, label: '인력' },
   { key: WORK_FILTER_EXPENSE, label: '경비' },
   { key: WORK_FILTER_PESTICIDE, label: '농약' },
@@ -377,8 +392,17 @@ function isFertilizerWork(midCd: string, midNm: string): boolean {
   return nm.includes('비료') || nm.includes('영양제')
 }
 
+/** 기타작업 — 캘린더 「기타」에 작업 메모(rmk)로 표시 */
+export function isOtherWork(midCd: string, midNm: string): boolean {
+  const cd = String(midCd || '').trim().toUpperCase()
+  if (cd === WORK_MID_CD_OTHER) return true
+  const nm = String(midNm || '').trim()
+  return nm.includes('기타작업') || nm === '기타'
+}
+
 export type CalendarScheduleHint = {
   title: string
+  work_tm?: string | null
 }
 
 export type CalendarLine = {
@@ -389,7 +413,12 @@ export type CalendarLine = {
 export function buildCalendarLines(
   cell: {
     work_names?: string[]
-    work_items?: { work_mid_cd?: string; work_mid_nm?: string }[]
+    work_items?: {
+      work_mid_cd?: string
+      work_mid_nm?: string
+      status_cd?: string | null
+      rmk?: string | null
+    }[]
     has_work?: boolean
     resource_count?: number
     labor_hour_sum?: number
@@ -401,14 +430,20 @@ export function buildCalendarLines(
     work_rmk?: string
   } | null,
   filters: Record<WorkFilterKey, boolean>,
-  schedules: CalendarScheduleHint[] = [],
+  _schedules: CalendarScheduleHint[] = [],
 ): { lines: CalendarLine[]; extra: number } {
   const all: CalendarLine[] = []
 
-  if (filters[WORK_FILTER_SCHEDULE]) {
-    for (const s of schedules) {
-      const text = String(s.title || '').trim() || '예정'
-      all.push({ kind: WORK_FILTER_SCHEDULE, text })
+  if (filters[WORK_FILTER_SCHEDULE] && cell) {
+    const items =
+      cell.work_items && cell.work_items.length > 0
+        ? cell.work_items
+        : []
+    for (const it of items) {
+      const st = String(it.status_cd || '').trim()
+      if (st !== STATUS_PREPARING_CD) continue
+      const nm = String(it.work_mid_nm || '').trim() || '준비중'
+      all.push({ kind: WORK_FILTER_SCHEDULE, text: nm })
     }
   }
 
@@ -418,13 +453,19 @@ export function buildCalendarLines(
         ? cell.work_items.map((it) => ({
             cd: String(it.work_mid_cd || '').trim(),
             nm: String(it.work_mid_nm || '').trim() || '-',
+            st: String(it.status_cd || '').trim(),
+            rmk: String(it.rmk || '').trim(),
           }))
         : (cell.work_names || []).map((nm) => ({
             cd: '',
             nm: String(nm || '').trim() || '-',
+            st: '',
+            rmk: '',
           }))
 
     for (const it of items) {
+      // 준비중은 위 SCHEDULE 필터에서만 (작업/농약 중복 표시 방지)
+      if (it.st === STATUS_PREPARING_CD) continue
       if (isPesticideWork(it.cd, it.nm)) {
         if (filters[WORK_FILTER_PESTICIDE]) {
           all.push({ kind: WORK_FILTER_PESTICIDE, text: it.nm })
@@ -434,6 +475,16 @@ export function buildCalendarLines(
       if (isFertilizerWork(it.cd, it.nm)) {
         if (filters[WORK_FILTER_FERTILIZER]) {
           all.push({ kind: WORK_FILTER_FERTILIZER, text: it.nm })
+        }
+        continue
+      }
+      // 기타작업 → 「기타」필터에 메모 요약 (작업 필터와 중복 표시 안 함)
+      if (isOtherWork(it.cd, it.nm)) {
+        if (filters[WORK_FILTER_OTHER]) {
+          all.push({
+            kind: WORK_FILTER_OTHER,
+            text: calendarOtherWorkMemoText(it.rmk, it.nm),
+          })
         }
         continue
       }
@@ -456,17 +507,7 @@ export function buildCalendarLines(
     if (filters[WORK_FILTER_EXPENSE] && cost > 0) {
       all.push({ kind: WORK_FILTER_EXPENSE, text: '경비' })
     }
-    const weatherLabel = displayWeatherNm(cell.weather_cd, cell.weather_nm)
-    const hasWeather = Boolean(cell.weather_cd) || Boolean(weatherLabel)
-    if (filters[WORK_FILTER_WEATHER] && hasWeather) {
-      all.push({
-        kind: WORK_FILTER_WEATHER,
-        text: weatherLabel || '기상',
-      })
-    }
-    if (filters[WORK_FILTER_OTHER] && cell.has_issue) {
-      all.push({ kind: WORK_FILTER_OTHER, text: '이슈' })
-    }
+    // 기상은 날짜 옆 아이콘으로 표시 (WorkLogMonthCalendar) — 이벤트 줄에는 넣지 않음
   }
 
   const max = 2
@@ -530,7 +571,7 @@ export const MSG_OBS_LOCATION_FALLBACK = '필지'
 /** 일간 생육관찰 사진 미리보기 칸 수 */
 export const DAILY_OBS_PHOTO_PREVIEW_MAX = 4
 export const MSG_WORK_FORM_TIP =
-  '작업내용만 선택해도 타임라인에 추가할 수 있습니다.'
+  '작업구분만 선택해도 타임라인에 추가할 수 있습니다.'
 export const MSG_FERTILIZER_PENDING =
   '비료 사용·재고 연동은 준비 중입니다.'
 export const MSG_PESTICIDE_HINT =
@@ -541,6 +582,36 @@ export const MSG_PESTICIDE_EMPTY = '등록된 사용 농약이 없습니다.'
 /** PC와 동일: 방제/약제살포가 아닐 때 */
 export const MSG_PESTICIDE_NOT_TARGET =
   '농약등록은 방제/약제살포 작업에서 가능합니다.'
+export const MSG_PESTICIDE_REMOVE_CONFIRM = '등록된 농약을 삭제하시겠습니까?'
+/** 농약 등록·수정 시 재고 부족 (현재고·요청수량) */
+export function msgPesticideStockShort(
+  itemNm: string,
+  available: number,
+  requested: number,
+): string {
+  const nm = String(itemNm || '').trim() || '농약'
+  return `${nm}: 재고 부족 (가능 ${available}개 < 사용 ${requested}개)`
+}
+/** 목록·재고 반영 여부를 반영한 사용 가능 수량 */
+export function availablePesticideQty(input: {
+  stockQty: number
+  listed: Array<{ id: string; itemId: number | null; useQty: string }>
+  itemId: number
+  editingId: string | null
+  /** 재고 이미 차감된 확정 건(수정/교체 모드) */
+  stockCommitted: boolean
+}): number {
+  const same = input.listed.filter(
+    (r) => Number(r.itemId || 0) === Number(input.itemId),
+  )
+  const sumQty = (rows: typeof same) =>
+    rows.reduce((s, r) => s + Math.max(0, Number(r.useQty || 0)), 0)
+  const credited = input.stockCommitted ? sumQty(same) : 0
+  const reservedOthers = sumQty(
+    same.filter((r) => r.id !== input.editingId),
+  )
+  return Math.max(0, Number(input.stockQty || 0) + credited - reservedOthers)
+}
 export const MSG_LABOR_REMOVE_CONFIRM = '등록된 인력을 삭제하시겠습니까?'
 export const MSG_LABOR_REMOVE_PAID_CONFIRM =
   '지급된 인력입니다. 삭제 시 관련 전표가 역분개됩니다. 계속하시겠습니까?'
@@ -549,9 +620,56 @@ export const MSG_EXPENSE_REMOVE_PAID_CONFIRM =
   '지불된 경비입니다. 삭제 시 관련 전표가 역분개됩니다. 계속하시겠습니까?'
 export const MSG_WORK_PHOTO_EMPTY = '작업 결과 사진이 없습니다.'
 export const MSG_WORK_PHOTO_LIMIT = `최대 ${WORK_PHOTO_MAX_COUNT}장까지 등록할 수 있습니다.`
+export const MSG_WORK_PHOTO_SAVE_FIRST =
+  '사진을 등록하려면 먼저 작업을 저장해 주세요.'
+export const MSG_WORK_PHOTO_DELETE_CONFIRM = '이 사진을 삭제하시겠습니까?'
+export const MSG_WORK_PHOTO_UPLOADING = '사진 업로드 중…'
+export const MSG_WORK_PHOTO_LOADING = '사진을 불러오는 중…'
 
 export const PLACEHOLDER_SELECT = '선택하세요'
-export const PLACEHOLDER_WORK_RMK = '비고'
+export const LABEL_WORK_TYPE = '작업구분'
+export const LABEL_WORK_SITE = '작업장소'
+export const LABEL_WORK_MEMO = '메모'
+/** 일간 메모 작성 가이드 (placeholder · 안내) */
+export const WORK_MEMO_GUIDE_LINES = [
+  '작업명 - ',
+  '작업내용 - ',
+  '사용기기 - ',
+  '특이사항 - ',
+] as const
+export const PLACEHOLDER_WORK_RMK = WORK_MEMO_GUIDE_LINES.join('\n')
+export const MSG_WORK_MEMO_GUIDE =
+  '아래 항목을 참고해 작성해 주세요.'
+/** 월간 캘린더 「기타작업」메모 미리보기 글자 수 */
+export const CALENDAR_OTHER_MEMO_MAX_LEN = 5
+
+/** 기타작업 셀 문구: 작업 메모(rmk) 첫 줄을 4~5자로. 없으면 구분명. */
+export function calendarOtherWorkMemoText(
+  rmk?: string | null,
+  midNm?: string | null,
+): string {
+  const raw = String(rmk || '').trim()
+  const first = raw
+    ? raw
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find(Boolean) || raw
+    : ''
+  // 가이드 줄("작업명 - xxx")이면 값 쪽만 짧게
+  let text = first
+  const guideMatch = first.match(
+    /^(?:작업명|작업내용|사용기기|특이사항)\s*[-–—:：]\s*(.*)$/,
+  )
+  if (guideMatch) {
+    text = String(guideMatch[1] || '').trim() || first
+  }
+  if (!text) {
+    const nm = String(midNm || '').trim()
+    return nm.includes('기타') ? '기타' : nm || '기타'
+  }
+  if (text.length <= CALENDAR_OTHER_MEMO_MAX_LEN) return text
+  return text.slice(0, CALENDAR_OTHER_MEMO_MAX_LEN)
+}
 
 /** PC 지급/지불방식 계정 prefix·level */
 export const PAY_METHOD_ACCT_PREFIX = 'AS0101'
@@ -562,7 +680,7 @@ export const EXPENSE_ACCT_LEVEL = 4
 
 export type DailyWorkFormModel = {
   workId: string | null
-  /** WK01 작업내용 */
+  /** WK01 작업구분 */
   workMidCd: string
   workContent: string
   workLocId: string
@@ -572,6 +690,9 @@ export type DailyWorkFormModel = {
   statusCd: string
   statusNm: string
   rmk: string
+  /** 저장 시 구글 캘린더 반영 */
+  syncGoogle: boolean
+  googleEventId: string | null
 }
 
 export function createEmptyWorkForm(): DailyWorkFormModel {
@@ -586,6 +707,8 @@ export function createEmptyWorkForm(): DailyWorkFormModel {
     statusCd: '',
     statusNm: '',
     rmk: '',
+    syncGoogle: false,
+    googleEventId: null,
   }
 }
 
@@ -679,7 +802,7 @@ export function createEmptyPesticideRow(id: string): DailyShellPesticideRow {
   }
 }
 
-export type DailyTimelineTone = 'mint' | 'forest' | 'gold' | 'violet'
+export type DailyTimelineTone = 'mint' | 'forest' | 'gold' | 'violet' | 'sky'
 
 export type DailyTimelineItem = {
   id: string
@@ -693,7 +816,7 @@ export type DailyTimelineItem = {
   icon: string
   statusLabel: string
   location: string
-  /** 작업 비고 (PC rmk) */
+  /** 작업 메모 (PC rmk) */
   rmk: string
 }
 
@@ -939,6 +1062,7 @@ export function mapWorkItemToTimeline(
     rmk?: string | null
     start_tm?: string | null
     end_tm?: string | null
+    status_cd?: string | null
     status_nm?: string | null
   },
   index = 0,
@@ -949,7 +1073,9 @@ export function mapWorkItemToTimeline(
   const end = formatWorkTimeHm(work.end_tm)
   let tone: DailyTimelineTone = TIMELINE_TONES[index % TIMELINE_TONES.length] || 'mint'
   let icon = iconWork
-  if (isPesticideWork(midCd, midNm)) {
+  if (String(work.status_cd || '').trim() === STATUS_PREPARING_CD) {
+    tone = 'sky'
+  } else if (isPesticideWork(midCd, midNm)) {
     tone = 'forest'
     icon = iconPesticide
   } else if (isFertilizerWork(midCd, midNm)) {

@@ -15,8 +15,8 @@ import OdsFormField from '@/components/ods/OdsFormField.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
   categoryLabel,
+  formatAiErrorDisplay,
   formatConfidence,
-  messageForAiErrorCode,
   urgencyLabel,
 } from '@/shared/aiErrorMessages'
 import {
@@ -360,7 +360,7 @@ async function runAnalyze() {
     syncSelectionFromAnalysis(res)
     if (!res.success) {
       phase.value = 'error'
-      errorMessage.value = messageForAiErrorCode(res.error_code, res.error)
+      errorMessage.value = formatAiErrorDisplay(res.error_code, res.error)
       statusMessage.value = ''
       stopAnalyzeTick()
       return
@@ -380,9 +380,9 @@ async function runAnalyze() {
     statusMessage.value = ''
     stopAnalyzeTick()
     if (err instanceof ApiClientError) {
-      errorMessage.value = messageForAiErrorCode(err.errorCode, err.message)
+      errorMessage.value = formatAiErrorDisplay(err.errorCode, err.message)
     } else {
-      errorMessage.value = 'AI 분석에 실패했습니다.'
+      errorMessage.value = formatAiErrorDisplay(null, 'AI 분석에 실패했습니다.')
     }
   }
 }
@@ -435,7 +435,7 @@ async function runConfirm() {
 
     if (!res.success) {
       confirmPhase.value = 'error'
-      confirmError.value = messageForAiErrorCode(res.error_code, res.error)
+      confirmError.value = formatAiErrorDisplay(res.error_code, res.error)
       statusMessage.value = ''
       return
     }
@@ -464,7 +464,7 @@ async function runConfirm() {
     confirmPhase.value = 'error'
     statusMessage.value = ''
     if (err instanceof ApiClientError) {
-      confirmError.value = messageForAiErrorCode(err.errorCode, err.message)
+      confirmError.value = formatAiErrorDisplay(err.errorCode, err.message)
     } else {
       confirmError.value = '후보 확정에 실패했습니다.'
     }
@@ -697,38 +697,36 @@ defineExpose({
 }
 .lead {
   margin: 0;
-  font: var(--ods-font-body-1);
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   color: var(--ods-color-text);
 }
 .hint,
 .summary {
   margin: 0;
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .status {
   margin: 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-body);
   color: var(--ods-color-primary);
   font-weight: 600;
 }
 .duration-notice {
   margin: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-caution, #c2410c);
+  font: var(--ods-font-card-body);
+  color: var(--ods-color-caution);
 }
 .error {
   margin: 0;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-danger);
 }
 .consent {
   display: flex;
   align-items: flex-start;
   gap: var(--ods-space-8);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 .crop-field {
@@ -739,22 +737,21 @@ defineExpose({
 }
 .crop-field__lbl {
   flex-shrink: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   color: var(--ods-color-text);
 }
 .crop-field__input {
   flex: 1;
   min-width: 0;
   width: auto;
-  min-height: 40px;
+  min-height: var(--ods-control-height);
   padding: 0 var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-badge, 8px);
-  font: var(--ods-font-body-2);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-card-body);
   font-weight: 700;
   color: var(--ods-color-text);
-  background: var(--ods-color-white, #fff);
+  background: var(--ods-color-white);
 }
 .crop-field__input::placeholder {
   font-weight: 400;
@@ -770,10 +767,10 @@ defineExpose({
   min-width: 168px;
 }
 .analyze-spin {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
+  border: 2px solid color-mix(in srgb, var(--ods-color-white) 35%, transparent);
+  border-top-color: var(--ods-color-white);
   border-radius: 50%;
   animation: analyze-spin 0.75s linear infinite;
   flex-shrink: 0;
@@ -785,8 +782,8 @@ defineExpose({
 }
 .warn {
   margin: 0;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-caution, #b45309);
+  font: var(--ods-font-card-help);
+  color: var(--ods-color-caution);
 }
 .cand-set {
   margin: 0;
@@ -794,8 +791,7 @@ defineExpose({
   border: none;
 }
 .cand-set__legend {
-  font: var(--ods-font-body-2);
-  font-weight: 700;
+  font: var(--ods-font-card-section);
   margin-bottom: var(--ods-space-8);
 }
 .cand {
@@ -804,8 +800,8 @@ defineExpose({
   padding: var(--ods-space-8);
   margin: 0 0 var(--ods-space-8);
   border: 1px solid var(--ods-color-border);
-  border-radius: 8px;
-  background: var(--ods-color-white, #fff);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
   cursor: pointer;
 }
 .cand--active {
@@ -817,18 +813,18 @@ defineExpose({
 }
 .cand__title {
   margin: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
+  font: var(--ods-font-card-body);
 }
 .cand__badge {
-  margin-left: 6px;
-  font-size: 11px;
+  margin-left: var(--ods-space-4);
+  font: var(--ods-font-card-meta);
+  font-weight: 700;
   color: var(--ods-color-primary);
 }
 .cand__meta,
 .cand__ev {
-  margin: 4px 0 0;
-  font: var(--ods-font-caption);
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
 }
 </style>

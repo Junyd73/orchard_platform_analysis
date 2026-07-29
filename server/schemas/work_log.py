@@ -18,10 +18,13 @@ class WorkLogMonthSummary(BaseModel):
 
 
 class WorkLogDayWorkItem(BaseModel):
-    """월간 셀용 작업 한 건 — 농약/비료 필터는 mid_cd 기준."""
+    """월간 셀용 작업 한 건 — 농약/비료/기타 필터는 mid_cd 기준."""
 
     work_mid_cd: str = ""
     work_mid_nm: str = ""
+    status_cd: str | None = None
+    # 작업 메모 — 기타작업(WK010600) 캘린더 표시용
+    rmk: str | None = None
 
 
 class WorkLogDayCell(BaseModel):
@@ -83,6 +86,8 @@ class WorkLogWorkItem(BaseModel):
     end_tm: str | None = None
     status_cd: str | None = None
     status_nm: str | None = None
+    google_event_id: str | None = None
+    sync_status: str | None = None
 
 
 class WorkLogDailyResponse(BaseModel):

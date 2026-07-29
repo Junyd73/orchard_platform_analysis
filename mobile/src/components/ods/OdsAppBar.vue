@@ -14,12 +14,19 @@ import { useNotificationBadgeStore } from '@/composables/stores/notificationBadg
 /** 이 스크롤 거리에서 Glass → Surface 전환 완료 */
 const SCROLL_RANGE_PX = 64
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
-    /** Wizard/Camera/Viewer/Modal 예외용 Back */
+    /** Wizard/Camera/Viewer/Modal 예외용 Back 표시 */
     showBack?: boolean
+    /**
+     * history: 왔던 화면으로(router.back) — 시스템 기본
+     * emit: 부모가 @back에서 처리(위저드·모달 닫기 등)
+     */
+    backMode?: 'history' | 'emit'
+    /** history 모드에서 히스토리가 없을 때 이동할 route name */
+    backFallback?: string
   }>(),
-  { showBack: false },
+  { showBack: false, backMode: 'history' },
 )
 
 const emit = defineEmits<{
@@ -80,6 +87,29 @@ function onSettings() {
   showSoon('환경설정')
 }
 
+function historyPosition(): number {
+  const st = window.history.state as { position?: number } | null
+  return typeof st?.position === 'number' ? st.position : -1
+}
+
+function handleBack() {
+  if (props.backMode === 'emit') {
+    emit('back')
+    return
+  }
+  // 기본: 왔던 화면으로
+  const pos = historyPosition()
+  if (pos > 0 || (pos < 0 && window.history.length > 1)) {
+    router.back()
+    return
+  }
+  if (props.backFallback) {
+    void router.push({ name: props.backFallback })
+    return
+  }
+  router.back()
+}
+
 onMounted(() => {
   updateProgress()
   window.addEventListener('scroll', onScroll, { passive: true })
@@ -109,7 +139,7 @@ onUnmounted(() => {
           type="button"
           class="ods-appbar__icon-btn"
           aria-label="뒤로"
-          @click="emit('back')"
+          @click="handleBack"
         >
           <img :src="iconBack" alt="" aria-hidden="true">
         </button>
@@ -153,11 +183,9 @@ onUnmounted(() => {
   /* 부모 page padding을 상쇄해 Surface가 가로 full-bleed
      (부모는 .ods-page-content — --ods-page-padding-x SSOT) */
   margin-inline: calc(-1 * var(--ods-page-padding-x));
-  /* 스크롤 전: page gap을 상쇄해 AppBar↔다음(Hero) = --ods-appbar-content-gap
-     (= --ods-appbar-pad-y, 상단 패딩과 동일) */
+  /* page gap 상쇄: AppBar 하단 pad만 쓰고, 다음 컴포넌트와 추가 간격 0 */
   margin-bottom: calc(
-    (var(--ods-page-content-gap) - var(--ods-appbar-content-gap)) * -1 *
-      (1 - var(--ods-appbar-p))
+    (var(--ods-page-content-gap) - var(--ods-appbar-content-gap)) * -1
   );
   padding-top: env(safe-area-inset-top, 0px);
   /* Glass 투명도 고정 (스크롤 전·후 동일). Elevation·Border만 progress로 보강 */
@@ -173,8 +201,7 @@ onUnmounted(() => {
   /* 스크롤 rAF로 progress가 이미 보간되므로 짧은 transition만 보조 */
   transition:
     box-shadow 80ms linear,
-    border-color 80ms linear,
-    margin-bottom 80ms linear;
+    border-color 80ms linear;
   will-change: box-shadow;
 }
 
@@ -191,10 +218,10 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: var(--ods-space-12);
   min-height: 48px;
-  /* 아이콘(22px)이 카드 좌·우 여백(--ods-page-padding-x)과 시각 정렬되도록
+  /* 아이콘(--ods-icon-xl)이 카드 좌·우 여백(--ods-page-padding-x)과 시각 정렬되도록
      터치영역(44px) 보정: (44-22)/2 = 11px 바깥으로 당김 */
   padding: var(--ods-appbar-pad-y)
-    calc(var(--ods-page-padding-x) - ((var(--ods-touch-min) - 22px) / 2));
+    calc(var(--ods-page-padding-x) - ((var(--ods-touch-min) - var(--ods-icon-xl)) / 2));
 }
 
 .ods-appbar__left {
@@ -207,7 +234,7 @@ onUnmounted(() => {
 
 /* Back 없을 때 Farm Mark도 동일 좌측 정렬 */
 .ods-appbar__left > .ods-appbar__farm:first-child {
-  margin-left: calc((var(--ods-touch-min) - 22px) / 2);
+  margin-left: calc((var(--ods-touch-min) - var(--ods-icon-xl)) / 2);
 }
 
 .ods-appbar__right {
@@ -233,8 +260,8 @@ onUnmounted(() => {
 }
 
 .ods-appbar__farm-mark {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
   flex: 0 0 auto;
 }
 
@@ -252,8 +279,8 @@ onUnmounted(() => {
 }
 
 .ods-appbar__farm-chev {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
   flex: 0 0 auto;
   opacity: 0.72;
 }
@@ -274,8 +301,8 @@ onUnmounted(() => {
 }
 
 .ods-appbar__icon-btn img {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
   display: block;
 }
 
@@ -283,15 +310,15 @@ onUnmounted(() => {
   position: absolute;
   top: 6px;
   right: 4px;
-  min-width: 16px;
-  height: 16px;
+  min-width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
   padding: 0 4px;
   border-radius: 999px;
   background: var(--ods-color-danger);
   color: var(--ods-color-white);
   font-size: 10px;
   font-weight: 700;
-  line-height: 16px;
+  line-height: var(--ods-icon-md);
   text-align: center;
 }
 

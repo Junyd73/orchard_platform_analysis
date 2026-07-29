@@ -28,6 +28,9 @@ export const OBS_SEVERITY_WATCH_CD = 'OS010200'
 export const OBS_SEVERITY_CAUTION_CD = 'OS010300'
 export const OBS_SEVERITY_DANGER_CD = 'OS010400'
 
+/** 추적관찰 등록 — 카드 타이틀 접두 (1차 관찰명) */
+export const OBS_FOLLOW_UP_ROOT_TITLE_LABEL = '최초 관찰명'
+
 /** PC Stage2 열매측정 공통코드 대분류 */
 export const OBS_FRUIT_SHAPE_PARENT_CD = 'FS01'
 export const OBS_FRUIT_COLOR_PARENT_CD = 'FC01'

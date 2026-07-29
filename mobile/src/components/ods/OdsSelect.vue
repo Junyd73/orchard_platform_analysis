@@ -35,14 +35,16 @@ defineEmits<{
 
 <style scoped>
 .ods-select {
-  height: var(--ods-control-height);
-  min-height: var(--ods-control-height);
+  height: var(--ods-select-height, var(--ods-control-height));
+  min-height: var(--ods-select-height, var(--ods-control-height));
+  max-height: var(--ods-select-height, var(--ods-control-height));
   width: 100%;
   box-sizing: border-box;
   padding: 0 var(--ods-space-16);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   font: var(--ods-font-body-1);
+  line-height: 1.2;
   color: var(--ods-color-text);
   background: var(--ods-color-white);
 }

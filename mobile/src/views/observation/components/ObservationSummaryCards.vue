@@ -95,7 +95,7 @@ function formatCount(n: number | null | undefined): string {
 }
 .kpi__hint {
   margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-card-help);
   color: var(--ods-color-text-secondary);
   text-align: center;
 }
@@ -108,9 +108,9 @@ function formatCount(n: number | null | undefined): string {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   margin: 0;
-  padding: var(--ods-space-8) 4px;
+  padding: var(--ods-space-8) var(--ods-space-4);
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-card);
   background: var(--ods-color-white);
@@ -119,21 +119,18 @@ function formatCount(n: number | null | undefined): string {
   min-width: 0;
 }
 .kpi__ico {
-  width: 18px;
-  height: 18px;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
 }
 .kpi__label {
-  font: var(--ods-font-caption);
-  font-size: 10px;
+  font: var(--ods-font-card-meta);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
   white-space: nowrap;
 }
 .kpi__value {
-  font: var(--ods-font-body-2);
-  font-weight: 800;
+  font: var(--ods-font-card-body);
   color: var(--ods-color-text);
-  line-height: 1.2;
 }
 .kpi__value--danger {
   color: var(--ods-color-danger);

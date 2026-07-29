@@ -67,14 +67,14 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-12);
-  min-height: 56px;
-  height: 56px;
+  min-height: var(--ods-thumb-sm);
+  height: var(--ods-thumb-sm);
   padding: 0 var(--ods-space-16);
 }
 .wl-bar__farm {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--ods-space-8);
   min-width: 0;
   max-width: 70%;
   border: none;
@@ -89,14 +89,14 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 18px;
+  font: var(--ods-font-title-2);
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--ods-color-white);
 }
 .wl-bar__chev {
-  width: 16px;
-  height: 16px;
+  width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
   flex-shrink: 0;
   filter: brightness(0) invert(1);
   opacity: 0.92;
@@ -104,7 +104,7 @@ onMounted(() => {
 .wl-bar__right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--ods-space-4);
   flex-shrink: 0;
 }
 .wl-bar__icon {
@@ -120,29 +120,29 @@ onMounted(() => {
   cursor: pointer;
 }
 .wl-bar__icon img {
-  width: 22px;
-  height: 22px;
+  width: var(--ods-icon-xl);
+  height: var(--ods-icon-xl);
   filter: brightness(0) invert(1);
 }
 .wl-bar__badge {
   position: absolute;
-  top: 6px;
-  right: 4px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
+  top: var(--ods-space-4);
+  right: var(--ods-space-4);
+  min-width: var(--ods-icon-md);
+  height: var(--ods-icon-md);
+  padding: 0 var(--ods-space-4);
+  border-radius: var(--ods-radius-badge);
   background: var(--ods-color-danger);
   color: var(--ods-color-white);
-  font-size: 10px;
+  font: var(--ods-font-card-help);
   font-weight: 700;
-  line-height: 16px;
+  line-height: var(--ods-icon-md);
   text-align: center;
 }
 .wl-bar__toast {
   position: fixed;
   left: 50%;
-  top: calc(12px + env(safe-area-inset-top, 0px));
+  top: calc(var(--ods-space-12) + env(safe-area-inset-top, 0px));
   transform: translateX(-50%);
   z-index: 80;
   margin: 0;
@@ -150,6 +150,6 @@ onMounted(() => {
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-gray-900);
   color: var(--ods-color-white);
-  font: var(--ods-font-caption);
+  font: var(--ods-font-form-help);
 }
 </style>

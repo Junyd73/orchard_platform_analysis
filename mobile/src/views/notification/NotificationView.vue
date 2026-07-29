@@ -67,11 +67,6 @@ function formatEventAt(raw: string): string {
   return s || '—'
 }
 
-function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push({ name: 'observation' })
-}
-
 function closeDetail() {
   detailOpen.value = false
   selectedItem.value = null
@@ -148,7 +143,7 @@ onMounted(() => {
 
 <template>
   <main class="ods-page-content ntf-page">
-    <OdsAppBar show-back @back="goBack" />
+    <OdsAppBar show-back back-fallback="observation" />
 
     <section class="ntf-toolbar" aria-label="알림 도구">
       <p class="ntf-summary">{{ headerCountLabel }}</p>
