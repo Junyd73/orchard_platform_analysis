@@ -497,13 +497,14 @@ function onPending(msg?: string) {
   showToast(msg || MSG_DETAIL_PENDING)
 }
 
-function goBack() {
+function goBack(reload = false) {
   const dt = workDt.value
   const q: Record<string, string> = {}
   if (/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
     q.year = dt.slice(0, 4)
     q.month = String(Number(dt.slice(5, 7)))
   }
+  if (reload) q.reload = '1'
   void router.push({ name: 'work-log', query: q })
 }
 
@@ -1097,7 +1098,7 @@ async function onSave(
       void router.push(opts.navigateTo.fullPath || opts.navigateTo)
     } else {
       leaveGuardBypass.value = true
-      window.setTimeout(() => goBack(), 600)
+      window.setTimeout(() => goBack(true), 600)
     }
     return true
   } catch (err) {

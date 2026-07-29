@@ -240,12 +240,19 @@ watch([year, month], () => {
   void loadMonth()
 })
 
-/** 일간→월간 복귀 시 캘린더 갱신 */
+/** 일간→월간 복귀 시 캘린더 갱신 — query.reload 감지 */
 watch(
-  () => route.name,
-  (name) => {
-    if (name === 'work-log') {
+  () => route.query.reload,
+  (v) => {
+    if (v) {
       void loadMonth()
+      void router.replace({
+        name: 'work-log',
+        query: {
+          ...(route.query.year ? { year: String(route.query.year) } : {}),
+          ...(route.query.month ? { month: String(route.query.month) } : {}),
+        },
+      })
     }
   },
 )
