@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   onBeforeRouteLeave,
   useRoute,
@@ -48,7 +48,6 @@ import iconTrash from '@/assets/ods/scr004/icon-trash.svg'
 import {
   buildDailySummaryCards,
   createEmptyWorkForm,
-  DAILY_TAB_LABOR,
   DAILY_TAB_WORK,
   hasWorkLogWeather,
   isFutureDate,
@@ -85,6 +84,7 @@ import {
 } from '@/views/work-log/workLogConstants'
 import { HOME_DAILY_NEW_QUERY } from '@/views/home/homeConstants'
 import { useAppStore } from '@/composables/stores/app'
+import { useWorkCopyStore } from '@/composables/stores/workCopy'
 import type {
   WorkLogExpenseDto,
   WorkLogIntegratedSavePayload,
@@ -96,6 +96,7 @@ import type {
 } from '@/types/workLog'
 
 const store = useAppStore()
+const workCopyStore = useWorkCopyStore()
 const router = useRouter()
 const route = useRoute()
 const { farmCd, farm } = storeToRefs(store)
@@ -117,13 +118,19 @@ const isEditing = ref(true)
 const isCopyMode = ref(false)
 /** 복사 대상 작업일 (YYYY-MM-DD) */
 const copyTargetDt = ref('')
-/** 작업복사 모달 오픈 */
-const copyModalOpen = ref(false)
-/** 복사 버튼 클릭 시 원본 작업(work_id) — 취소 시 복원 */
-const copySourceWorkId = ref<string | null>(null)
-/** 복사 후 이동 시(다른 날짜) 인력 탭으로 전환 + 복사된 작업 선택 */
-const goLaborAfterCopy = ref(false)
-const copyCreatedWorkId = ref<string | null>(null)
+/** 작업복사 모달 독립 state */
+const copyModal = reactive({
+  open: false,
+  workDt: '',
+  workMidCd: '',
+  workContent: '',
+  workLocId: '',
+  siteNm: '',
+  startTime: '08:00',
+  endTime: '09:00',
+  rmk: '',
+})
+const copyRestoreId = ref<string | null>(null)
 const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
 const googleStatus = ref<GoogleCalendarStatus | null>(null)
 const googleImportOpen = ref(false)
@@ -319,7 +326,6 @@ function refreshSummaryCards() {
 function clearCopyMode() {
   isCopyMode.value = false
   copyTargetDt.value = ''
-  copyModalOpen.value = false
 }
 
 function onSelectTimeline(id: string) {
@@ -400,25 +406,69 @@ function onEditSelected() {
   captureCleanState()
 }
 
-/** 작업 기본정보만 복사 · 인력/경비/농약/사진 제외 · 작업일 변경 가능 */
+/** 작업 복사 버튼 → 모달 오픈 */
 function onCopySelected() {
   const w = sourceWorks.value.find((it) => it.work_id === selectedId.value)
-  if (!w) {
-    onPending()
-    return
+  if (!w) { onPending(); return }
+  copyRestoreId.value = selectedId.value
+  copyModal.workDt = todayIso()
+  copyModal.workMidCd = String(w.work_mid_cd || '')
+  copyModal.workContent = String(w.work_mid_nm || '')
+  copyModal.workLocId = String(w.work_loc_id || '')
+  copyModal.siteNm = String(w.work_loc_nm || '')
+  copyModal.startTime = String(w.start_tm || '08:00').slice(0, 5)
+  copyModal.endTime = String(w.end_tm || '09:00').slice(0, 5)
+  copyModal.rmk = String(w.rmk || '')
+  copyModal.open = true
+}
+
+function onCopyModalCancel() {
+  copyModal.open = false
+}
+
+async function onCopyModalApply() {
+  if (!copyModal.workMidCd) { showToast(MSG_WORK_CONTENT_REQUIRED); return }
+  const targetDt = String(copyModal.workDt || '').trim()
+  if (!targetDt || !/^\d{4}-\d{2}-\d{2}$/.test(targetDt)) {
+    showToast(MSG_COPY_DATE_INVALID); return
   }
-  copySourceWorkId.value = selectedId.value
+  copyModal.open = false
+
+  // Pinia store에 저장
+  workCopyStore.set({
+    workMidCd: copyModal.workMidCd,
+    workContent: copyModal.workContent,
+    workLocId: copyModal.workLocId,
+    siteNm: copyModal.siteNm,
+    startTime: copyModal.startTime,
+    endTime: copyModal.endTime,
+    rmk: copyModal.rmk,
+  })
+
+  if (targetDt === workDt.value) {
+    // 같은 날짜: 바로 폼에 세팅
+    _applyCopyToForm()
+  } else {
+    // 다른 날짜: 이동 (onMounted에서 store 꺼내 세팅)
+    leaveGuardBypass.value = true
+    await router.push({ name: 'work-log-daily', params: { workDt: targetDt } })
+  }
+}
+
+function _applyCopyToForm() {
+  const d = workCopyStore.consume()
+  if (!d) return
   formModel.value = {
     workId: null,
-    workMidCd: String(w.work_mid_cd || ''),
-    workContent: String(w.work_mid_nm || ''),
-    workLocId: String(w.work_loc_id || ''),
-    siteNm: String(w.work_loc_nm || ''),
-    startTime: String(w.start_tm || '08:00').slice(0, 5),
-    endTime: String(w.end_tm || '09:00').slice(0, 5),
-    statusCd: String(w.status_cd || ''),
-    statusNm: String(w.status_nm || ''),
-    rmk: String(w.rmk || ''),
+    workMidCd: d.workMidCd,
+    workContent: d.workContent,
+    workLocId: d.workLocId,
+    siteNm: d.siteNm,
+    startTime: d.startTime,
+    endTime: d.endTime,
+    statusCd: '',
+    statusNm: '',
+    rmk: d.rmk,
     syncGoogle: false,
     googleEventId: null,
   }
@@ -431,100 +481,9 @@ function onCopySelected() {
   removedResIds.value = []
   removedExpIds.value = []
   selectedId.value = null
-  isCopyMode.value = true
-  copyTargetDt.value = todayIso()
-  copyCreatedWorkId.value = null
-  goLaborAfterCopy.value = false
-  copyModalOpen.value = true
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
   captureCleanState()
-}
-
-function onCancelCopyModal() {
-  const restoreId = copySourceWorkId.value
-  clearCopyMode()
-  if (!restoreId) {
-    selectedId.value = null
-    isEditing.value = true
-    formModel.value = createEmptyWorkForm()
-    captureCleanState()
-    return
-  }
-  selectedId.value = restoreId
-  isEditing.value = false
-  activeTab.value = DAILY_TAB_WORK
-  loadSideForWork(
-    restoreId,
-    cachedResources,
-    cachedExpenses,
-    cachedPesticides,
-  )
-  captureCleanState()
-}
-
-
-/** 복사 모달 "적용" — 저장 없이 복사 날짜의 일간 화면으로 이동해 작업등록 폼을 열어줌 */
-async function onCopyModalApply() {
-  if (!formModel.value.workMidCd) {
-    showToast(MSG_WORK_CONTENT_REQUIRED)
-    return
-  }
-  const targetDt = String(copyTargetDt.value || '').trim()
-  if (!targetDt || !/^\d{4}-\d{2}-\d{2}$/.test(targetDt)) {
-    showToast(MSG_COPY_DATE_INVALID)
-    return
-  }
-
-  // 복사 데이터 스냅샷 (모달 닫기 전에 저장)
-  const copyData = {
-    workMidCd: formModel.value.workMidCd || '',
-    workContent: formModel.value.workContent || '',
-    workLocId: formModel.value.workLocId || '',
-    siteNm: formModel.value.siteNm || '',
-    startTime: formModel.value.startTime || '08:00',
-    endTime: formModel.value.endTime || '09:00',
-    rmk: formModel.value.rmk || '',
-  }
-
-  function applyCopyData() {
-    formModel.value = {
-      workId: null,
-      workMidCd: copyData.workMidCd,
-      workContent: copyData.workContent,
-      workLocId: copyData.workLocId,
-      siteNm: copyData.siteNm,
-      startTime: copyData.startTime,
-      endTime: copyData.endTime,
-      statusCd: '',
-      statusNm: '',
-      rmk: copyData.rmk,
-      syncGoogle: false,
-      googleEventId: null,
-    }
-    selectedId.value = null
-    isEditing.value = true
-    activeTab.value = DAILY_TAB_WORK
-    captureCleanState()
-  }
-
-  copyModalOpen.value = false
-  isCopyMode.value = false
-
-  // 같은 날짜이면 loadDaily 후 직접 복원 (watch가 트리거 안 되므로)
-  if (targetDt === workDt.value) {
-    await loadDaily()
-    applyCopyData()
-    return
-  }
-
-  // 다른 날짜: sessionStorage 저장 후 push → watch에서 복원
-  sessionStorage.setItem('__copy_form__', JSON.stringify(copyData))
-  leaveGuardBypass.value = true
-  await router.push({
-    name: 'work-log-daily',
-    params: { workDt: targetDt },
-  })
 }
 
 function showToast(msg: string) {
@@ -1192,38 +1151,11 @@ async function saveCopiedWork(
   saving.value = true
   try {
     if (targetDt === workDt.value) {
-      goLaborAfterCopy.value = false
-      const idsBefore = new Set(
-        sourceWorks.value
-          .map((w) => String(w.work_id || '').trim())
-          .filter(Boolean),
-      )
       const payload = buildWorksPayload()
       if (!payload) return false
-      const res = await saveWorkLogWorks(farmCd.value, workDt.value, {
-        works: payload,
-      })
+      await saveWorkLogWorks(farmCd.value, workDt.value, { works: payload })
       clearCopyMode()
-      const createdId =
-        (res?.work_ids || []).find((id) => id && !idsBefore.has(id)) ||
-        (res?.work_ids || [])[0] ||
-        null
-      copyCreatedWorkId.value = createdId
       await loadDaily()
-      if (createdId) {
-        selectedId.value = createdId
-        isEditing.value = false
-        activeTab.value = DAILY_TAB_LABOR
-        loadSideForWork(
-          createdId,
-          cachedResources,
-          cachedExpenses,
-          cachedPesticides,
-        )
-        copyCreatedWorkId.value = null
-      } else {
-        activeTab.value = DAILY_TAB_LABOR
-      }
       showToast(mode === 'draft' ? MSG_DRAFT_OK : MSG_COPY_OK)
       if (opts?.navigateTo) {
         leaveGuardBypass.value = true
@@ -1233,21 +1165,10 @@ async function saveCopiedWork(
     }
 
     const daily = await fetchWorkLogDaily(farmCd.value, targetDt)
-    const existingIds = new Set(
-      (daily.works || [])
-        .map((w) => String(w.work_id || '').trim())
-        .filter(Boolean),
-    )
     const works = (daily.works || []).map(toUpsertItem)
     works.push(draft)
-    const res = await saveWorkLogWorks(farmCd.value, targetDt, { works })
+    await saveWorkLogWorks(farmCd.value, targetDt, { works })
     clearCopyMode()
-    const createdId =
-      (res?.work_ids || []).find((id) => id && !existingIds.has(id)) ||
-      (res?.work_ids || [])[0] ||
-      null
-    copyCreatedWorkId.value = createdId
-    goLaborAfterCopy.value = true
     showToast(mode === 'draft' ? MSG_DRAFT_OK : MSG_COPY_OK)
     leaveGuardBypass.value = true
     if (opts?.navigateTo) {
@@ -1326,52 +1247,9 @@ async function onDeleteSelected() {
   }
 }
 
-watch(workDt, async () => {
+watch(workDt, () => {
   clearCopyMode()
-  await loadDaily()
-  // 복사 적용 이동: sessionStorage에 저장된 복사 데이터가 있으면 폼에 복원
-  const raw = sessionStorage.getItem('__copy_form__')
-  if (raw) {
-    sessionStorage.removeItem('__copy_form__')
-    try {
-      const snap = JSON.parse(raw)
-      formModel.value = {
-        workId: null,
-        workMidCd: String(snap.workMidCd || ''),
-        workContent: String(snap.workContent || ''),
-        workLocId: String(snap.workLocId || ''),
-        siteNm: String(snap.siteNm || ''),
-        startTime: String(snap.startTime || '08:00'),
-        endTime: String(snap.endTime || '09:00'),
-        statusCd: '',
-        statusNm: '',
-        rmk: String(snap.rmk || ''),
-        syncGoogle: false,
-        googleEventId: null,
-      }
-      selectedId.value = null
-      isEditing.value = true
-      activeTab.value = DAILY_TAB_WORK
-      captureCleanState()
-    } catch {
-      // 파싱 실패 시 무시
-    }
-  }
-  if (goLaborAfterCopy.value) {
-    activeTab.value = DAILY_TAB_LABOR
-    if (copyCreatedWorkId.value) {
-      selectedId.value = copyCreatedWorkId.value
-      isEditing.value = false
-      loadSideForWork(
-        copyCreatedWorkId.value,
-        cachedResources,
-        cachedExpenses,
-        cachedPesticides,
-      )
-      copyCreatedWorkId.value = null
-    }
-    goLaborAfterCopy.value = false
-  }
+  void loadDaily()
 })
 
 onMounted(async () => {
@@ -1379,7 +1257,10 @@ onMounted(async () => {
     await store.refreshAll()
   }
   await Promise.all([loadDaily(), loadPickOptions(), loadGoogleStatus()])
-  if (String(route.query.new || '') === HOME_DAILY_NEW_QUERY) {
+  // 작업복사 적용 후 이동 시 Pinia store에 데이터가 있으면 폼에 세팅
+  if (workCopyStore.draft) {
+    _applyCopyToForm()
+  } else if (String(route.query.new || '') === HOME_DAILY_NEW_QUERY) {
     onAddWork()
     void router.replace({
       name: 'work-log-daily',
@@ -1410,7 +1291,7 @@ onMounted(async () => {
       />
 
       <WorkLogDailyWorkForm
-        v-if="showForm && !copyModalOpen && !isCopyMode"
+        v-if="showForm"
         v-model="formModel"
         v-model:active-tab="activeTab"
         v-model:labor-rows="laborRows"
@@ -1437,7 +1318,7 @@ onMounted(async () => {
         @connect-google="onGoogleConnect"
       />
       <WorkLogDailyWorkCard
-        v-else-if="selectedItem && !copyModalOpen"
+        v-else-if="selectedItem"
         v-model:active-tab="activeTab"
         v-model:labor-rows="laborRows"
         v-model:expense-rows="expenseRows"
@@ -1469,7 +1350,7 @@ onMounted(async () => {
     </main>
 
     <div
-      v-if="showForm && !copyModalOpen && !isCopyMode"
+      v-if="showForm"
       class="footer-actions"
       aria-label="임시 저장·저장하기"
     >
@@ -1495,7 +1376,7 @@ onMounted(async () => {
         저장하기
       </OdsButton>
     </div>
-    <div v-else-if="!showForm" class="footer-actions" aria-label="저장·삭제">
+    <div v-else class="footer-actions" aria-label="저장·삭제">
       <OdsButton
         v-if="!isFuture"
         variant="primary"
@@ -1523,83 +1404,6 @@ onMounted(async () => {
     </div>
 
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
-
-    <Teleport to="body">
-      <div
-        v-if="copyModalOpen"
-        class="workcopy-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="작업 복사"
-      >
-        <button
-          type="button"
-          class="workcopy-modal__backdrop"
-          aria-label="닫기"
-          @click="onCancelCopyModal"
-        />
-        <div class="workcopy-modal__panel">
-          <header class="workcopy-modal__head">
-            <h3 class="workcopy-modal__title">작업 복사</h3>
-            <button
-              type="button"
-              class="workcopy-modal__close"
-              aria-label="닫기"
-              @click="onCancelCopyModal"
-            >✕</button>
-          </header>
-
-          <div class="workcopy-modal__body">
-            <WorkLogDailyWorkForm
-              v-model="formModel"
-              v-model:active-tab="activeTab"
-              v-model:labor-rows="laborRows"
-              v-model:expense-rows="expenseRows"
-              v-model:pesticide-rows="pesticideRows"
-              v-model:copy-work-dt="copyTargetDt"
-              :copy-mode="isCopyMode"
-              :copy-date-fixed="false"
-              :inline-pick="true"
-              :detail-locked="isFuture"
-              :work-options="workOptions"
-              :site-options="siteOptions"
-              :status-options="statusOptions"
-              :work-dt="workDt"
-              :farm-cd="farmCd"
-              :stock-applied-yn="pesticideAppliedYn"
-              :editing-replace="!!pesticideReplaceUseId"
-              :google-configured="!!googleStatus?.configured"
-              :google-connected="!!googleStatus?.connected"
-              @pending="onPending"
-              @cancel-pesticide="onCancelPesticide"
-              @edit-pesticide="onEditPesticide"
-              @remove-labor-res="onRemoveLaborRes"
-              @remove-expense-exp="onRemoveExpenseExp"
-              @push-google="onPushGoogleNow"
-              @connect-google="onGoogleConnect"
-            />
-          </div>
-
-          <div class="workcopy-modal__actions" aria-label="작업 복사">
-            <button
-              type="button"
-              class="workcopy-modal__btn workcopy-modal__btn--cancel"
-              @click="onCancelCopyModal"
-            >
-              취소
-            </button>
-            <button
-              type="button"
-              class="workcopy-modal__btn workcopy-modal__btn--apply"
-              @click="onCopyModalApply"
-            >
-              적용
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
 
     <Teleport to="body">
       <div
@@ -1700,6 +1504,58 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="copyModal.open" class="cpmodal" role="dialog" aria-modal="true" aria-label="작업 복사">
+        <button type="button" class="cpmodal__bd" aria-label="닫기" @click="onCopyModalCancel" />
+        <div class="cpmodal__panel">
+          <header class="cpmodal__head">
+            <h3 class="cpmodal__title">작업 복사</h3>
+            <button type="button" class="cpmodal__x" @click="onCopyModalCancel">✕</button>
+          </header>
+          <div class="cpmodal__body">
+            <p class="cpmodal__hint">인력·경비·농약·비료·사진은 복사되지 않습니다.</p>
+            <label class="cpmodal__field">
+              <span class="cpmodal__label">작업일 <span aria-hidden="true">*</span></span>
+              <input class="cpmodal__input" type="date" v-model="copyModal.workDt" />
+            </label>
+            <div class="cpmodal__row">
+              <label class="cpmodal__field">
+                <span class="cpmodal__label">작업구분 <span aria-hidden="true">*</span></span>
+                <select class="cpmodal__select" v-model="copyModal.workMidCd" @change="copyModal.workContent = workOptions.find(o => o.value === copyModal.workMidCd)?.label || copyModal.workContent">
+                  <option value="">선택하세요</option>
+                  <option v-for="o in workOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+              </label>
+              <label class="cpmodal__field">
+                <span class="cpmodal__label">작업장소</span>
+                <select class="cpmodal__select" v-model="copyModal.workLocId" @change="copyModal.siteNm = siteOptions.find(o => o.value === copyModal.workLocId)?.label || copyModal.siteNm">
+                  <option value="">선택하세요</option>
+                  <option v-for="o in siteOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="cpmodal__field">
+              <span class="cpmodal__label">시작 / 종료</span>
+              <div class="cpmodal__times">
+                <input class="cpmodal__time" type="time" v-model="copyModal.startTime" />
+                <span>~</span>
+                <input class="cpmodal__time" type="time" v-model="copyModal.endTime" />
+              </div>
+            </div>
+            <label class="cpmodal__field">
+              <span class="cpmodal__label">메모</span>
+              <textarea class="cpmodal__textarea" rows="4" v-model="copyModal.rmk" />
+            </label>
+          </div>
+          <div class="cpmodal__actions">
+            <button type="button" class="cpmodal__cancel" @click="onCopyModalCancel">취소</button>
+            <button type="button" class="cpmodal__apply" @click="onCopyModalApply">적용</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
 
     <OdsBottomNav />
   </div>
@@ -1854,183 +1710,6 @@ onMounted(async () => {
   font-weight: 600;
 }
 
-.workcopy-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 85;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--ods-space-16);
-}
-
-.workcopy-modal__backdrop {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
-  cursor: pointer;
-}
-
-.workcopy-modal__panel {
-  position: relative;
-  z-index: 1;
-  width: min(520px, 100%);
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  border-radius: var(--ods-radius-card);
-  background: var(--ods-color-bg-muted);
-  box-shadow: var(--ods-shadow-card);
-  overflow: hidden;
-}
-
-.workcopy-modal__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--ods-space-14) var(--ods-space-16);
-  border-bottom: 1px solid var(--ods-color-border);
-  background: var(--ods-color-white);
-  flex-shrink: 0;
-}
-
-.workcopy-modal__title {
-  margin: 0;
-  font: var(--ods-font-headline);
-  color: var(--ods-color-text);
-}
-
-.workcopy-modal__close {
-  border: 0;
-  background: transparent;
-  color: var(--ods-color-text-secondary);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 4px;
-}
-
-.workcopy-modal__body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: var(--ods-space-12);
-  -webkit-overflow-scrolling: touch;
-  position: relative;
-}
-
-.workcopy-modal__actions {
-  flex-shrink: 0;
-  display: flex;
-  gap: var(--ods-space-8);
-  padding: var(--ods-space-12) var(--ods-space-16);
-  border-top: 1px solid var(--ods-color-border);
-  background: var(--ods-color-white);
-}
-
-.workcopy-modal__btn {
-  flex: 1;
-  min-height: var(--ods-button-height);
-  border-radius: var(--ods-radius-button);
-  font: var(--ods-font-form-value);
-  font-weight: 700;
-  cursor: pointer;
-  border: 0;
-}
-
-.workcopy-modal__btn--cancel {
-  background: var(--ods-color-white);
-  border: 2px solid var(--ods-color-border);
-  color: var(--ods-color-text-secondary);
-}
-
-.workcopy-modal__btn--apply {
-  background: var(--ods-color-primary);
-  color: var(--ods-color-white);
-}
-
-.copy-confirm {
-  position: fixed;
-  inset: 0;
-  z-index: 86;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--ods-space-16);
-}
-
-.copy-confirm__backdrop {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
-  cursor: pointer;
-}
-
-.copy-confirm__card {
-  position: relative;
-  z-index: 1;
-  width: min(380px, 100%);
-  padding: var(--ods-space-20) var(--ods-space-16);
-  border-radius: var(--ods-radius-card);
-  background: var(--ods-color-white);
-  box-shadow: var(--ods-shadow-card);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-16);
-}
-
-.copy-confirm__title {
-  margin: 0;
-  font: var(--ods-font-body-1);
-  font-weight: 800;
-  color: var(--ods-color-text);
-  text-align: center;
-}
-
-.copy-confirm__msg {
-  margin: 0;
-  font: var(--ods-font-form-help);
-  color: var(--ods-color-text-secondary);
-  line-height: 1.5;
-}
-
-.copy-confirm__actions {
-  display: flex;
-  gap: var(--ods-space-8);
-}
-
-.copy-confirm__btn {
-  flex: 1;
-  min-height: var(--ods-button-height);
-  border-radius: var(--ods-radius-button);
-  font: var(--ods-font-form-value);
-  font-weight: 700;
-  cursor: pointer;
-  border: 0;
-}
-
-.copy-confirm__btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.copy-confirm__btn--primary {
-  background: var(--ods-color-primary);
-  color: var(--ods-color-white);
-}
-
-.copy-confirm__btn--secondary {
-  background: var(--ods-color-white);
-  border: 2px solid var(--ods-color-primary);
-  color: var(--ods-color-primary);
-}
-
 .gimport {
   position: fixed;
   inset: 0;
@@ -2125,4 +1804,149 @@ onMounted(async () => {
   color: var(--ods-color-text-secondary);
   white-space: pre-wrap;
 }
+.cpmodal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ods-space-16);
+}
+.cpmodal__bd {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--ods-color-gray-900) 45%, transparent);
+  cursor: pointer;
+}
+.cpmodal__panel {
+  position: relative;
+  z-index: 1;
+  width: min(480px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
+  overflow: hidden;
+}
+.cpmodal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ods-space-14) var(--ods-space-16);
+  border-bottom: 1px solid var(--ods-color-border);
+  flex-shrink: 0;
+}
+.cpmodal__title {
+  margin: 0;
+  font: var(--ods-font-headline);
+  color: var(--ods-color-text);
+}
+.cpmodal__x {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  color: var(--ods-color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.cpmodal__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--ods-space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+}
+.cpmodal__hint {
+  margin: 0;
+  font: var(--ods-font-card-help);
+  color: var(--ods-color-text-secondary);
+}
+.cpmodal__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+}
+.cpmodal__row {
+  display: flex;
+  gap: var(--ods-space-8);
+}
+.cpmodal__row .cpmodal__field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.cpmodal__label {
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-text);
+}
+.cpmodal__input,
+.cpmodal__select {
+  width: 100%;
+  padding: var(--ods-space-10) var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+  background: var(--ods-color-white);
+  box-sizing: border-box;
+}
+.cpmodal__times {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+}
+.cpmodal__time {
+  flex: 1;
+  padding: var(--ods-space-10) var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+}
+.cpmodal__textarea {
+  width: 100%;
+  padding: var(--ods-space-10) var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.cpmodal__actions {
+  display: flex;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-top: 1px solid var(--ods-color-border);
+  flex-shrink: 0;
+}
+.cpmodal__cancel {
+  flex: 1;
+  min-height: var(--ods-button-height);
+  border: 2px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-form-value);
+  font-weight: 700;
+  cursor: pointer;
+}
+.cpmodal__apply {
+  flex: 1;
+  min-height: var(--ods-button-height);
+  border: 0;
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
+  font: var(--ods-font-form-value);
+  font-weight: 700;
+  cursor: pointer;
+}
+
 </style>
