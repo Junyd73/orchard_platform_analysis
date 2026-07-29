@@ -124,6 +124,8 @@ const copySourceWorkId = ref<string | null>(null)
 /** 복사 후 이동 시(다른 날짜) 인력 탭으로 전환 + 복사된 작업 선택 */
 const goLaborAfterCopy = ref(false)
 const copyCreatedWorkId = ref<string | null>(null)
+/** 복사 적용 후 다른 날짜로 이동 시 formModel 데이터 보존 플래그 */
+const preserveFormOnNavigate = ref(false)
 const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
 const googleStatus = ref<GoogleCalendarStatus | null>(null)
 const googleImportOpen = ref(false)
@@ -464,19 +466,40 @@ function onCancelCopyModal() {
 }
 
 
-/** 복사 모달 "적용" — 저장 없이 작업 등록 폼에 복사 데이터를 채워 이동 */
-function onCopyModalApply() {
+/** 복사 모달 "적용" — 저장 없이 복사 날짜의 일간 화면으로 이동해 작업등록 폼을 열어줌 */
+async function onCopyModalApply() {
   if (!formModel.value.workMidCd) {
     showToast(MSG_WORK_CONTENT_REQUIRED)
     return
   }
-  // 모달 닫고, isCopyMode 해제 후 일반 신규 등록 폼으로 전환(데이터 유지)
+  const targetDt = String(copyTargetDt.value || '').trim()
+  if (!targetDt || !/^\d{4}-\d{2}-\d{2}$/.test(targetDt)) {
+    showToast(MSG_COPY_DATE_INVALID)
+    return
+  }
+
+  // 현재 화면과 복사 날짜가 같으면 그냥 폼만 열기
+  if (targetDt === workDt.value) {
+    copyModalOpen.value = false
+    isCopyMode.value = false
+    selectedId.value = null
+    isEditing.value = true
+    activeTab.value = DAILY_TAB_WORK
+    captureCleanState()
+    return
+  }
+
+  // 다른 날짜이면 해당 날짜 일간 페이지로 이동 후 폼 복원
   copyModalOpen.value = false
   isCopyMode.value = false
-  selectedId.value = null
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
-  captureCleanState()
+  preserveFormOnNavigate.value = true
+  leaveGuardBypass.value = true
+  await router.push({
+    name: 'work-log-daily',
+    params: { workDt: targetDt },
+  })
 }
 
 function showToast(msg: string) {
@@ -1279,8 +1302,17 @@ async function onDeleteSelected() {
 }
 
 watch(workDt, async () => {
+  const keepForm = preserveFormOnNavigate.value
+  preserveFormOnNavigate.value = false
   clearCopyMode()
   await loadDaily()
+  // 복사 적용 이동: loadDaily가 formModel을 초기화하므로 다시 신규 등록 상태로 복원
+  if (keepForm) {
+    selectedId.value = null
+    isEditing.value = true
+    activeTab.value = DAILY_TAB_WORK
+    captureCleanState()
+  }
   if (goLaborAfterCopy.value) {
     activeTab.value = DAILY_TAB_LABOR
     if (copyCreatedWorkId.value) {
@@ -1823,7 +1855,7 @@ onMounted(async () => {
 
 .workcopy-modal__title {
   margin: 0;
-  font: 700 16px/1.3 var(--ods-font-family);
+  font: var(--ods-font-headline);
   color: var(--ods-color-text);
 }
 
