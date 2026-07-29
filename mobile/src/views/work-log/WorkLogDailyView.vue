@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   onBeforeRouteLeave,
   useRoute,
@@ -1306,9 +1306,10 @@ watch(workDt, async () => {
   pendingCopyForm.value = null
   clearCopyMode()
   await loadDaily()
-  // 복사 적용 이동: 저장해둔 폼 데이터를 loadDaily 후 복원
+  // 복사 적용 이동: loadDaily/applyWorksFromApi 이후 nextTick에 폼 복원
   if (savedForm) {
-    formModel.value = savedForm
+    await nextTick()
+    formModel.value = { ...savedForm, workId: null }
     selectedId.value = null
     isEditing.value = true
     activeTab.value = DAILY_TAB_WORK
