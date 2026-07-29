@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   onBeforeRouteLeave,
   useRoute,
@@ -487,23 +487,23 @@ async function onCopyModalApply() {
     return
   }
 
-  // 다른 날짜: 복사 데이터를 query로 인코딩해 전달
+  // 다른 날짜: sessionStorage에 복사 데이터 저장 후 이동
   const snap = formModel.value
+  sessionStorage.setItem('__copy_form__', JSON.stringify({
+    workMidCd: snap.workMidCd || '',
+    workContent: snap.workContent || '',
+    workLocId: snap.workLocId || '',
+    siteNm: snap.siteNm || '',
+    startTime: snap.startTime || '08:00',
+    endTime: snap.endTime || '09:00',
+    rmk: snap.rmk || '',
+  }))
   copyModalOpen.value = false
   isCopyMode.value = false
   leaveGuardBypass.value = true
   await router.push({
     name: 'work-log-daily',
     params: { workDt: targetDt },
-    query: {
-      copy_mid: snap.workMidCd || '',
-      copy_mid_nm: snap.workContent || '',
-      copy_loc: snap.workLocId || '',
-      copy_loc_nm: snap.siteNm || '',
-      copy_start: snap.startTime || '',
-      copy_end: snap.endTime || '',
-      copy_rmk: snap.rmk || '',
-    },
   })
 }
 
@@ -1309,34 +1309,33 @@ async function onDeleteSelected() {
 watch(workDt, async () => {
   clearCopyMode()
   await loadDaily()
-  // 복사 적용 이동: query에 복사 데이터가 있으면 폼에 복원
-  const q = route.query
-  if (q.copy_mid) {
-    await nextTick()
-    formModel.value = {
-      workId: null,
-      workMidCd: String(q.copy_mid || ''),
-      workContent: String(q.copy_mid_nm || ''),
-      workLocId: String(q.copy_loc || ''),
-      siteNm: String(q.copy_loc_nm || ''),
-      startTime: String(q.copy_start || '08:00'),
-      endTime: String(q.copy_end || '09:00'),
-      statusCd: '',
-      statusNm: '',
-      rmk: String(q.copy_rmk || ''),
-      syncGoogle: false,
-      googleEventId: null,
+  // 복사 적용 이동: sessionStorage에 저장된 복사 데이터가 있으면 폼에 복원
+  const raw = sessionStorage.getItem('__copy_form__')
+  if (raw) {
+    sessionStorage.removeItem('__copy_form__')
+    try {
+      const snap = JSON.parse(raw)
+      formModel.value = {
+        workId: null,
+        workMidCd: String(snap.workMidCd || ''),
+        workContent: String(snap.workContent || ''),
+        workLocId: String(snap.workLocId || ''),
+        siteNm: String(snap.siteNm || ''),
+        startTime: String(snap.startTime || '08:00'),
+        endTime: String(snap.endTime || '09:00'),
+        statusCd: '',
+        statusNm: '',
+        rmk: String(snap.rmk || ''),
+        syncGoogle: false,
+        googleEventId: null,
+      }
+      selectedId.value = null
+      isEditing.value = true
+      activeTab.value = DAILY_TAB_WORK
+      captureCleanState()
+    } catch {
+      // 파싱 실패 시 무시
     }
-    selectedId.value = null
-    isEditing.value = true
-    activeTab.value = DAILY_TAB_WORK
-    captureCleanState()
-    // query 파라미터 제거 (뒤로가기 시 재실행 방지)
-    void router.replace({
-      name: 'work-log-daily',
-      params: { workDt: workDt.value },
-      query: {},
-    })
   }
   if (goLaborAfterCopy.value) {
     activeTab.value = DAILY_TAB_LABOR
