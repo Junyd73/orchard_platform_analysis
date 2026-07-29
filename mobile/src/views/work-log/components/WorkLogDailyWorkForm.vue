@@ -58,6 +58,8 @@ const props = defineProps<{
   copyMode?: boolean
   /** 작업복사 시 작업일을 고정(오늘) 표시 */
   copyDateFixed?: boolean
+  /** 픽시트를 Teleport 없이 현재 위치(모달 내부)에서 인라인 렌더링 */
+  inlinePick?: boolean
 }>()
 
 const copyWorkDt = defineModel<string>('copyWorkDt', { default: '' })
@@ -159,10 +161,7 @@ function onSelectPending(msg?: string) {
         <span>{{ tab.label }}</span>
       </button>
     </div>
-    <header v-else class="form__copy-head">
-      <h3 class="form__copy-title">작업 복사</h3>
-      <p class="form__copy-hint" role="note">{{ MSG_COPY_HINT }}</p>
-    </header>
+    <p v-else class="form__copy-hint" role="note">{{ MSG_COPY_HINT }}</p>
 
     <div :key="copyMode ? 'copy' : activeTab" class="form__body" role="tabpanel">
       <template v-if="copyMode || activeTab === DAILY_TAB_WORK">
@@ -336,6 +335,7 @@ function onSelectPending(msg?: string) {
       :open="pickKind != null"
       :title="pickKind ? pickTitle[pickKind] : ''"
       :options="pickKind ? pickOptions[pickKind] : []"
+      :inline="inlinePick"
       @close="closePick"
       @select="onPick"
     />

@@ -1482,7 +1482,8 @@ onMounted(async () => {
               v-model:pesticide-rows="pesticideRows"
               v-model:copy-work-dt="copyTargetDt"
               :copy-mode="isCopyMode"
-              :copy-date-fixed="true"
+              :copy-date-fixed="false"
+              :inline-pick="true"
               :detail-locked="isFuture"
               :work-options="workOptions"
               :site-options="siteOptions"
@@ -1842,6 +1843,7 @@ onMounted(async () => {
   overflow-y: auto;
   padding: var(--ods-space-12);
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .workcopy-modal__actions {

@@ -1,9 +1,14 @@
 <script setup lang="ts">
-defineProps<{
-  open: boolean
-  title: string
-  options: ReadonlyArray<{ value: string; label: string }>
-}>()
+withDefaults(
+  defineProps<{
+    open: boolean
+    title: string
+    options: ReadonlyArray<{ value: string; label: string }>
+    /** true이면 Teleport 없이 현재 위치(모달 내부)에서 절대위치 렌더링 */
+    inline?: boolean
+  }>(),
+  { inline: false },
+)
 
 const emit = defineEmits<{
   close: []
@@ -12,7 +17,8 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <Teleport to="body">
+  <!-- 일반 모드: body로 Teleport -->
+  <Teleport v-if="!inline" to="body">
     <div v-if="open" class="sheet" role="dialog" :aria-label="title">
       <button type="button" class="sheet__backdrop" aria-label="닫기" @click="emit('close')" />
       <div class="sheet__panel">
@@ -22,11 +28,7 @@ const emit = defineEmits<{
         </header>
         <ul class="sheet__list">
           <li v-for="opt in options" :key="opt.value">
-            <button
-              type="button"
-              class="sheet__item"
-              @click="emit('select', opt.value, opt.label)"
-            >
+            <button type="button" class="sheet__item" @click="emit('select', opt.value, opt.label)">
               {{ opt.label }}
             </button>
           </li>
@@ -35,6 +37,25 @@ const emit = defineEmits<{
       </div>
     </div>
   </Teleport>
+
+  <!-- 인라인 모드: 부모(모달) 안에서 절대위치로 렌더링 -->
+  <div v-else-if="open" class="sheet sheet--inline" role="dialog" :aria-label="title">
+    <button type="button" class="sheet__backdrop" aria-label="닫기" @click="emit('close')" />
+    <div class="sheet__panel sheet__panel--inline">
+      <header class="sheet__head">
+        <h3 class="sheet__title">{{ title }}</h3>
+        <button type="button" class="sheet__x" @click="emit('close')">닫기</button>
+      </header>
+      <ul class="sheet__list">
+        <li v-for="opt in options" :key="opt.value">
+          <button type="button" class="sheet__item" @click="emit('select', opt.value, opt.label)">
+            {{ opt.label }}
+          </button>
+        </li>
+      </ul>
+      <p v-if="options.length === 0" class="sheet__empty">선택 가능한 항목이 없습니다.</p>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -46,6 +67,14 @@ const emit = defineEmits<{
   flex-direction: column;
   justify-content: flex-end;
 }
+
+.sheet--inline {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  border-radius: inherit;
+}
+
 .sheet__backdrop {
   position: absolute;
   inset: 0;
@@ -55,6 +84,7 @@ const emit = defineEmits<{
   background: color-mix(in srgb, var(--ods-color-gray-900) 40%, transparent);
   cursor: pointer;
 }
+
 .sheet__panel {
   position: relative;
   max-height: min(56dvh, 420px);
@@ -65,12 +95,23 @@ const emit = defineEmits<{
   box-shadow: var(--ods-shadow-card);
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+.sheet__panel--inline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 80%;
+  border-radius: 0 0 var(--ods-radius-card) var(--ods-radius-card);
+}
+
 .sheet__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--ods-space-12) var(--ods-space-16);
   border-bottom: 1px solid var(--ods-color-border);
+  flex-shrink: 0;
 }
 .sheet__title {
   margin: 0;
