@@ -240,9 +240,9 @@ watch([year, month], () => {
   void loadMonth()
 })
 
-/** 일간→월간 복귀 시 캘린더 갱신 — keep-alive 없어도 route 변경으로 감지 */
+/** 일간→월간 복귀 시 캘린더 갱신 */
 watch(
-  () => useRoute().name,
+  () => route.name,
   (name) => {
     if (name === 'work-log') {
       void loadMonth()
