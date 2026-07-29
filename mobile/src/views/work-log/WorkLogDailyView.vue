@@ -124,8 +124,6 @@ const copySourceWorkId = ref<string | null>(null)
 /** 복사 후 이동 시(다른 날짜) 인력 탭으로 전환 + 복사된 작업 선택 */
 const goLaborAfterCopy = ref(false)
 const copyCreatedWorkId = ref<string | null>(null)
-/** 복사 적용 후 다른 날짜로 이동 시 복원할 폼 스냅샷 */
-const pendingCopyForm = ref<DailyWorkFormModel | null>(null)
 const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
 const googleStatus = ref<GoogleCalendarStatus | null>(null)
 const googleImportOpen = ref(false)
@@ -489,16 +487,23 @@ async function onCopyModalApply() {
     return
   }
 
-  // 다른 날짜이면 폼 스냅샷 저장 후 해당 날짜 일간 페이지로 이동
-  pendingCopyForm.value = { ...formModel.value, workId: null }
+  // 다른 날짜: 복사 데이터를 query로 인코딩해 전달
+  const snap = formModel.value
   copyModalOpen.value = false
   isCopyMode.value = false
-  isEditing.value = true
-  activeTab.value = DAILY_TAB_WORK
   leaveGuardBypass.value = true
   await router.push({
     name: 'work-log-daily',
     params: { workDt: targetDt },
+    query: {
+      copy_mid: snap.workMidCd || '',
+      copy_mid_nm: snap.workContent || '',
+      copy_loc: snap.workLocId || '',
+      copy_loc_nm: snap.siteNm || '',
+      copy_start: snap.startTime || '',
+      copy_end: snap.endTime || '',
+      copy_rmk: snap.rmk || '',
+    },
   })
 }
 
@@ -1302,18 +1307,36 @@ async function onDeleteSelected() {
 }
 
 watch(workDt, async () => {
-  const savedForm = pendingCopyForm.value
-  pendingCopyForm.value = null
   clearCopyMode()
   await loadDaily()
-  // 복사 적용 이동: loadDaily/applyWorksFromApi 이후 nextTick에 폼 복원
-  if (savedForm) {
+  // 복사 적용 이동: query에 복사 데이터가 있으면 폼에 복원
+  const q = route.query
+  if (q.copy_mid) {
     await nextTick()
-    formModel.value = { ...savedForm, workId: null }
+    formModel.value = {
+      workId: null,
+      workMidCd: String(q.copy_mid || ''),
+      workContent: String(q.copy_mid_nm || ''),
+      workLocId: String(q.copy_loc || ''),
+      siteNm: String(q.copy_loc_nm || ''),
+      startTime: String(q.copy_start || '08:00'),
+      endTime: String(q.copy_end || '09:00'),
+      statusCd: '',
+      statusNm: '',
+      rmk: String(q.copy_rmk || ''),
+      syncGoogle: false,
+      googleEventId: null,
+    }
     selectedId.value = null
     isEditing.value = true
     activeTab.value = DAILY_TAB_WORK
     captureCleanState()
+    // query 파라미터 제거 (뒤로가기 시 재실행 방지)
+    void router.replace({
+      name: 'work-log-daily',
+      params: { workDt: workDt.value },
+      query: {},
+    })
   }
   if (goLaborAfterCopy.value) {
     activeTab.value = DAILY_TAB_LABOR
