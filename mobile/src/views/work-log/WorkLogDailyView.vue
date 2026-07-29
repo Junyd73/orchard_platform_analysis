@@ -124,8 +124,8 @@ const copySourceWorkId = ref<string | null>(null)
 /** 복사 후 이동 시(다른 날짜) 인력 탭으로 전환 + 복사된 작업 선택 */
 const goLaborAfterCopy = ref(false)
 const copyCreatedWorkId = ref<string | null>(null)
-/** 복사 적용 후 다른 날짜로 이동 시 formModel 데이터 보존 플래그 */
-const preserveFormOnNavigate = ref(false)
+/** 복사 적용 후 다른 날짜로 이동 시 복원할 폼 스냅샷 */
+const pendingCopyForm = ref<DailyWorkFormModel | null>(null)
 const formModel = ref<DailyWorkFormModel>(createEmptyWorkForm())
 const googleStatus = ref<GoogleCalendarStatus | null>(null)
 const googleImportOpen = ref(false)
@@ -489,12 +489,12 @@ async function onCopyModalApply() {
     return
   }
 
-  // 다른 날짜이면 해당 날짜 일간 페이지로 이동 후 폼 복원
+  // 다른 날짜이면 폼 스냅샷 저장 후 해당 날짜 일간 페이지로 이동
+  pendingCopyForm.value = { ...formModel.value, workId: null }
   copyModalOpen.value = false
   isCopyMode.value = false
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
-  preserveFormOnNavigate.value = true
   leaveGuardBypass.value = true
   await router.push({
     name: 'work-log-daily',
@@ -1302,12 +1302,13 @@ async function onDeleteSelected() {
 }
 
 watch(workDt, async () => {
-  const keepForm = preserveFormOnNavigate.value
-  preserveFormOnNavigate.value = false
+  const savedForm = pendingCopyForm.value
+  pendingCopyForm.value = null
   clearCopyMode()
   await loadDaily()
-  // 복사 적용 이동: loadDaily가 formModel을 초기화하므로 다시 신규 등록 상태로 복원
-  if (keepForm) {
+  // 복사 적용 이동: 저장해둔 폼 데이터를 loadDaily 후 복원
+  if (savedForm) {
+    formModel.value = savedForm
     selectedId.value = null
     isEditing.value = true
     activeTab.value = DAILY_TAB_WORK
