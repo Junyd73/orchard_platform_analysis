@@ -121,10 +121,6 @@ const copyTargetDt = ref('')
 const copyModalOpen = ref(false)
 /** 복사 버튼 클릭 시 원본 작업(work_id) — 취소 시 복원 */
 const copySourceWorkId = ref<string | null>(null)
-/** 복사 저장 전 확인(질문) 모달 */
-const copyConfirmOpen = ref(false)
-const copyConfirmMode = ref<'draft' | 'final'>('final')
-const copyConfirmReportMsg = ref('')
 /** 복사 후 이동 시(다른 날짜) 인력 탭으로 전환 + 복사된 작업 선택 */
 const goLaborAfterCopy = ref(false)
 const copyCreatedWorkId = ref<string | null>(null)
@@ -440,31 +436,13 @@ function onCopySelected() {
   copyCreatedWorkId.value = null
   goLaborAfterCopy.value = false
   copyModalOpen.value = true
-  copyConfirmOpen.value = false
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
   captureCleanState()
 }
 
-function buildCopyWorkReport(): string {
-  const dt = String(copyTargetDt.value || '').trim()
-  const workType = String(formModel.value.workContent || '').trim()
-  const site = String(formModel.value.siteNm || '').trim()
-  const start = String(formModel.value.startTime || '').slice(0, 5)
-  const end = String(formModel.value.endTime || '').slice(0, 5)
-  const memo = String(formModel.value.rmk || '').trim()
-  const memoPart = memo ? ` · 메모: ${memo}` : ''
-  return `복사 완료 · ${dt} · ${workType || '—'} · ${site || '—'} · ${start}~${end}${memoPart}`
-}
-
-function shouldConfirmCopyDate(): boolean {
-  // 작업일을 “오늘”로 고정하지만, 현재 화면 날짜와 다르면(과거/미래) 사용자 의도 확인이 필요.
-  return String(copyTargetDt.value || '') !== String(workDt.value || '')
-}
-
 function onCancelCopyModal() {
   const restoreId = copySourceWorkId.value
-  copyConfirmOpen.value = false
   clearCopyMode()
   if (!restoreId) {
     selectedId.value = null
@@ -485,30 +463,20 @@ function onCancelCopyModal() {
   captureCleanState()
 }
 
-async function onCopyModalSave(mode: 'draft' | 'final') {
-  if (saving.value) return false
-  const reportMsg = buildCopyWorkReport()
-  if (shouldConfirmCopyDate()) {
-    copyConfirmMode.value = mode
-    copyConfirmReportMsg.value = reportMsg
-    copyConfirmOpen.value = true
-    return false
+
+/** 복사 모달 "적용" — 저장 없이 작업 등록 폼에 복사 데이터를 채워 이동 */
+function onCopyModalApply() {
+  if (!formModel.value.workMidCd) {
+    showToast(MSG_WORK_CONTENT_REQUIRED)
+    return
   }
-  const ok = await onSave(mode)
-  if (ok) showToast(reportMsg)
-  return ok
-}
-
-async function onCopyConfirmYes() {
-  copyConfirmOpen.value = false
-  const mode = copyConfirmMode.value
-  const reportMsg = copyConfirmReportMsg.value
-  const ok = await onSave(mode)
-  if (ok && reportMsg) showToast(reportMsg)
-}
-
-function onCopyConfirmNo() {
-  copyConfirmOpen.value = false
+  // 모달 닫고, isCopyMode 해제 후 일반 신규 등록 폼으로 전환(데이터 유지)
+  copyModalOpen.value = false
+  isCopyMode.value = false
+  selectedId.value = null
+  isEditing.value = true
+  activeTab.value = DAILY_TAB_WORK
+  captureCleanState()
 }
 
 function showToast(msg: string) {
@@ -1535,74 +1503,26 @@ onMounted(async () => {
             />
           </div>
 
-          <div class="workcopy-modal__actions" aria-label="작업 복사 저장">
-            <OdsButton
-              variant="secondary"
+          <div class="workcopy-modal__actions" aria-label="작업 복사">
+            <button
               type="button"
-              :block="false"
-              class="footer-btn footer-btn--outline"
-              :busy="saving"
-              @click="onCopyModalSave('draft')"
+              class="workcopy-modal__btn workcopy-modal__btn--cancel"
+              @click="onCancelCopyModal"
             >
-              임시 저장
-            </OdsButton>
-            <OdsButton
-              v-if="!isFutureDate(copyTargetDt)"
-              variant="primary"
+              취소
+            </button>
+            <button
               type="button"
-              :block="false"
-              class="footer-btn"
-              :busy="saving"
-              @click="onCopyModalSave('final')"
+              class="workcopy-modal__btn workcopy-modal__btn--apply"
+              @click="onCopyModalApply"
             >
-              저장하기
-            </OdsButton>
+              적용
+            </button>
           </div>
         </div>
       </div>
     </Teleport>
 
-    <Teleport to="body">
-      <div
-        v-if="copyConfirmOpen"
-        class="copy-confirm"
-        role="dialog"
-        aria-modal="true"
-        aria-label="작업 복사 확인"
-      >
-        <button
-          type="button"
-          class="copy-confirm__backdrop"
-          aria-label="닫기"
-          @click="onCopyConfirmNo"
-        />
-        <div class="copy-confirm__card">
-          <p class="copy-confirm__title">복사 저장 확인</p>
-          <p class="copy-confirm__msg">
-            현재 화면 날짜 {{ workDt }}의 작업을
-            <strong>{{ copyTargetDt }}</strong>(오늘)에 추가할까요?
-          </p>
-          <div class="copy-confirm__actions">
-            <button
-              type="button"
-              class="copy-confirm__btn copy-confirm__btn--primary"
-              :disabled="saving"
-              @click.stop="onCopyConfirmYes"
-            >
-              예, 저장
-            </button>
-            <button
-              type="button"
-              class="copy-confirm__btn copy-confirm__btn--secondary"
-              :disabled="saving"
-              @click.stop="onCopyConfirmNo"
-            >
-              아니요
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <Teleport to="body">
       <div
@@ -1933,9 +1853,25 @@ onMounted(async () => {
   background: var(--ods-color-white);
 }
 
-.workcopy-modal__actions :deep(.ods-btn) {
-  min-height: var(--ods-button-height);
+.workcopy-modal__btn {
   flex: 1;
+  min-height: var(--ods-button-height);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-form-value);
+  font-weight: 700;
+  cursor: pointer;
+  border: 0;
+}
+
+.workcopy-modal__btn--cancel {
+  background: var(--ods-color-white);
+  border: 2px solid var(--ods-color-border);
+  color: var(--ods-color-text-secondary);
+}
+
+.workcopy-modal__btn--apply {
+  background: var(--ods-color-primary);
+  color: var(--ods-color-white);
 }
 
 .copy-confirm {

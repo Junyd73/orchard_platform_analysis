@@ -41,7 +41,7 @@ const emit = defineEmits<{
 .sheet {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 200;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
