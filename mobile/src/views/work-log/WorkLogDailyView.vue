@@ -476,18 +476,7 @@ async function onCopyModalApply() {
     return
   }
 
-  // 현재 화면과 복사 날짜가 같으면 그냥 폼만 열기
-  if (targetDt === workDt.value) {
-    copyModalOpen.value = false
-    isCopyMode.value = false
-    selectedId.value = null
-    isEditing.value = true
-    activeTab.value = DAILY_TAB_WORK
-    captureCleanState()
-    return
-  }
-
-  // 복사 데이터 스냅샷
+  // 복사 데이터 스냅샷 (모달 닫기 전에 저장)
   const copyData = {
     workMidCd: formModel.value.workMidCd || '',
     workContent: formModel.value.workContent || '',
@@ -522,14 +511,14 @@ async function onCopyModalApply() {
   copyModalOpen.value = false
   isCopyMode.value = false
 
-  // 이미 같은 날짜 페이지이면 watch가 안 트리거되므로 직접 loadDaily 후 복원
+  // 같은 날짜이면 loadDaily 후 직접 복원 (watch가 트리거 안 되므로)
   if (targetDt === workDt.value) {
     await loadDaily()
     applyCopyData()
     return
   }
 
-  // 다른 날짜: sessionStorage 저장 + push
+  // 다른 날짜: sessionStorage 저장 후 push → watch에서 복원
   sessionStorage.setItem('__copy_form__', JSON.stringify(copyData))
   leaveGuardBypass.value = true
   await router.push({
