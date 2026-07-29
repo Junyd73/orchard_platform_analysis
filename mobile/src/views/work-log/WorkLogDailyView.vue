@@ -487,28 +487,55 @@ async function onCopyModalApply() {
     return
   }
 
-  // 다른 날짜: sessionStorage에 복사 데이터 저장 후 이동
-  const snap = formModel.value
+  // 복사 데이터 스냅샷
   const copyData = {
-    workMidCd: snap.workMidCd || '',
-    workContent: snap.workContent || '',
-    workLocId: snap.workLocId || '',
-    siteNm: snap.siteNm || '',
-    startTime: snap.startTime || '08:00',
-    endTime: snap.endTime || '09:00',
-    rmk: snap.rmk || '',
+    workMidCd: formModel.value.workMidCd || '',
+    workContent: formModel.value.workContent || '',
+    workLocId: formModel.value.workLocId || '',
+    siteNm: formModel.value.siteNm || '',
+    startTime: formModel.value.startTime || '08:00',
+    endTime: formModel.value.endTime || '09:00',
+    rmk: formModel.value.rmk || '',
   }
-  console.log('[복사적용] STEP1 저장:', copyData)
-  sessionStorage.setItem('__copy_form__', JSON.stringify(copyData))
-  console.log('[복사적용] STEP2 sessionStorage 확인:', sessionStorage.getItem('__copy_form__'))
+
+  function applyCopyData() {
+    formModel.value = {
+      workId: null,
+      workMidCd: copyData.workMidCd,
+      workContent: copyData.workContent,
+      workLocId: copyData.workLocId,
+      siteNm: copyData.siteNm,
+      startTime: copyData.startTime,
+      endTime: copyData.endTime,
+      statusCd: '',
+      statusNm: '',
+      rmk: copyData.rmk,
+      syncGoogle: false,
+      googleEventId: null,
+    }
+    selectedId.value = null
+    isEditing.value = true
+    activeTab.value = DAILY_TAB_WORK
+    captureCleanState()
+  }
+
   copyModalOpen.value = false
   isCopyMode.value = false
+
+  // 이미 같은 날짜 페이지이면 watch가 안 트리거되므로 직접 loadDaily 후 복원
+  if (targetDt === workDt.value) {
+    await loadDaily()
+    applyCopyData()
+    return
+  }
+
+  // 다른 날짜: sessionStorage 저장 + push
+  sessionStorage.setItem('__copy_form__', JSON.stringify(copyData))
   leaveGuardBypass.value = true
   await router.push({
     name: 'work-log-daily',
     params: { workDt: targetDt },
   })
-  console.log('[복사적용] STEP3 router.push 완료, workDt:', targetDt)
 }
 
 function showToast(msg: string) {
@@ -1315,12 +1342,10 @@ watch(workDt, async () => {
   await loadDaily()
   // 복사 적용 이동: sessionStorage에 저장된 복사 데이터가 있으면 폼에 복원
   const raw = sessionStorage.getItem('__copy_form__')
-  console.log('[복사복원] STEP4 watch발동 workDt:', workDt.value, 'raw:', raw)
   if (raw) {
     sessionStorage.removeItem('__copy_form__')
     try {
       const snap = JSON.parse(raw)
-      console.log('[복사복원] STEP5 폼복원:', snap)
       formModel.value = {
         workId: null,
         workMidCd: String(snap.workMidCd || ''),
@@ -1339,9 +1364,8 @@ watch(workDt, async () => {
       isEditing.value = true
       activeTab.value = DAILY_TAB_WORK
       captureCleanState()
-      console.log('[복사복원] STEP6 formModel 복원완료:', formModel.value)
-    } catch (e) {
-      console.error('[복사복원] 파싱실패:', e)
+    } catch {
+      // 파싱 실패 시 무시
     }
   }
   if (goLaborAfterCopy.value) {
