@@ -1398,7 +1398,7 @@ class WorkLogService:
         )
         with get_sqlite_write_connection(self._db_path) as conn:
             bridge = ServerDbBridge(conn)
-            # 작업-only: 기존 기상 마스터를 보존(빈 MasterDto로 덮어쓰지 않음)
+            # 기상 마스터 보존
             row = conn.execute(
                 """
                 SELECT day_of_week, weather_cd, temp_min, temp_max, precip, humidity,
@@ -1423,6 +1423,38 @@ class WorkLogService:
                     wind_min=row["wind_min"],
                     work_rmk=_s(row["work_rmk"]) or None,
                 )
+
+            # 기존 작업 보존: 클라이언트가 보낸 목록에 없는 기존 작업을 자동 병합
+            # (모바일이 sourceWorks를 누락해서 보낸 경우 기존 작업 삭제를 방지)
+            existing_rows = conn.execute(
+                """
+                SELECT work_id, work_mid_cd, work_mid_nm, work_loc_id,
+                       start_tm, end_tm, status_cd, rmk
+                FROM t_work_detail WHERE work_dt = ? AND farm_cd = ?
+                """,
+                (dt, farm),
+            ).fetchall()
+            incoming_ids = {_s(w.work_id) for w in works if _s(w.work_id)}
+            for ex in existing_rows:
+                ex_id = _s(ex["work_id"])
+                if ex_id and ex_id not in incoming_ids:
+                    # 클라이언트가 보내지 않은 기존 작업을 payload에 추가
+                    works.append(
+                        WorkDetailDto(
+                            work_id=ex_id,
+                            work_mid_cd=_s(ex["work_mid_cd"]),
+                            work_loc_id=_s(ex["work_loc_id"]) or None,
+                            rmk=_s(ex["rmk"]) or None,
+                            start_tm=_s(ex["start_tm"]) or None,
+                            end_tm=_s(ex["end_tm"]) or None,
+                            status_cd=_s(ex["status_cd"]) or None,
+                            pesticide_lines=[],
+                        )
+                    )
+                    keep_ids.append(ex_id)
+            # works가 변경됐으므로 payload 재생성
+            payload.works = works
+
             svc = WorkLogIntegratedSaveService(bridge, farm)
             try:
                 svc.save_work_log_basic(uid, payload)
