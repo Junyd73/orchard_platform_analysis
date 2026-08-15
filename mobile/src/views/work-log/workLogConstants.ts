@@ -68,6 +68,12 @@ export const MSG_SAVE_OK = '저장되었습니다.'
 export const MSG_DRAFT_OK = '임시 저장되었습니다.'
 export const MSG_WORK_CONTENT_REQUIRED = '작업구분을 선택해 주세요.'
 export const MSG_SAVE_FAILED = '저장에 실패했습니다.'
+export const MSG_DELETE_OK = '작업이 삭제되었습니다.'
+export const MSG_DELETE_CONFIRM_TITLE = '이 작업을 삭제하시겠습니까?'
+export const MSG_DELETE_CONFIRM_RELATED =
+  '삭제 시 아래 연결 정보도 함께 처리됩니다.'
+export const BTN_DELETE_CANCEL = '취소'
+export const BTN_DELETE_CONFIRM = '작업 및 관련정보 삭제'
 /** 일간 화면 이탈 시 미저장 등록 데이터 확인 */
 export const MSG_UNSAVED_LEAVE_CONFIRM =
   '등록된 데이터가 있습니다. 저장하시겠습니까?'

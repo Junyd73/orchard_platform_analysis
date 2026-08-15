@@ -232,6 +232,28 @@ export type WorkLogSaveResponse = {
   work_ids: string[]
 }
 
+export type WorkLogDeletePreviewResponse = {
+  success: boolean
+  work_id: string
+  work_dt: string
+  farm_cd: string
+  work_mid_cd?: string | null
+  work_mid_nm?: string | null
+  rmk?: string | null
+  status_cd?: string | null
+  labor_count: number
+  labor_amount: number
+  expense_count: number
+  expense_amount: number
+  pesticide_count: number
+  pesticide_item_names: string[]
+  is_fertilizer_work: boolean
+  fertilizer_note?: string | null
+  photo_count: number
+  google_calendar_linked: boolean
+  has_related: boolean
+}
+
 export type WorkLogWeatherFetchPayload = {
   force_refresh?: boolean
 }

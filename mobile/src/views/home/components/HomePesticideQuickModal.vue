@@ -214,9 +214,26 @@ function toUpsertItem(w: WorkLogWorkItem): WorkLogWorkUpsertItem {
   }
 }
 
-function predictNewWorkId(existingCount: number): string {
+function predictNewWorkId(existingIds: readonly (string | null | undefined)[]): string {
   const ymd = workDt.value.replace(/-/g, '')
-  return `${ymd}-${String(existingCount + 1).padStart(2, '0')}`
+  const prefix = `${ymd}-`
+  let maxSeq = 0
+  const occupied = new Set<string>()
+  for (const raw of existingIds) {
+    const id = String(raw || '').trim()
+    if (!id) continue
+    occupied.add(id)
+    if (id.startsWith(prefix)) {
+      const tail = id.slice(prefix.length)
+      if (/^\d+$/.test(tail)) maxSeq = Math.max(maxSeq, Number(tail))
+    }
+  }
+  let seq = maxSeq
+  while (true) {
+    seq += 1
+    const cand = `${ymd}-${String(seq).padStart(2, '0')}`
+    if (!occupied.has(cand)) return cand
+  }
 }
 
 async function onSave() {
@@ -236,7 +253,7 @@ async function onSave() {
       status_cd: statusCd.value,
     }
     const works = [...existing, draft]
-    const newWorkId = predictNewWorkId(existing.length)
+    const newWorkId = predictNewWorkId(existing.map((w) => w.work_id))
     googleTarget = newWorkId
     const isPreparing = statusCd.value === PEST_QUICK_STATUS_PREPARING_CD
     const hasSide =

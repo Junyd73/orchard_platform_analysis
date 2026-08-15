@@ -9,6 +9,7 @@ from app.api.dependencies import get_work_log_service
 from app.schemas.work_log import (
     WorkLogAccountCodeOption,
     WorkLogDailyResponse,
+    WorkLogDeletePreviewResponse,
     WorkLogIntegratedSaveRequest,
     WorkLogMasterUpsertRequest,
     WorkLogMonthlyResponse,
@@ -183,6 +184,19 @@ def replace_work_log_pesticide(
     return service.replace_pesticide_use(farm_cd, body, user_id=user_id)
 
 
+@router.get(
+    "/works/{work_id}/delete-preview",
+    response_model=WorkLogDeletePreviewResponse,
+)
+def preview_delete_work_log_work(
+    farm_cd: str,
+    work_id: str,
+    service: WorkLogService = Depends(get_work_log_service),
+) -> WorkLogDeletePreviewResponse:
+    """삭제 확인 모달용 연관정보."""
+    return service.get_delete_preview(farm_cd, work_id)
+
+
 @router.delete("/works/{work_id}", response_model=WorkLogSaveResponse)
 def delete_work_log_work(
     farm_cd: str,
@@ -190,4 +204,5 @@ def delete_work_log_work(
     user_id: str | None = Depends(_user_header),
     service: WorkLogService = Depends(get_work_log_service),
 ) -> WorkLogSaveResponse:
+    """작업 및 연관정보 삭제 — 장부 역분개·농약 취소·사진 soft 포함."""
     return service.delete_work(farm_cd, work_id, user_id=user_id)

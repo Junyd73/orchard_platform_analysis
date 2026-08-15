@@ -17,6 +17,7 @@ from app.schemas.work_log import (
     WorkLogDailyResponse,
     WorkLogDayCell,
     WorkLogDayWorkItem,
+    WorkLogDeletePreviewResponse,
     WorkLogExpenseDto,
     WorkLogIntegratedSaveRequest,
     WorkLogMasterDto,
@@ -80,6 +81,60 @@ LABOR_WORKER_TYPES_SQL = ", ".join(f"'{t}'" for t in LABOR_WORKER_TYPES)
 
 def _s(v) -> str:
     return str(v or "").strip()
+
+
+def _allocate_work_id(
+    *,
+    digits: str,
+    requested: str,
+    occupied: set[str],
+    payload_seen: set[str],
+    next_seq: list[int],
+) -> str:
+    """일자 work_id 채번.
+
+    - 유효하고 이번 payload에서 아직 안 쓴 ID → 그대로 사용(기존 행 수정)
+    - 비었거나 payload 내 중복 → DB/occupied 기준 다음 빈 seq
+    """
+    wid = _s(requested)
+    if wid and wid.startswith(digits) and wid not in payload_seen:
+        payload_seen.add(wid)
+        occupied.add(wid)
+        if wid.startswith(digits + "-"):
+            tail = wid[len(digits) + 1 :]
+            if tail.isdigit():
+                next_seq[0] = max(next_seq[0], int(tail))
+        return wid
+    while True:
+        next_seq[0] += 1
+        cand = f"{digits}-{next_seq[0]:02d}"
+        if cand not in occupied and cand not in payload_seen:
+            occupied.add(cand)
+            payload_seen.add(cand)
+            return cand
+
+
+def _load_day_work_id_state(
+    conn: sqlite3.Connection, farm: str, dt: str, digits: str
+) -> tuple[set[str], list[int]]:
+    occupied: set[str] = set()
+    next_seq = [0]
+    for row in conn.execute(
+        """
+        SELECT work_id FROM t_work_detail
+        WHERE farm_cd = ? AND work_dt = ?
+        """,
+        (farm, dt),
+    ).fetchall():
+        eid = _s(row["work_id"] if hasattr(row, "keys") else row[0])
+        if not eid:
+            continue
+        occupied.add(eid)
+        if eid.startswith(digits + "-"):
+            tail = eid[len(digits) + 1 :]
+            if tail.isdigit():
+                next_seq[0] = max(next_seq[0], int(tail))
+    return occupied, next_seq
 
 
 def _f(v) -> float | None:
@@ -596,8 +651,9 @@ class WorkLogService:
             if nm not in cell.work_names:
                 cell.work_names.append(nm)
             status_cd = _s(row["status_cd"]) or None
-            # 기타작업은 메모별로 각각 표시 · 그 외 mid는 이름 중복 제거
-            if _is_other_work(mid_cd, nm):
+            # 준비중(일정): 동일 mid라도 건별 표시 — A/B/C 캘린더 누락 방지
+            # 기타작업: 메모별 각각 표시 · 그 외 실적: mid 이름 중복 제거
+            if status_cd == STATUS_PREPARING_CD or _is_other_work(mid_cd, nm):
                 cell.work_items.append(
                     WorkLogDayWorkItem(
                         work_mid_cd=mid_cd,
@@ -973,88 +1029,109 @@ class WorkLogService:
 
         ymd_compact = dt.replace("-", "")
         works_out: list[WorkDetailDto] = []
-        for i, w in enumerate(body.works or []):
-            mid = _s(w.work_mid_cd)
-            if not mid:
-                continue
-            wid = _s(w.work_id) or f"{ymd_compact}-{i + 1:02d}"
-            pest_lines = [
-                PesticideLineDto(
-                    item_id=int(ln.item_id),
-                    use_qty=int(ln.use_qty or 0),
-                    item_nm_snapshot=_s(ln.item_nm_snapshot),
-                    spec_nm_snapshot=_s(ln.spec_nm_snapshot),
-                    purpose_nm=_s(ln.purpose_nm),
-                    line_rmk=_s(ln.line_rmk),
-                )
-                for ln in (w.pesticide_lines or [])
-                if int(ln.item_id or 0) > 0
-            ]
-            works_out.append(
-                WorkDetailDto(
-                    work_id=wid,
-                    work_mid_cd=mid,
-                    work_mid_nm=_s(w.work_mid_nm),
-                    work_loc_id=w.work_loc_id,
-                    rmk=_s(w.rmk),
-                    start_tm=_s(w.start_tm),
-                    end_tm=_s(w.end_tm),
-                    status_cd=_s(w.status_cd),
-                    pesticide_lines=pest_lines,
-                    replace_pesticide_use_id=w.replace_pesticide_use_id,
-                    # 라인이 있으면 방제 작업이 아니어도 농약 확정 경로로 진입
-                    is_pesticide=True if pest_lines else None,
-                )
-            )
-
-        labor_rows = [
-            LaborRowDto(
-                status=_s(r.status) or "INS",
-                res_id=r.res_id,
-                emp_cd=_s(r.emp_cd),
-                emp_nm=_s(r.emp_nm) or _s(r.emp_cd),
-                man_hour=float(r.man_hour or 0),
-                daily_wage=float(r.daily_wage or 0),
-                pay_method_cd=_s(r.pay_method_cd),
-                pay_status=_s(r.pay_status) or "N",
-            )
-            for r in (body.labor_rows or [])
-            if _s(r.emp_cd)
-        ]
-        expense_rows = [
-            ExpenseRowDto(
-                status=_s(r.status) or "INS",
-                exp_id=r.exp_id,
-                acct_cd=_s(r.acct_cd),
-                item_nm=_s(r.item_nm),
-                amt=float(r.amt or 0),
-                pay_method_cd=_s(r.pay_method_cd),
-                pay_status=_s(r.pay_status) or "N",
-                trans_dt=_s(r.trans_dt) or dt,
-            )
-            for r in (body.expense_rows or [])
-            if _s(r.acct_cd)
-        ]
-
-        labor_wid = _s(body.labor_work_id) or (
-            works_out[0].work_id if works_out else None
-        )
-        exp_wid = _s(body.expense_work_id) or labor_wid
-
-        payload = WorkLogSavePayload(
-            master=master,
-            works=works_out,
-            labor_work_id=labor_wid,
-            labor_rows=labor_rows,
-            removed_res_ids=list(body.removed_res_ids or []),
-            expense_work_id=exp_wid,
-            expense_rows=expense_rows,
-            removed_exp_ids=list(body.removed_exp_ids or []),
-            worker_nm=_s(body.worker_nm) or uid,
-            worker_id=uid,
-        )
-
         with get_sqlite_write_connection(self._db_path) as conn:
+            occupied, next_seq = _load_day_work_id_state(
+                conn, farm, dt, ymd_compact
+            )
+            payload_seen: set[str] = set()
+            reallocated_ids: list[str] = []
+            # payload 내 선행 행이 먼저 seen에 들어가 중복 ID 재할당
+            for w in body.works or []:
+                mid = _s(w.work_mid_cd)
+                if not mid:
+                    continue
+                requested = _s(w.work_id)
+                wid = _allocate_work_id(
+                    digits=ymd_compact,
+                    requested=requested,
+                    occupied=occupied,
+                    payload_seen=payload_seen,
+                    next_seq=next_seq,
+                )
+                if not requested or requested != wid:
+                    reallocated_ids.append(wid)
+                pest_lines = [
+                    PesticideLineDto(
+                        item_id=int(ln.item_id),
+                        use_qty=int(ln.use_qty or 0),
+                        item_nm_snapshot=_s(ln.item_nm_snapshot),
+                        spec_nm_snapshot=_s(ln.spec_nm_snapshot),
+                        purpose_nm=_s(ln.purpose_nm),
+                        line_rmk=_s(ln.line_rmk),
+                    )
+                    for ln in (w.pesticide_lines or [])
+                    if int(ln.item_id or 0) > 0
+                ]
+                works_out.append(
+                    WorkDetailDto(
+                        work_id=wid,
+                        work_mid_cd=mid,
+                        work_mid_nm=_s(w.work_mid_nm),
+                        work_loc_id=w.work_loc_id,
+                        rmk=_s(w.rmk),
+                        start_tm=_s(w.start_tm),
+                        end_tm=_s(w.end_tm),
+                        status_cd=_s(w.status_cd),
+                        pesticide_lines=pest_lines,
+                        replace_pesticide_use_id=w.replace_pesticide_use_id,
+                        is_pesticide=True if pest_lines else None,
+                    )
+                )
+
+            labor_rows = [
+                LaborRowDto(
+                    status=_s(r.status) or "INS",
+                    res_id=r.res_id,
+                    emp_cd=_s(r.emp_cd),
+                    emp_nm=_s(r.emp_nm) or _s(r.emp_cd),
+                    man_hour=float(r.man_hour or 0),
+                    daily_wage=float(r.daily_wage or 0),
+                    pay_method_cd=_s(r.pay_method_cd),
+                    pay_status=_s(r.pay_status) or "N",
+                )
+                for r in (body.labor_rows or [])
+                if _s(r.emp_cd)
+            ]
+            expense_rows = [
+                ExpenseRowDto(
+                    status=_s(r.status) or "INS",
+                    exp_id=r.exp_id,
+                    acct_cd=_s(r.acct_cd),
+                    item_nm=_s(r.item_nm),
+                    amt=float(r.amt or 0),
+                    pay_method_cd=_s(r.pay_method_cd),
+                    pay_status=_s(r.pay_status) or "N",
+                    trans_dt=_s(r.trans_dt) or dt,
+                )
+                for r in (body.expense_rows or [])
+                if _s(r.acct_cd)
+            ]
+
+            out_ids = {w.work_id for w in works_out}
+            labor_wid = _s(body.labor_work_id)
+            # 신규/재할당 행이 있으면 인력·경비는 그 행에 (잘못된 -02 예측이 B에 붙지 않게)
+            if reallocated_ids:
+                if labor_wid not in reallocated_ids:
+                    labor_wid = reallocated_ids[-1]
+            elif not labor_wid or labor_wid not in out_ids:
+                labor_wid = works_out[-1].work_id if works_out else None
+            exp_wid = _s(body.expense_work_id) or labor_wid
+            if exp_wid not in out_ids:
+                exp_wid = labor_wid
+
+            payload = WorkLogSavePayload(
+                master=master,
+                works=works_out,
+                labor_work_id=labor_wid,
+                labor_rows=labor_rows,
+                removed_res_ids=list(body.removed_res_ids or []),
+                expense_work_id=exp_wid,
+                expense_rows=expense_rows,
+                removed_exp_ids=list(body.removed_exp_ids or []),
+                worker_nm=_s(body.worker_nm) or uid,
+                worker_id=uid,
+            )
+
             bridge = ServerDbBridge(conn)
             svc = WorkLogIntegratedSaveService(bridge, farm)
             try:
@@ -1354,49 +1431,57 @@ class WorkLogService:
         works: list[WorkDetailDto] = []
         keep_ids: list[str] = []
 
-        for i, item in enumerate(items):
-            mid = _s(item.work_mid_cd)
-            if not mid:
-                raise BusinessRuleError("작업 유형을 선택해 주세요.")
-            start = _s(item.start_tm) or None
-            end = _s(item.end_tm) or None
-            if start and not _TIME_RE.match(start):
-                raise BusinessRuleError("시작 시각은 HH:MM 형식이어야 합니다.")
-            if end and not _TIME_RE.match(end):
-                raise BusinessRuleError("종료 시각은 HH:MM 형식이어야 합니다.")
-            status = _normalize_status_for_date(dt, item.status_cd)
-            wid = _s(item.work_id) or f"{digits}-{i + 1:02d}"
-            if not wid.startswith(digits):
-                wid = f"{digits}-{i + 1:02d}"
-            keep_ids.append(wid)
-            works.append(
-                WorkDetailDto(
-                    work_id=wid,
-                    work_mid_cd=mid,
-                    work_loc_id=_s(item.work_loc_id) or None,
-                    rmk=_s(item.rmk) or None,
-                    start_tm=start,
-                    end_tm=end,
-                    status_cd=status,
-                    pesticide_lines=[],
-                )
-            )
-
-        dow = ""
-        try:
-            d = datetime.strptime(dt, "%Y-%m-%d")
-            week = ["월", "화", "수", "목", "금", "토", "일"]
-            dow = week[d.weekday()]
-        except ValueError:
-            dow = ""
-
-        payload = WorkLogSavePayload(
-            master=MasterDto(work_dt=dt, day_of_week=dow),
-            works=works,
-            worker_nm=uid,
-            worker_id=uid,
-        )
         with get_sqlite_write_connection(self._db_path) as conn:
+            # 기존 채번 + payload 내 중복 work_id → 다음 빈 seq (덮어쓰기 방지)
+            occupied, next_seq = _load_day_work_id_state(conn, farm, dt, digits)
+            payload_seen: set[str] = set()
+
+            for item in items:
+                mid = _s(item.work_mid_cd)
+                if not mid:
+                    raise BusinessRuleError("작업 유형을 선택해 주세요.")
+                start = _s(item.start_tm) or None
+                end = _s(item.end_tm) or None
+                if start and not _TIME_RE.match(start):
+                    raise BusinessRuleError("시작 시각은 HH:MM 형식이어야 합니다.")
+                if end and not _TIME_RE.match(end):
+                    raise BusinessRuleError("종료 시각은 HH:MM 형식이어야 합니다.")
+                status = _normalize_status_for_date(dt, item.status_cd)
+                wid = _allocate_work_id(
+                    digits=digits,
+                    requested=_s(item.work_id),
+                    occupied=occupied,
+                    payload_seen=payload_seen,
+                    next_seq=next_seq,
+                )
+                keep_ids.append(wid)
+                works.append(
+                    WorkDetailDto(
+                        work_id=wid,
+                        work_mid_cd=mid,
+                        work_loc_id=_s(item.work_loc_id) or None,
+                        rmk=_s(item.rmk) or None,
+                        start_tm=start,
+                        end_tm=end,
+                        status_cd=status,
+                        pesticide_lines=[],
+                    )
+                )
+
+            dow = ""
+            try:
+                d = datetime.strptime(dt, "%Y-%m-%d")
+                week = ["월", "화", "수", "목", "금", "토", "일"]
+                dow = week[d.weekday()]
+            except ValueError:
+                dow = ""
+
+            payload = WorkLogSavePayload(
+                master=MasterDto(work_dt=dt, day_of_week=dow),
+                works=works,
+                worker_nm=uid,
+                worker_id=uid,
+            )
             bridge = ServerDbBridge(conn)
             # 작업-only: 기존 기상 마스터를 보존(빈 MasterDto로 덮어쓰지 않음)
             row = conn.execute(
@@ -1436,6 +1521,146 @@ class WorkLogService:
             work_ids=keep_ids,
         )
 
+    def get_delete_preview(
+        self,
+        farm_cd: str,
+        work_id: str,
+    ) -> WorkLogDeletePreviewResponse:
+        """삭제 확인 모달용 연관정보 조회 (읽기 전용)."""
+        farm = self._ensure_farm(farm_cd)
+        wid = _s(work_id)
+        if not wid:
+            raise BusinessRuleError("삭제할 작업이 없습니다.")
+        with get_sqlite_connection(self._db_path) as conn:
+            cols = {
+                str(r[1]) for r in conn.execute("PRAGMA table_info(t_work_detail)")
+            }
+            select_cols = "work_dt, work_mid_cd, rmk, status_cd"
+            if "google_event_id" in cols:
+                select_cols += ", google_event_id"
+            row = conn.execute(
+                f"""
+                SELECT {select_cols} FROM t_work_detail
+                WHERE farm_cd = ? AND work_id = ?
+                """,
+                (farm, wid),
+            ).fetchone()
+            if not row:
+                raise EntityNotFoundError("Work not found")
+            dt = _norm_dt(row["work_dt"])
+            mid = _s(row["work_mid_cd"])
+            mid_nm = ""
+            if mid:
+                nm_row = conn.execute(
+                    """
+                    SELECT code_nm FROM m_common_code
+                    WHERE farm_cd = ? AND code_cd = ?
+                    LIMIT 1
+                    """,
+                    (farm, mid),
+                ).fetchone()
+                if nm_row:
+                    mid_nm = _s(nm_row["code_nm"]) or mid
+            labor_row = conn.execute(
+                """
+                SELECT COUNT(*) AS c,
+                       COALESCE(SUM(COALESCE(daily_wage, 0)), 0) AS amt
+                FROM t_work_resource
+                WHERE farm_cd = ? AND work_id = ?
+                """,
+                (farm, wid),
+            ).fetchone()
+            exp_row = conn.execute(
+                """
+                SELECT COUNT(*) AS c,
+                       COALESCE(SUM(COALESCE(total_amt, 0)), 0) AS amt
+                FROM t_work_expense
+                WHERE farm_cd = ? AND work_id = ?
+                """,
+                (farm, wid),
+            ).fetchone()
+            pest_cnt = 0
+            pest_items: list[str] = []
+            try:
+                pest_cnt = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS c FROM t_pesticide_use
+                        WHERE farm_cd = ? AND work_id = ?
+                          AND COALESCE(use_yn, 'Y') = 'Y'
+                          AND COALESCE(cancel_yn, 'N') != 'Y'
+                        """,
+                        (farm, wid),
+                    ).fetchone()["c"]
+                    or 0
+                )
+                for pr in conn.execute(
+                    """
+                    SELECT DISTINCT COALESCE(NULLIF(TRIM(l.item_nm_snapshot), ''),
+                                            CAST(l.item_id AS TEXT)) AS nm
+                    FROM t_pesticide_use u
+                    JOIN t_pesticide_use_line l ON l.use_id = u.use_id
+                    WHERE u.farm_cd = ? AND u.work_id = ?
+                      AND COALESCE(u.use_yn, 'Y') = 'Y'
+                      AND COALESCE(u.cancel_yn, 'N') != 'Y'
+                    ORDER BY nm
+                    """,
+                    (farm, wid),
+                ).fetchall():
+                    nm = _s(pr["nm"])
+                    if nm:
+                        pest_items.append(nm)
+            except sqlite3.Error:
+                pass
+            photo_cnt = 0
+            try:
+                photo_cnt = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS c FROM t_work_photo
+                        WHERE farm_cd = ? AND work_id = ?
+                          AND COALESCE(use_yn, 'Y') = 'Y'
+                        """,
+                        (farm, wid),
+                    ).fetchone()["c"]
+                    or 0
+                )
+            except sqlite3.Error:
+                pass
+            google_linked = bool(
+                "google_event_id" in cols and _s(row["google_event_id"])
+            )
+            fertilizer = _is_fertilizer_work(mid, mid_nm)
+            has_related = (
+                int(labor_row["c"] or 0) > 0
+                or int(exp_row["c"] or 0) > 0
+                or pest_cnt > 0
+                or photo_cnt > 0
+                or google_linked
+            )
+            return WorkLogDeletePreviewResponse(
+                work_id=wid,
+                work_dt=dt,
+                farm_cd=farm,
+                work_mid_cd=mid or None,
+                work_mid_nm=mid_nm or None,
+                rmk=_s(row["rmk"]) or None,
+                status_cd=_s(row["status_cd"]) or None,
+                labor_count=int(labor_row["c"] or 0),
+                labor_amount=float(labor_row["amt"] or 0),
+                expense_count=int(exp_row["c"] or 0),
+                expense_amount=float(exp_row["amt"] or 0),
+                pesticide_count=pest_cnt,
+                pesticide_item_names=pest_items,
+                is_fertilizer_work=fertilizer,
+                fertilizer_note="비료/영양제 작업(전용 재고 연동 없음)"
+                if fertilizer
+                else None,
+                photo_count=photo_cnt,
+                google_calendar_linked=google_linked,
+                has_related=has_related,
+            )
+
     def delete_work(
         self,
         farm_cd: str,
@@ -1443,10 +1668,20 @@ class WorkLogService:
         *,
         user_id: str | None = None,
     ) -> WorkLogSaveResponse:
+        """작업 삭제 orchestrator — 인력/경비 역분개·농약 취소·사진 soft 재사용."""
+        ensure_repo_root_on_path()
+        from core.work_log_integrated_save_service import (  # noqa: WPS433
+            WorkLogIntegratedSaveService,
+            WorkLogSaveError,
+        )
+
         farm = self._ensure_farm(farm_cd)
         wid = _s(work_id)
         if not wid:
             raise BusinessRuleError("삭제할 작업이 없습니다.")
+        uid = _s(user_id) or "MOBILE"
+        google_eid = ""
+        dt = ""
         with get_sqlite_write_connection(self._db_path) as conn:
             cols = {
                 str(r[1]) for r in conn.execute("PRAGMA table_info(t_work_detail)")
@@ -1469,23 +1704,31 @@ class WorkLogService:
                 if "google_event_id" in cols
                 else ""
             )
-            self._assert_can_delete_work(conn, farm, wid)
-            conn.execute(
-                "DELETE FROM t_work_detail WHERE farm_cd = ? AND work_id = ?",
-                (farm, wid),
-            )
-            # 일정→실적 전환분 삭제 시 Schedule PENDING 복구 (WLS-001)
-            try:
-                from app.services.work_schedule_service import (  # noqa: WPS433
-                    WorkScheduleService,
-                )
 
-                WorkScheduleService.rollback_converted_work(
-                    conn, farm, wid, user_id=_s(user_id) or "MOBILE"
+            def _schedule_rollback(cur: sqlite3.Cursor) -> None:
+                try:
+                    from app.services.work_schedule_service import (  # noqa: WPS433
+                        WorkScheduleService,
+                    )
+
+                    WorkScheduleService.rollback_converted_work(
+                        cur.connection, farm, wid, user_id=uid
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            bridge = ServerDbBridge(conn)
+            svc = WorkLogIntegratedSaveService(bridge, farm)
+            try:
+                svc.purge_work_related(
+                    uid,
+                    wid,
+                    dt,
+                    extra_cursor_ops=[_schedule_rollback],
                 )
-            except Exception:  # noqa: BLE001
-                pass
-            conn.commit()
+            except WorkLogSaveError as e:
+                raise BusinessRuleError(e.message or "작업 삭제 실패") from e
+
         if google_eid:
             try:
                 from app.services.google_calendar_service import (  # noqa: WPS433
@@ -1505,6 +1748,7 @@ class WorkLogService:
     def _assert_can_delete_work(
         conn: sqlite3.Connection, farm: str, work_id: str
     ) -> None:
+        """레거시 차단 검사 — 신규 삭제는 purge_work_related 경로를 사용."""
         for table, label in (
             ("t_work_resource", "인력"),
             ("t_work_expense", "경비"),

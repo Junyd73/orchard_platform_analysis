@@ -226,6 +226,30 @@ class WorkLogPesticideCancelResponse(BaseModel):
     message: str = "농약 사용이 취소되었습니다."
 
 
+class WorkLogDeletePreviewResponse(BaseModel):
+    """삭제 확인 모달 — work_id 연관정보 요약."""
+
+    success: bool = True
+    work_id: str
+    work_dt: str
+    farm_cd: str
+    work_mid_cd: str | None = None
+    work_mid_nm: str | None = None
+    rmk: str | None = None
+    status_cd: str | None = None
+    labor_count: int = 0
+    labor_amount: float = 0.0
+    expense_count: int = 0
+    expense_amount: float = 0.0
+    pesticide_count: int = 0
+    pesticide_item_names: list[str] = Field(default_factory=list)
+    is_fertilizer_work: bool = False
+    fertilizer_note: str | None = None
+    photo_count: int = 0
+    google_calendar_linked: bool = False
+    has_related: bool = False
+
+
 class WorkLogMasterUpsertRequest(BaseModel):
     day_of_week: str | None = None
     weather_cd: str | None = None

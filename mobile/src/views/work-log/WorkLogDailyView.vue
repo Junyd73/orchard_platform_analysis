@@ -18,6 +18,7 @@ import {
   cancelWorkLogPesticide,
   deleteWorkLogWork,
   fetchWorkLogDaily,
+  fetchWorkLogDeletePreview,
   fetchWorkLogWeather,
   saveWorkLogIntegrated,
   saveWorkLogMaster,
@@ -56,10 +57,15 @@ import {
   BTN_UNSAVED_LEAVE_DISCARD,
   BTN_UNSAVED_LEAVE_SAVE,
   BTN_UNSAVED_LEAVE_STAY,
+  BTN_DELETE_CANCEL,
+  BTN_DELETE_CONFIRM,
   MSG_DETAIL_PENDING,
   MSG_DRAFT_OK,
   MSG_COPY_DATE_INVALID,
   MSG_COPY_OK,
+  MSG_DELETE_CONFIRM_RELATED,
+  MSG_DELETE_CONFIRM_TITLE,
+  MSG_DELETE_OK,
   MSG_FUTURE_WORK_LOG,
   MSG_FUTURE_DETAIL_LOCKED,
   MSG_GOOGLE_IMPORT_EMPTY,
@@ -86,6 +92,7 @@ import { HOME_DAILY_NEW_QUERY } from '@/views/home/homeConstants'
 import { useAppStore } from '@/composables/stores/app'
 import { useWorkCopyStore } from '@/composables/stores/workCopy'
 import type {
+  WorkLogDeletePreviewResponse,
   WorkLogExpenseDto,
   WorkLogIntegratedSavePayload,
   WorkLogMasterDto,
@@ -138,6 +145,10 @@ const googleImportLoading = ref(false)
 const googleImportBusy = ref(false)
 const googleImportItems = ref<GoogleImportPreviewItem[]>([])
 const googleImportMessage = ref('')
+const deleteConfirmOpen = ref(false)
+const deleteConfirmLoading = ref(false)
+const deletePreview = ref<WorkLogDeletePreviewResponse | null>(null)
+const deleteTargetId = ref<string | null>(null)
 
 const laborRows = ref<DailyShellLaborRow[]>([])
 const expenseRows = ref<DailyShellExpenseRow[]>([])
@@ -333,6 +344,8 @@ function onSelectTimeline(id: string) {
   activeTab.value = DAILY_TAB_WORK
   isEditing.value = false
   clearCopyMode()
+  // 이전 수정 폼의 workId가 남은 채 신규 저장되면 기존 행을 덮어씀
+  formModel.value = createEmptyWorkForm()
   removedResIds.value = []
   removedExpIds.value = []
   loadSideForWork(id, cachedResources, cachedExpenses, cachedPesticides)
@@ -671,21 +684,46 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
   return valid
 }
 
-/** 서버 채번(YYYYMMDD-SEQ)과 맞추기 — 인력/경비/농약 연결 대상 */
+/** 서버 채번(YYYYMMDD-SEQ)과 맞추기 — 기존 최대 seq 다음 (index/count 금지) */
+function nextWorkIdFromExisting(
+  existingIds: readonly (string | null | undefined)[],
+  workDtYmd: string,
+): string | null {
+  const ymd = String(workDtYmd || '').replace(/-/g, '')
+  if (!/^\d{8}$/.test(ymd)) return null
+  const prefix = `${ymd}-`
+  let maxSeq = 0
+  const occupied = new Set<string>()
+  for (const raw of existingIds) {
+    const id = String(raw || '').trim()
+    if (!id) continue
+    occupied.add(id)
+    if (id.startsWith(prefix)) {
+      const tail = id.slice(prefix.length)
+      if (/^\d+$/.test(tail)) maxSeq = Math.max(maxSeq, Number(tail))
+    }
+  }
+  let seq = maxSeq
+  while (true) {
+    seq += 1
+    const cand = `${ymd}-${String(seq).padStart(2, '0')}`
+    if (!occupied.has(cand)) return cand
+  }
+}
+
 function resolveTargetWorkId(
   payload: WorkLogWorkUpsertItem[],
 ): string | null {
   if (selectedId.value) return String(selectedId.value)
   if (formModel.value.workId) return String(formModel.value.workId)
-  // 신규 폼(미채번): body.works 열거 인덱스와 동일한 임시 ID
+  // 신규 폼(미채번): 기존·payload ID 최대 seq 다음 (index+1 채번 금지 — B 덮어쓰기 방지)
   if (showForm.value) {
-    const idx = payload.findIndex((w) => !w.work_id)
-    if (idx >= 0) {
-      const ymd = workDt.value.replace(/-/g, '')
-      if (/^\d{8}$/.test(ymd)) {
-        return `${ymd}-${String(idx + 1).padStart(2, '0')}`
-      }
-    }
+    const existing = [
+      ...sourceWorks.value.map((w) => w.work_id),
+      ...payload.map((w) => w.work_id),
+    ]
+    const next = nextWorkIdFromExisting(existing, workDt.value)
+    if (next) return next
   }
   const first = payload[0]?.work_id
   return first ? String(first) : null
@@ -1236,16 +1274,59 @@ async function onDeleteSelected() {
     onPending()
     return
   }
+  if (saving.value || deleteConfirmLoading.value) return
+  deleteConfirmLoading.value = true
+  deleteTargetId.value = selectedId.value
+  deletePreview.value = null
+  try {
+    deletePreview.value = await fetchWorkLogDeletePreview(
+      farmCd.value,
+      selectedId.value,
+    )
+    deleteConfirmOpen.value = true
+  } catch (e) {
+    const msg =
+      e instanceof ApiClientError && e.message
+        ? e.message
+        : MSG_SAVE_FAILED
+    showToast(msg)
+    deleteTargetId.value = null
+  } finally {
+    deleteConfirmLoading.value = false
+  }
+}
+
+function closeDeleteConfirm() {
+  if (saving.value) return
+  deleteConfirmOpen.value = false
+  deletePreview.value = null
+  deleteTargetId.value = null
+}
+
+async function confirmDeleteWithRelated() {
+  const wid = deleteTargetId.value
+  if (!wid || saving.value) return
   saving.value = true
   try {
-    await deleteWorkLogWork(farmCd.value, selectedId.value)
+    await deleteWorkLogWork(farmCd.value, wid)
+    deleteConfirmOpen.value = false
+    deletePreview.value = null
+    deleteTargetId.value = null
     await loadDaily()
-    showToast(MSG_SAVE_OK)
-  } catch {
-    showToast(MSG_SAVE_FAILED)
+    showToast(MSG_DELETE_OK)
+  } catch (e) {
+    const msg =
+      e instanceof ApiClientError && e.message
+        ? e.message
+        : MSG_SAVE_FAILED
+    showToast(msg)
   } finally {
     saving.value = false
   }
+}
+
+function formatDeleteAmount(n: number): string {
+  return `${Math.round(Number(n) || 0).toLocaleString('ko-KR')}원`
 }
 
 watch(workDt, () => {
@@ -1394,7 +1475,7 @@ onMounted(async () => {
         type="button"
         :block="false"
         class="footer-btn"
-        :busy="saving"
+        :busy="saving || deleteConfirmLoading"
         @click="onDeleteSelected"
       >
         <span class="footer-btn__inner">
@@ -1405,6 +1486,83 @@ onMounted(async () => {
     </div>
 
     <p v-if="toastMessage" class="toast" role="status">{{ toastMessage }}</p>
+
+    <Teleport to="body">
+      <div
+        v-if="deleteConfirmOpen"
+        class="leave-confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-label="작업 삭제 확인"
+      >
+        <button
+          type="button"
+          class="leave-confirm__backdrop"
+          aria-label="닫기"
+          :disabled="saving"
+          @click="closeDeleteConfirm"
+        />
+        <div class="leave-confirm__card delete-confirm__card">
+          <p class="leave-confirm__msg">{{ MSG_DELETE_CONFIRM_TITLE }}</p>
+          <p
+            v-if="deletePreview?.has_related"
+            class="delete-confirm__related"
+          >
+            {{ MSG_DELETE_CONFIRM_RELATED }}
+          </p>
+          <ul v-if="deletePreview" class="delete-confirm__list">
+            <li>
+              작업:
+              {{ deletePreview.work_mid_nm || deletePreview.work_mid_cd || '-' }}
+              <template v-if="deletePreview.work_dt">
+                ({{ deletePreview.work_dt }})
+              </template>
+            </li>
+            <li v-if="deletePreview.labor_count > 0">
+              인력: {{ deletePreview.labor_count }}명 ·
+              {{ formatDeleteAmount(deletePreview.labor_amount) }}
+            </li>
+            <li v-if="deletePreview.expense_count > 0">
+              경비: {{ deletePreview.expense_count }}건 ·
+              {{ formatDeleteAmount(deletePreview.expense_amount) }}
+            </li>
+            <li v-if="deletePreview.pesticide_count > 0">
+              농약: {{ deletePreview.pesticide_count }}건
+              <template v-if="deletePreview.pesticide_item_names?.length">
+                · {{ deletePreview.pesticide_item_names.join(', ') }}
+              </template>
+            </li>
+            <li v-if="deletePreview.is_fertilizer_work">
+              비료: {{ deletePreview.fertilizer_note || '비료/영양제 작업' }}
+            </li>
+            <li v-if="deletePreview.photo_count > 0">
+              사진: {{ deletePreview.photo_count }}장
+            </li>
+            <li v-if="deletePreview.google_calendar_linked">
+              Google Calendar: 연동됨 (삭제 시 연동 해제)
+            </li>
+          </ul>
+          <div class="leave-confirm__actions">
+            <button
+              type="button"
+              class="leave-confirm__btn leave-confirm__btn--ghost"
+              :disabled="saving"
+              @click="closeDeleteConfirm"
+            >
+              {{ BTN_DELETE_CANCEL }}
+            </button>
+            <button
+              type="button"
+              class="leave-confirm__btn leave-confirm__btn--danger"
+              :disabled="saving"
+              @click="confirmDeleteWithRelated"
+            >
+              {{ BTN_DELETE_CONFIRM }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div
@@ -1709,6 +1867,32 @@ onMounted(async () => {
   background: transparent;
   color: var(--ods-color-gray-700);
   font-weight: 600;
+}
+
+.leave-confirm__btn--danger {
+  border: 0;
+  background: #b42318;
+  color: #fff;
+  font-weight: 700;
+}
+
+.delete-confirm__card {
+  max-width: 22rem;
+}
+
+.delete-confirm__related {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ods-color-gray-700);
+  line-height: 1.4;
+}
+
+.delete-confirm__list {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  color: var(--ods-color-gray-900, #3d3429);
+  line-height: 1.45;
 }
 
 .gimport {
