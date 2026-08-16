@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
+from app.core.ops_biz_date import today_ops
 from app.core.observation_constants import (
     MOBILE_BASIC_TARGET_CDS,
     OBS_AI_STATUS_NONE,
@@ -194,7 +195,7 @@ class ObservationService:
         obs_dt = str(body.obs_dt or "").strip()
         if not _DATE_RE.match(obs_dt):
             raise BusinessRuleError("관찰일은 YYYY-MM-DD 형식이어야 합니다.")
-        today = date.today().isoformat()
+        today = today_ops().isoformat()
         if obs_dt > today:
             raise BusinessRuleError("관찰일자는 오늘까지만 허용됩니다.")
         target = str(body.target_type_cd or "").strip()
