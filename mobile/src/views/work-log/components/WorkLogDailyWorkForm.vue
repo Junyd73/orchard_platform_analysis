@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import WorkLogDailyExpensePanel from '@/views/work-log/components/WorkLogDailyExpensePanel.vue'
 import WorkLogDailyLaborPanel from '@/views/work-log/components/WorkLogDailyLaborPanel.vue'
@@ -14,13 +14,14 @@ import {
   DAILY_TAB_PHOTO,
   DAILY_TAB_WORK,
   DAILY_WORK_TABS,
+  isDailyWorkTabEnabled,
+  isFertilizerWork,
   isPesticideWork,
   LABEL_COPY_WORK_DT,
   LABEL_WORK_MEMO,
   LABEL_WORK_SITE,
   LABEL_WORK_TYPE,
   MSG_COPY_HINT,
-  MSG_FERTILIZER_PENDING,
   MSG_WORK_FORM_TIP,
   MSG_WORK_MEMO_GUIDE,
   PLACEHOLDER_SELECT,
@@ -76,10 +77,33 @@ const isPestWork = computed(() =>
   isPesticideWork(modelValue.value.workMidCd, modelValue.value.workContent),
 )
 
+const isFertWork = computed(() =>
+  isFertilizerWork(modelValue.value.workMidCd, modelValue.value.workContent),
+)
+
 const visibleTabs = computed(() =>
   props.detailLocked
     ? DAILY_WORK_TABS.filter((t) => t.key === DAILY_TAB_WORK)
     : DAILY_WORK_TABS,
+)
+
+function isTabEnabled(key: DailyWorkTabKey): boolean {
+  if (props.detailLocked && key !== DAILY_TAB_WORK) return false
+  return isDailyWorkTabEnabled(
+    key,
+    modelValue.value.workMidCd,
+    modelValue.value.workContent,
+  )
+}
+
+/** 작업구분 변경 시 비활성 탭에 머무르지 않음 (입력 행은 유지 → 유실 방지) */
+watch(
+  () => [modelValue.value.workMidCd, modelValue.value.workContent] as const,
+  () => {
+    if (!isTabEnabled(activeTab.value)) {
+      activeTab.value = DAILY_TAB_WORK
+    }
+  },
 )
 
 type PickKind = 'work' | 'site' | 'status' | null
@@ -104,7 +128,7 @@ const pickOptions = {
 }
 
 function selectTab(key: DailyWorkTabKey) {
-  if (props.detailLocked && key !== DAILY_TAB_WORK) return
+  if (!isTabEnabled(key)) return
   activeTab.value = key
 }
 
@@ -150,9 +174,13 @@ function onSelectPending(msg?: string) {
         type="button"
         role="tab"
         class="form__tab"
-        :class="{ 'form__tab--on': activeTab === tab.key }"
+        :class="{
+          'form__tab--on': activeTab === tab.key,
+          'form__tab--disabled': !isTabEnabled(tab.key),
+        }"
         :aria-selected="activeTab === tab.key"
-        :disabled="detailLocked && tab.key !== DAILY_TAB_WORK"
+        :aria-disabled="!isTabEnabled(tab.key)"
+        :disabled="!isTabEnabled(tab.key)"
         @click="selectTab(tab.key)"
       >
         <img class="form__tab-ico" :src="tab.icon" alt="" />
@@ -311,20 +339,26 @@ function onSelectPending(msg?: string) {
         @pending="onSelectPending"
         @remove-saved="(id) => emit('removeExpenseExp', id)"
       />
+      <!-- 농약/비료 탭: 동일 패널 재사용 (mode만 분기). key로 탭 전환 시 인스턴스 분리 -->
       <WorkLogDailyPesticidePanel
-        v-else-if="activeTab === DAILY_TAB_PESTICIDE"
+        v-else-if="
+          activeTab === DAILY_TAB_PESTICIDE || activeTab === DAILY_TAB_FERTILIZER
+        "
+        :key="activeTab"
         v-model="pesticideRows"
+        :mode="
+          activeTab === DAILY_TAB_FERTILIZER ? 'fertilizer' : 'pesticide'
+        "
         :farm-cd="farmCd"
-        :is-pesticide-work="isPestWork"
+        :is-target-work="
+          activeTab === DAILY_TAB_FERTILIZER ? isFertWork : isPestWork
+        "
         :stock-applied-yn="stockAppliedYn"
         :editing-replace="editingReplace"
         @pending="onSelectPending"
         @cancel-use="emit('cancelPesticide')"
         @edit-begin="emit('editPesticide')"
       />
-      <p v-else-if="activeTab === DAILY_TAB_FERTILIZER" class="form__pending">
-        {{ MSG_FERTILIZER_PENDING }}
-      </p>
       <WorkLogDailyWorkPhotoPanel
         v-else-if="activeTab === DAILY_TAB_PHOTO"
         :farm-cd="farmCd"
@@ -405,6 +439,14 @@ function onSelectPending(msg?: string) {
   color: var(--ods-color-primary);
   font-weight: 700;
   border-bottom-color: var(--ods-color-primary);
+}
+
+.form__tab--disabled,
+.form__tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  color: var(--ods-color-text-secondary);
+  border-bottom-color: transparent;
 }
 
 .form__tab-ico {

@@ -379,7 +379,7 @@ export function isRestDay(iso: string): boolean {
   return isWeekend(iso) || isPublicHoliday(iso)
 }
 
-/** 방제/약제살포 작업 여부 (PC is_pesticide_work와 동일 기준) */
+/** 방제/약제살포 작업 여부 — m_common_code WK010200(방제살포) + 기존 휴리스틱 */
 export function isPesticideWork(midCd: string, midNm: string): boolean {
   const cd = String(midCd || '').trim().toUpperCase()
   if (cd === WORK_MID_CD_PESTICIDE) return true
@@ -391,7 +391,8 @@ export function isPesticideWork(midCd: string, midNm: string): boolean {
   return false
 }
 
-function isFertilizerWork(midCd: string, midNm: string): boolean {
+/** 비료/영양제작업 — m_common_code WK010800(비료영양) + 기존 휴리스틱 */
+export function isFertilizerWork(midCd: string, midNm: string): boolean {
   const cd = String(midCd || '').trim().toUpperCase()
   if (cd === WORK_MID_CD_FERTILIZER) return true
   const nm = String(midNm || '')
@@ -560,6 +561,20 @@ export const DAILY_WORK_TABS: ReadonlyArray<{
   { key: DAILY_TAB_PHOTO, label: '사진', icon: iconTabPhoto },
 ]
 
+/**
+ * 일간 상세 탭 활성화 — 탭은 유지, 작업구분에 따라 농약/비료만 enable.
+ * WK010200 방제살포→농약만, WK010800 비료영양→비료만, 그 외→둘 다 비활성.
+ */
+export function isDailyWorkTabEnabled(
+  tabKey: DailyWorkTabKey,
+  midCd: string,
+  midNm: string,
+): boolean {
+  if (tabKey === DAILY_TAB_PESTICIDE) return isPesticideWork(midCd, midNm)
+  if (tabKey === DAILY_TAB_FERTILIZER) return isFertilizerWork(midCd, midNm)
+  return true
+}
+
 /** 작업 결과 사진 — 관찰 사진과 별개 · 작업 1건당 최대 */
 export const WORK_PHOTO_MAX_COUNT = 5
 
@@ -578,8 +593,12 @@ export const MSG_OBS_LOCATION_FALLBACK = '필지'
 export const DAILY_OBS_PHOTO_PREVIEW_MAX = 4
 export const MSG_WORK_FORM_TIP =
   '작업구분만 선택해도 타임라인에 추가할 수 있습니다.'
-export const MSG_FERTILIZER_PENDING =
-  '비료 사용·재고 연동은 준비 중입니다.'
+export const MSG_FERTILIZER_HINT =
+  '비료/영양제작업일 때 영양제 품목을 등록합니다. (화면 표시명: 비료)'
+export const MSG_FERTILIZER_EMPTY = '등록된 사용 비료가 없습니다.'
+export const MSG_FERTILIZER_NOT_TARGET =
+  '비료 등록은 비료/영양제작업에서 가능합니다.'
+export const MSG_FERTILIZER_REMOVE_CONFIRM = '등록된 비료를 삭제하시겠습니까?'
 export const MSG_PESTICIDE_HINT =
   '방제·약제살포 작업일 때 사용 농약을 등록합니다.'
 export const MSG_LABOR_EMPTY = '등록된 인력이 없습니다.'
@@ -594,8 +613,9 @@ export function msgPesticideStockShort(
   itemNm: string,
   available: number,
   requested: number,
+  label = '농약',
 ): string {
-  const nm = String(itemNm || '').trim() || '농약'
+  const nm = String(itemNm || '').trim() || label
   return `${nm}: 재고 부족 (가능 ${available}개 < 사용 ${requested}개)`
 }
 /** 목록·재고 반영 여부를 반영한 사용 가능 수량 */
@@ -895,8 +915,6 @@ export type DailyShellSummaryCard = {
 
 const DAILY_SUMMARY_PEST_MAX_LINES = 3
 const MSG_SUMMARY_NONE = '없음'
-const MSG_SUMMARY_FERTILIZER_PENDING = '준비 중'
-
 /** 일간 API resources/expenses/pesticides → 오늘 작업 요약 카드 */
 export function buildDailySummaryCards(input: {
   resources?: readonly {
@@ -906,16 +924,30 @@ export function buildDailySummaryCards(input: {
   }[]
   expenses?: readonly { total_amt?: number | null }[]
   pesticides?: readonly {
+    work_id?: string | null
     lines?: readonly {
       item_id?: number | null
       item_nm_snapshot?: string | null
       use_qty?: number | null
     }[]
   }[]
+  works?: readonly {
+    work_id?: string | null
+    work_mid_cd?: string | null
+    work_mid_nm?: string | null
+  }[]
 }): DailyShellSummaryCard[] {
   const resources = input.resources || []
   const expenses = input.expenses || []
   const pesticides = input.pesticides || []
+  const fertWorkIds = new Set(
+    (input.works || [])
+      .filter((w) =>
+        isFertilizerWork(String(w.work_mid_cd || ''), String(w.work_mid_nm || '')),
+      )
+      .map((w) => String(w.work_id || '').trim())
+      .filter(Boolean),
+  )
 
   const empKeys = new Set(
     resources
@@ -929,31 +961,54 @@ export function buildDailySummaryCards(input: {
   const expenseCnt = expenses.length
   const expenseAmt = expenses.reduce((s, e) => s + Number(e.total_amt || 0), 0)
 
-  const pestQty = new Map<string, number>()
-  for (const doc of pesticides) {
-    for (const ln of doc.lines || []) {
-      const qty = Number(ln.use_qty || 0)
-      if (!(qty > 0)) continue
-      const nm =
-        String(ln.item_nm_snapshot || '').trim() ||
-        (ln.item_id ? `품목#${ln.item_id}` : '농약')
-      pestQty.set(nm, (pestQty.get(nm) || 0) + qty)
+  function accumulateQty(
+    docs: typeof pesticides,
+    fallbackLabel: string,
+  ): Map<string, number> {
+    const qtyMap = new Map<string, number>()
+    for (const doc of docs) {
+      for (const ln of doc.lines || []) {
+        const qty = Number(ln.use_qty || 0)
+        if (!(qty > 0)) continue
+        const nm =
+          String(ln.item_nm_snapshot || '').trim() ||
+          (ln.item_id ? `품목#${ln.item_id}` : fallbackLabel)
+        qtyMap.set(nm, (qtyMap.get(nm) || 0) + qty)
+      }
     }
+    return qtyMap
   }
-  const pestEntries = [...pestQty.entries()].sort((a, b) => b[1] - a[1])
-  const pestLines: DailyShellSummaryLine[] =
-    pestEntries.length === 0
-      ? [{ label: '사용', value: MSG_SUMMARY_NONE }]
-      : pestEntries.slice(0, DAILY_SUMMARY_PEST_MAX_LINES).map(([nm, qty]) => ({
-          label: nm,
-          value: `${Math.round(qty)}`,
-        }))
-  if (pestEntries.length > DAILY_SUMMARY_PEST_MAX_LINES) {
-    pestLines.push({
-      label: '기타',
-      value: `${pestEntries.length - DAILY_SUMMARY_PEST_MAX_LINES}종`,
-    })
+
+  function linesFromQty(
+    qtyMap: Map<string, number>,
+  ): DailyShellSummaryLine[] {
+    const entries = [...qtyMap.entries()].sort((a, b) => b[1] - a[1])
+    if (entries.length === 0) {
+      return [{ label: '사용', value: MSG_SUMMARY_NONE }]
+    }
+    const lines: DailyShellSummaryLine[] = entries
+      .slice(0, DAILY_SUMMARY_PEST_MAX_LINES)
+      .map(([nm, qty]) => ({
+        label: nm,
+        value: `${Math.round(qty)}`,
+      }))
+    if (entries.length > DAILY_SUMMARY_PEST_MAX_LINES) {
+      lines.push({
+        label: '기타',
+        value: `${entries.length - DAILY_SUMMARY_PEST_MAX_LINES}종`,
+      })
+    }
+    return lines
   }
+
+  const pestDocs = pesticides.filter(
+    (d) => !fertWorkIds.has(String(d.work_id || '').trim()),
+  )
+  const fertDocs = pesticides.filter((d) =>
+    fertWorkIds.has(String(d.work_id || '').trim()),
+  )
+  const pestLines = linesFromQty(accumulateQty(pestDocs, '농약'))
+  const fertLines = linesFromQty(accumulateQty(fertDocs, '비료'))
 
   return [
     {
@@ -989,7 +1044,7 @@ export function buildDailySummaryCards(input: {
       label: '비료',
       icon: iconFertilizer,
       tone: 'fertilizer',
-      lines: [{ label: '등록', value: MSG_SUMMARY_FERTILIZER_PENDING }],
+      lines: fertLines,
     },
   ]
 }

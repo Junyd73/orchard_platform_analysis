@@ -287,8 +287,12 @@ class PesticideService(PesticideOpsMixin):
         sql = f"""
             SELECT MAX(substr(IFNULL(u.use_dt, ''), 1, 10)) AS last_dt
             FROM t_pesticide_use u
+            INNER JOIN t_pesticide_use_line l ON l.use_id = u.use_id
+            INNER JOIN m_pesticide_item it
+              ON it.farm_cd = u.farm_cd AND it.item_id = l.item_id
             WHERE {_USAGE_FARM_WHERE.strip()}
               AND length(IFNULL(u.use_dt, '')) >= 10
+              AND TRIM(IFNULL(it.pest_category_nm, '')) != '영양제'
         """
         with get_sqlite_connection(self._db_path) as conn:
             row = conn.execute(sql, (farm,)).fetchone()

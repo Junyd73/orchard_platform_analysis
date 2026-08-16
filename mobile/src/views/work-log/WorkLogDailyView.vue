@@ -331,6 +331,7 @@ function refreshSummaryCards() {
     resources: cachedResources,
     expenses: cachedExpenses,
     pesticides: cachedPesticides,
+    works: sourceWorks.value,
   })
 }
 
@@ -1532,7 +1533,18 @@ onMounted(async () => {
                 · {{ deletePreview.pesticide_item_names.join(', ') }}
               </template>
             </li>
-            <li v-if="deletePreview.is_fertilizer_work">
+            <li v-if="(deletePreview.fertilizer_count ?? 0) > 0">
+              비료: {{ deletePreview.fertilizer_count }}건
+              <template v-if="deletePreview.fertilizer_item_names?.length">
+                · {{ deletePreview.fertilizer_item_names.join(', ') }}
+              </template>
+            </li>
+            <li
+              v-else-if="
+                deletePreview.is_fertilizer_work &&
+                !(deletePreview.fertilizer_count > 0)
+              "
+            >
               비료: {{ deletePreview.fertilizer_note || '비료/영양제 작업' }}
             </li>
             <li v-if="deletePreview.photo_count > 0">

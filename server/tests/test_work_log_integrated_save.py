@@ -78,6 +78,7 @@ def _make_db() -> tuple[sqlite3.Connection, Path]:
         CREATE TABLE m_pesticide_item (
             item_id INTEGER PRIMARY KEY, farm_cd TEXT, item_nm TEXT,
             qty_piece INTEGER, use_yn TEXT DEFAULT 'Y',
+            pest_category_nm TEXT DEFAULT '',
             mod_id TEXT, mod_dt TEXT
         );
         CREATE TABLE t_pesticide_use (

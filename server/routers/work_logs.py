@@ -64,10 +64,14 @@ def list_work_log_account_codes(
 )
 def list_work_log_pesticide_items(
     farm_cd: str,
+    kind: str = Query(
+        "pesticide",
+        description="pesticide=영양제 제외, fertilizer=영양제만",
+    ),
     service: WorkLogService = Depends(get_work_log_service),
 ) -> list[WorkLogPesticideItemOption]:
-    """농약 품목 — PC list_items 와 동일."""
-    return service.list_pesticide_items(farm_cd)
+    """영농일지 농약/비료 품목 — kind로 카테고리 분리."""
+    return service.list_pesticide_items(farm_cd, kind=kind)
 
 
 @router.get("/monthly", response_model=WorkLogMonthlyResponse)

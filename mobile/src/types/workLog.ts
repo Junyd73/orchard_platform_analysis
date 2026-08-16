@@ -247,6 +247,8 @@ export type WorkLogDeletePreviewResponse = {
   expense_amount: number
   pesticide_count: number
   pesticide_item_names: string[]
+  fertilizer_count: number
+  fertilizer_item_names: string[]
   is_fertilizer_work: boolean
   fertilizer_note?: string | null
   photo_count: number

@@ -441,8 +441,9 @@ async function onSave() {
           <div class="field field--pest">
             <WorkLogDailyPesticidePanel
               v-model="pesticideRows"
+              mode="pesticide"
               :farm-cd="farmCd"
-              :is-pesticide-work="true"
+              :is-target-work="true"
               :show-stock-link="false"
               stock-applied-yn="N"
               @pending="onPestPending"

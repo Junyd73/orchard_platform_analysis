@@ -106,10 +106,13 @@ def _make_db() -> tuple[sqlite3.Connection, Path]:
         );
         CREATE TABLE m_pesticide_item (
             item_id INTEGER PRIMARY KEY, farm_cd TEXT, item_nm TEXT,
+            pest_category_nm TEXT DEFAULT '',
             qty_piece INTEGER, use_yn TEXT DEFAULT 'Y',
             mod_id TEXT, mod_dt TEXT
         );
-        INSERT INTO m_pesticide_item VALUES (1,'OR001','테스트약',100,'Y',NULL,NULL);
+        INSERT INTO m_pesticide_item VALUES
+          (1,'OR001','테스트약','살충제',100,'Y',NULL,NULL),
+          (2,'OR001','루츠','영양제',50,'Y',NULL,NULL);
 
         CREATE TABLE t_pesticide_use (
             use_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -468,6 +471,93 @@ class TestWorkLogServiceDeleteCascade(unittest.TestCase):
             self.assertEqual(n, 0)
         finally:
             conn.close()
+
+
+class TestDeletePreviewFertilizerSplit(unittest.TestCase):
+    """삭제 미리보기: 영양제→비료 / 그 외→농약 분리."""
+
+    def setUp(self):
+        self.conn, self.path = _make_db()
+        self.db = _DbShim(self.conn)
+        self.core = WorkLogIntegratedSaveService(self.db, "OR001")
+        self.api = WorkLogService(db_path=self.path)
+        self.work_dt = "2026-08-10"
+
+    def tearDown(self):
+        self.conn.close()
+        try:
+            self.path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def test_fertilizer_work_preview_lists_nutrient_as_fertilizer(self):
+        wid = "20260810-F1"
+        self.core.save_integrated(
+            "tester",
+            WorkLogSavePayload(
+                master=MasterDto(work_dt=self.work_dt, day_of_week="월"),
+                works=[
+                    WorkDetailDto(
+                        work_id=wid,
+                        work_mid_cd="WK010800",
+                        work_mid_nm="비료/영양제",
+                        status_cd="WO010300",
+                        pesticide_lines=[
+                            PesticideLineDto(
+                                item_id=2,
+                                use_qty=1,
+                                item_nm_snapshot="루츠",
+                            )
+                        ],
+                    )
+                ],
+                labor_work_id=wid,
+                expense_work_id=wid,
+                worker_nm="tester",
+                worker_id="tester",
+            ),
+        )
+        preview = self.api.get_delete_preview("OR001", wid)
+        self.assertEqual(preview.fertilizer_count, 1)
+        self.assertEqual(preview.fertilizer_item_names, ["루츠"])
+        self.assertEqual(preview.pesticide_count, 0)
+        self.assertEqual(preview.pesticide_item_names, [])
+        self.assertTrue(preview.is_fertilizer_work)
+        self.assertTrue(preview.has_related)
+
+    def test_pesticide_work_preview_lists_spray_as_pesticide(self):
+        wid = "20260810-P1"
+        self.core.save_integrated(
+            "tester",
+            WorkLogSavePayload(
+                master=MasterDto(work_dt=self.work_dt, day_of_week="월"),
+                works=[
+                    WorkDetailDto(
+                        work_id=wid,
+                        work_mid_cd="WK010200",
+                        work_mid_nm="방제",
+                        status_cd="WO010300",
+                        pesticide_lines=[
+                            PesticideLineDto(
+                                item_id=1,
+                                use_qty=1,
+                                item_nm_snapshot="테스트약",
+                            )
+                        ],
+                    )
+                ],
+                labor_work_id=wid,
+                expense_work_id=wid,
+                worker_nm="tester",
+                worker_id="tester",
+            ),
+        )
+        preview = self.api.get_delete_preview("OR001", wid)
+        self.assertEqual(preview.pesticide_count, 1)
+        self.assertEqual(preview.pesticide_item_names, ["테스트약"])
+        self.assertEqual(preview.fertilizer_count, 0)
+        self.assertEqual(preview.fertilizer_item_names, [])
+        self.assertFalse(preview.is_fertilizer_work)
 
 
 if __name__ == "__main__":

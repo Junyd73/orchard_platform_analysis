@@ -406,16 +406,38 @@ class WorkLogService:
         ]
 
     def list_pesticide_items(
-        self, farm_cd: str
+        self, farm_cd: str, *, kind: str = "pesticide"
     ) -> list[WorkLogPesticideItemOption]:
-        """PC PesticideManager.list_items — 농약 품목 콤보."""
+        """영농일지 농약/비료 품목. kind=pesticide|fertilizer."""
+        from core.pesticide_manager import (
+            sql_item_is_nutrient,
+            sql_item_not_nutrient,
+        )
+        from core.work_log_constants import (
+            STOCK_ITEM_KIND_FERTILIZER,
+            STOCK_ITEM_KIND_PESTICIDE,
+        )
+
         farm = self._ensure_farm(farm_cd)
+        k = (kind or STOCK_ITEM_KIND_PESTICIDE).strip().lower()
+        if k not in (STOCK_ITEM_KIND_PESTICIDE, STOCK_ITEM_KIND_FERTILIZER):
+            raise BusinessRuleError(
+                f"kind는 {STOCK_ITEM_KIND_PESTICIDE} 또는 "
+                f"{STOCK_ITEM_KIND_FERTILIZER} 만 허용됩니다.",
+                code="INVALID_ITEM_KIND",
+            )
+        cat_sql = (
+            sql_item_is_nutrient("m")
+            if k == STOCK_ITEM_KIND_FERTILIZER
+            else sql_item_not_nutrient("m")
+        )
         with get_sqlite_connection(self._db_path) as conn:
             rows = conn.execute(
-                """
-                SELECT item_id, item_nm, spec_nm, qty_piece
-                FROM m_pesticide_item
+                f"""
+                SELECT item_id, item_nm, spec_nm, qty_piece, pest_category_nm
+                FROM m_pesticide_item m
                 WHERE farm_cd = ? AND IFNULL(use_yn, 'Y') = 'Y'
+                  AND ({cat_sql})
                 ORDER BY IFNULL(sort_ord, 0), item_nm
                 """,
                 (farm,),
@@ -426,6 +448,7 @@ class WorkLogService:
                 item_nm=_s(r["item_nm"]) or f"품목{r['item_id']}",
                 spec_nm=_s(r["spec_nm"]) or None,
                 qty_piece=int(r["qty_piece"] or 0),
+                pest_category_nm=_s(r["pest_category_nm"]) or None,
             )
             for r in (rows or [])
         ]
@@ -1062,11 +1085,26 @@ class WorkLogService:
                     for ln in (w.pesticide_lines or [])
                     if int(ln.item_id or 0) > 0
                 ]
+                mid_nm = _s(w.work_mid_nm)
+                # 재고 라인 유무로 is_pesticide=True 강제 금지.
+                # WK010800 비료영양 + 영양제 저장이 농약으로 오인되던 원인.
+                if pest_lines:
+                    is_pest_flag: bool | None = (
+                        True
+                        if _is_pesticide_work(mid, mid_nm)
+                        else (
+                            False
+                            if _is_fertilizer_work(mid, mid_nm)
+                            else None
+                        )
+                    )
+                else:
+                    is_pest_flag = None
                 works_out.append(
                     WorkDetailDto(
                         work_id=wid,
                         work_mid_cd=mid,
-                        work_mid_nm=_s(w.work_mid_nm),
+                        work_mid_nm=mid_nm,
                         work_loc_id=w.work_loc_id,
                         rmk=_s(w.rmk),
                         start_tm=_s(w.start_tm),
@@ -1074,7 +1112,7 @@ class WorkLogService:
                         status_cd=_s(w.status_cd),
                         pesticide_lines=pest_lines,
                         replace_pesticide_use_id=w.replace_pesticide_use_id,
-                        is_pesticide=True if pest_lines else None,
+                        is_pesticide=is_pest_flag,
                     )
                 )
 
@@ -1581,25 +1619,50 @@ class WorkLogService:
             ).fetchone()
             pest_cnt = 0
             pest_items: list[str] = []
+            fert_cnt = 0
+            fert_items: list[str] = []
             try:
-                pest_cnt = int(
-                    conn.execute(
-                        """
-                        SELECT COUNT(*) AS c FROM t_pesticide_use
-                        WHERE farm_cd = ? AND work_id = ?
-                          AND COALESCE(use_yn, 'Y') = 'Y'
-                          AND COALESCE(cancel_yn, 'N') != 'Y'
-                        """,
-                        (farm, wid),
-                    ).fetchone()["c"]
-                    or 0
+                ensure_repo_root_on_path()
+                from core.pesticide_manager import (  # noqa: WPS433
+                    is_nutrient_category,
+                )
+
+                # use_id별 품목을 영양제(비료) / 그 외(농약)로 분리
+                pest_use_ids: set[int] = set()
+                fert_use_ids: set[int] = set()
+                pest_names_seen: set[str] = set()
+                fert_names_seen: set[str] = set()
+                has_item_cat = False
+                try:
+                    col_names = {
+                        str(r[1])
+                        for r in conn.execute(
+                            "PRAGMA table_info(m_pesticide_item)"
+                        )
+                    }
+                    has_item_cat = "pest_category_nm" in col_names
+                except sqlite3.Error:
+                    has_item_cat = False
+                cat_expr = (
+                    "IFNULL(i.pest_category_nm, '')"
+                    if has_item_cat
+                    else "''"
+                )
+                join_item = (
+                    "LEFT JOIN m_pesticide_item i "
+                    "ON i.item_id = l.item_id AND i.farm_cd = u.farm_cd"
+                    if has_item_cat
+                    else ""
                 )
                 for pr in conn.execute(
-                    """
-                    SELECT DISTINCT COALESCE(NULLIF(TRIM(l.item_nm_snapshot), ''),
-                                            CAST(l.item_id AS TEXT)) AS nm
+                    f"""
+                    SELECT u.use_id,
+                           COALESCE(NULLIF(TRIM(l.item_nm_snapshot), ''),
+                                    CAST(l.item_id AS TEXT)) AS nm,
+                           {cat_expr} AS cat
                     FROM t_pesticide_use u
                     JOIN t_pesticide_use_line l ON l.use_id = u.use_id
+                    {join_item}
                     WHERE u.farm_cd = ? AND u.work_id = ?
                       AND COALESCE(u.use_yn, 'Y') = 'Y'
                       AND COALESCE(u.cancel_yn, 'N') != 'Y'
@@ -1607,9 +1670,23 @@ class WorkLogService:
                     """,
                     (farm, wid),
                 ).fetchall():
+                    uid = int(pr["use_id"] or 0)
                     nm = _s(pr["nm"])
-                    if nm:
-                        pest_items.append(nm)
+                    cat = _s(pr["cat"])
+                    if is_nutrient_category(cat):
+                        if uid:
+                            fert_use_ids.add(uid)
+                        if nm and nm not in fert_names_seen:
+                            fert_names_seen.add(nm)
+                            fert_items.append(nm)
+                    else:
+                        if uid:
+                            pest_use_ids.add(uid)
+                        if nm and nm not in pest_names_seen:
+                            pest_names_seen.add(nm)
+                            pest_items.append(nm)
+                pest_cnt = len(pest_use_ids)
+                fert_cnt = len(fert_use_ids)
             except sqlite3.Error:
                 pass
             photo_cnt = 0
@@ -1635,9 +1712,15 @@ class WorkLogService:
                 int(labor_row["c"] or 0) > 0
                 or int(exp_row["c"] or 0) > 0
                 or pest_cnt > 0
+                or fert_cnt > 0
                 or photo_cnt > 0
                 or google_linked
             )
+            fert_note = None
+            if fert_cnt > 0:
+                fert_note = "비료(영양제) 사용·재고 복구 포함"
+            elif fertilizer:
+                fert_note = "비료/영양제 작업"
             return WorkLogDeletePreviewResponse(
                 work_id=wid,
                 work_dt=dt,
@@ -1652,10 +1735,10 @@ class WorkLogService:
                 expense_amount=float(exp_row["amt"] or 0),
                 pesticide_count=pest_cnt,
                 pesticide_item_names=pest_items,
+                fertilizer_count=fert_cnt,
+                fertilizer_item_names=fert_items,
                 is_fertilizer_work=fertilizer,
-                fertilizer_note="비료/영양제 작업(전용 재고 연동 없음)"
-                if fertilizer
-                else None,
+                fertilizer_note=fert_note,
                 photo_count=photo_cnt,
                 google_calendar_linked=google_linked,
                 has_related=has_related,

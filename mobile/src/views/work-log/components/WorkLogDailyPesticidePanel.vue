@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
   fetchWorkLogPesticideItems,
   type WorkLogPesticideItemOption,
+  type WorkLogStockItemKind,
 } from '@/api/workLogs'
 import iconEdit from '@/assets/ods/scr004/icon-edit.svg'
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
@@ -18,6 +19,10 @@ import {
 import {
   availablePesticideQty,
   createEmptyPesticideRow,
+  MSG_FERTILIZER_EMPTY,
+  MSG_FERTILIZER_HINT,
+  MSG_FERTILIZER_NOT_TARGET,
+  MSG_FERTILIZER_REMOVE_CONFIRM,
   MSG_PESTICIDE_EMPTY,
   MSG_PESTICIDE_HINT,
   MSG_PESTICIDE_NOT_TARGET,
@@ -32,7 +37,14 @@ const listed = defineModel<DailyShellPesticideRow[]>({ default: () => [] })
 const props = withDefaults(
   defineProps<{
     farmCd: string
-    /** 방제/약제살포 작업일 때만 빈문구·추가 노출 */
+    /** pesticide | fertilizer — 품목 필터·문구 */
+    mode?: WorkLogStockItemKind
+    /**
+     * 방제/약제살포 또는 비료작업일 때만 빈문구·추가 노출.
+     * null=미지정 → isPesticideWork 폴백 (Boolean 미전달 시 false 캐스팅 회피)
+     */
+    isTargetWork?: boolean | null
+    /** @deprecated isTargetWork 사용 */
     isPesticideWork?: boolean
     stockAppliedYn?: string
     readOnly?: boolean
@@ -41,6 +53,8 @@ const props = withDefaults(
     showStockLink?: boolean
   }>(),
   {
+    mode: 'pesticide',
+    isTargetWork: null,
     // Boolean prop 미전달 시 Vue가 false로 캐스팅하므로 기본 true
     isPesticideWork: true,
     showStockLink: true,
@@ -55,7 +69,27 @@ const emit = defineEmits<{
 
 const router = useRouter()
 
-const isPestTarget = computed(() => props.isPesticideWork !== false)
+const isFertMode = computed(() => props.mode === 'fertilizer')
+const itemLabel = computed(() => (isFertMode.value ? '비료' : '농약'))
+const hintText = computed(() =>
+  isFertMode.value ? MSG_FERTILIZER_HINT : MSG_PESTICIDE_HINT,
+)
+const emptyText = computed(() =>
+  isFertMode.value ? MSG_FERTILIZER_EMPTY : MSG_PESTICIDE_EMPTY,
+)
+const notTargetText = computed(() =>
+  isFertMode.value ? MSG_FERTILIZER_NOT_TARGET : MSG_PESTICIDE_NOT_TARGET,
+)
+const removeConfirmText = computed(() =>
+  isFertMode.value
+    ? MSG_FERTILIZER_REMOVE_CONFIRM
+    : MSG_PESTICIDE_REMOVE_CONFIRM,
+)
+
+const isPestTarget = computed(() => {
+  if (props.isTargetWork != null) return props.isTargetWork !== false
+  return props.isPesticideWork !== false
+})
 
 const canEditLines = computed(
   () =>
@@ -97,13 +131,28 @@ function applyPurpose(purpose: string) {
   if (draft.value) draft.value.purpose = purpose
 }
 
-onMounted(async () => {
+async function loadItems() {
   try {
-    items.value = (await fetchWorkLogPesticideItems(props.farmCd)) || []
+    items.value =
+      (await fetchWorkLogPesticideItems(
+        props.farmCd,
+        props.mode || 'pesticide',
+      )) || []
   } catch {
     emit('pending')
   }
+}
+
+onMounted(() => {
+  void loadItems()
 })
+
+watch(
+  () => [props.farmCd, props.mode] as const,
+  () => {
+    void loadItems()
+  },
+)
 
 function clearDraft() {
   draft.value = null
@@ -118,7 +167,7 @@ function onAdd() {
   }
   seq += 1
   editingId.value = null
-  draft.value = createEmptyPesticideRow(`pest-draft-${seq}`)
+  draft.value = createEmptyPesticideRow(`${props.mode || 'pest'}-draft-${seq}`)
 }
 
 function onEditRow(row: DailyShellPesticideRow) {
@@ -130,7 +179,7 @@ function onEditRow(row: DailyShellPesticideRow) {
 
 function onRemoveRow(row: DailyShellPesticideRow) {
   if (!canEditLines.value) return
-  if (!window.confirm(MSG_PESTICIDE_REMOVE_CONFIRM)) return
+  if (!window.confirm(removeConfirmText.value)) return
   if (editingId.value === row.id) clearDraft()
   listed.value = listed.value.filter((r) => r.id !== row.id)
 }
@@ -159,7 +208,7 @@ function confirmDraft() {
   }
   const catalog = items.value.find((x) => Number(x.item_id) === iid)
   if (!catalog) {
-    emit('pending', '선택한 농약 품목을 찾을 수 없습니다.')
+    emit('pending', `선택한 ${itemLabel.value} 품목을 찾을 수 없습니다.`)
     return
   }
   const available = availablePesticideQty({
@@ -172,7 +221,12 @@ function confirmDraft() {
   if (qty > available) {
     emit(
       'pending',
-      msgPesticideStockShort(row.itemNm || catalog.item_nm, available, qty),
+      msgPesticideStockShort(
+        row.itemNm || catalog.item_nm,
+        available,
+        qty,
+        itemLabel.value,
+      ),
     )
     return
   }
@@ -190,11 +244,11 @@ function confirmDraft() {
 <template>
   <div class="panel">
     <template v-if="!isPestTarget">
-      <p class="panel__empty">{{ MSG_PESTICIDE_NOT_TARGET }}</p>
+      <p class="panel__empty">{{ notTargetText }}</p>
     </template>
     <template v-else>
       <div class="panel__top">
-        <p class="panel__hint">{{ MSG_PESTICIDE_HINT }}</p>
+        <p class="panel__hint">{{ hintText }}</p>
         <button
           v-if="showStockLink"
           type="button"
@@ -224,11 +278,11 @@ function confirmDraft() {
           class="panel__cancel"
           @click="emit('cancelUse')"
         >
-          농약 사용 취소
+          {{ itemLabel }} 사용 취소
         </button>
       </div>
 
-      <ul v-if="listed.length > 0" class="list" aria-label="등록 농약">
+      <ul v-if="listed.length > 0" class="list" :aria-label="`등록 ${itemLabel}`">
         <li
           v-for="row in listed"
           :key="row.id"
@@ -238,7 +292,7 @@ function confirmDraft() {
           <button
             type="button"
             class="list__body"
-            :aria-label="`${row.itemNm || '농약'} 수정`"
+            :aria-label="`${row.itemNm || itemLabel} 수정`"
             :disabled="!canEditLines"
             @click="onEditRow(row)"
           >
@@ -252,7 +306,7 @@ function confirmDraft() {
             <button
               type="button"
               class="list__edit"
-              :aria-label="`${row.itemNm || '농약'} 수정`"
+              :aria-label="`${row.itemNm || itemLabel} 수정`"
               @click="onEditRow(row)"
             >
               <img :src="iconEdit" alt="" />
@@ -260,7 +314,7 @@ function confirmDraft() {
             <button
               type="button"
               class="list__del"
-              :aria-label="`${row.itemNm || '농약'} 삭제`"
+              :aria-label="`${row.itemNm || itemLabel} 삭제`"
               @click="onRemoveRow(row)"
             >
               <img :src="iconTrash" alt="" />
@@ -268,7 +322,7 @@ function confirmDraft() {
           </template>
         </li>
       </ul>
-      <p v-else class="panel__empty">{{ MSG_PESTICIDE_EMPTY }}</p>
+      <p v-else class="panel__empty">{{ emptyText }}</p>
 
       <template v-if="canEditLines">
         <button
@@ -279,17 +333,17 @@ function confirmDraft() {
           @click="onAdd"
         >
           <img :src="iconPlus" alt="" />
-          {{ draft && !isEditing ? '입력 닫기' : '농약추가' }}
+          {{ draft && !isEditing ? '입력 닫기' : `${itemLabel}추가` }}
         </button>
 
         <article
           v-if="draft"
           class="row-card"
-          :aria-label="isEditing ? '농약 수정' : '농약 입력'"
+          :aria-label="isEditing ? `${itemLabel} 수정` : `${itemLabel} 입력`"
         >
           <p v-if="isEditing" class="row-card__badge">수정 중</p>
           <label class="field">
-            <span class="field__label">농약명</span>
+            <span class="field__label">{{ itemLabel }}명</span>
             <button type="button" class="field__select" @click="pickOpen = true">
               <span>{{ draft.itemNm || PLACEHOLDER_SELECT }}</span>
               <span class="field__chev">›</span>
@@ -344,7 +398,7 @@ function confirmDraft() {
               취소
             </button>
             <button type="button" class="panel__confirm" @click="confirmDraft">
-              {{ isEditing ? '농약 수정' : '농약 등록' }}
+              {{ isEditing ? `${itemLabel} 수정` : `${itemLabel} 등록` }}
             </button>
           </div>
         </article>
@@ -352,7 +406,7 @@ function confirmDraft() {
 
       <WorkLogDailyPickSheet
         :open="pickOpen"
-        title="농약 품목"
+        :title="`${itemLabel} 품목`"
         :options="itemOptions"
         @close="pickOpen = false"
         @select="onPickItem"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 import iconCopy from '@/assets/ods/scr004/icon-copy.svg'
 import iconEdit from '@/assets/ods/scr004/icon-edit.svg'
@@ -17,8 +17,9 @@ import {
   DAILY_TAB_WORK,
   DAILY_WORK_TABS,
   formatDailyTimeRange,
+  isDailyWorkTabEnabled,
+  isFertilizerWork,
   isPesticideWork,
-  MSG_FERTILIZER_PENDING,
   type DailyShellExpenseRow,
   type DailyShellLaborRow,
   type DailyShellPesticideRow,
@@ -56,6 +57,9 @@ const timeRange = computed(() => formatDailyTimeRange(props.item))
 const isPestWork = computed(() =>
   isPesticideWork(props.item.workMidCd || '', props.item.title),
 )
+const isFertWork = computed(() =>
+  isFertilizerWork(props.item.workMidCd || '', props.item.title),
+)
 
 const visibleTabs = computed(() =>
   props.detailLocked
@@ -63,8 +67,26 @@ const visibleTabs = computed(() =>
     : DAILY_WORK_TABS,
 )
 
+function isTabEnabled(key: DailyWorkTabKey): boolean {
+  if (props.detailLocked && key !== DAILY_TAB_WORK) return false
+  return isDailyWorkTabEnabled(
+    key,
+    props.item.workMidCd || '',
+    props.item.title,
+  )
+}
+
+watch(
+  () => [props.item.workMidCd, props.item.title] as const,
+  () => {
+    if (!isTabEnabled(activeTab.value)) {
+      activeTab.value = DAILY_TAB_WORK
+    }
+  },
+)
+
 function selectTab(key: DailyWorkTabKey) {
-  if (props.detailLocked && key !== DAILY_TAB_WORK) return
+  if (!isTabEnabled(key)) return
   activeTab.value = key
 }
 
@@ -108,8 +130,13 @@ function onPending(msg?: string) {
         type="button"
         role="tab"
         class="card__tab"
-        :class="{ 'card__tab--on': activeTab === tab.key }"
+        :class="{
+          'card__tab--on': activeTab === tab.key,
+          'card__tab--disabled': !isTabEnabled(tab.key),
+        }"
         :aria-selected="activeTab === tab.key"
+        :aria-disabled="!isTabEnabled(tab.key)"
+        :disabled="!isTabEnabled(tab.key)"
         @click="selectTab(tab.key)"
       >
         <img class="card__tab-ico" :src="tab.icon" alt="" />
@@ -160,20 +187,26 @@ function onPending(msg?: string) {
         @pending="onPending"
         @remove-saved="(id) => emit('removeExpenseExp', id)"
       />
+      <!-- 농약/비료 탭: 동일 패널 재사용 (mode만 분기). key로 탭 전환 시 인스턴스 분리 -->
       <WorkLogDailyPesticidePanel
-        v-else-if="activeTab === DAILY_TAB_PESTICIDE"
+        v-else-if="
+          activeTab === DAILY_TAB_PESTICIDE || activeTab === DAILY_TAB_FERTILIZER
+        "
+        :key="activeTab"
         v-model="pesticideRows"
+        :mode="
+          activeTab === DAILY_TAB_FERTILIZER ? 'fertilizer' : 'pesticide'
+        "
         :farm-cd="farmCd"
-        :is-pesticide-work="isPestWork"
+        :is-target-work="
+          activeTab === DAILY_TAB_FERTILIZER ? isFertWork : isPestWork
+        "
         :stock-applied-yn="stockAppliedYn"
         :editing-replace="editingReplace"
         @pending="onPending"
         @cancel-use="emit('cancelPesticide')"
         @edit-begin="emit('editPesticide')"
       />
-      <p v-else-if="activeTab === DAILY_TAB_FERTILIZER" class="pending">
-        {{ MSG_FERTILIZER_PENDING }}
-      </p>
       <WorkLogDailyWorkPhotoPanel
         v-else-if="activeTab === DAILY_TAB_PHOTO"
         :farm-cd="farmCd"
@@ -351,6 +384,14 @@ function onPending(msg?: string) {
   color: var(--ods-color-primary);
   font-weight: 700;
   border-bottom-color: var(--ods-color-primary);
+}
+
+.card__tab--disabled,
+.card__tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  color: var(--ods-color-text-secondary);
+  border-bottom-color: transparent;
 }
 
 .card__tab-ico {

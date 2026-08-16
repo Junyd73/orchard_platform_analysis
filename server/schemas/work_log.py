@@ -243,6 +243,8 @@ class WorkLogDeletePreviewResponse(BaseModel):
     expense_amount: float = 0.0
     pesticide_count: int = 0
     pesticide_item_names: list[str] = Field(default_factory=list)
+    fertilizer_count: int = 0
+    fertilizer_item_names: list[str] = Field(default_factory=list)
     is_fertilizer_work: bool = False
     fertilizer_note: str | None = None
     photo_count: int = 0
@@ -326,3 +328,4 @@ class WorkLogPesticideItemOption(BaseModel):
     item_nm: str
     spec_nm: str | None = None
     qty_piece: int = 0
+    pest_category_nm: str | None = None
