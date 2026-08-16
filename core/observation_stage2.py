@@ -5,19 +5,31 @@ from __future__ import annotations
 
 import datetime
 import sqlite3
-from typing import Any
+from typing import Any, Protocol
 
-from core.db_manager import DBManager
+from core.observation_stage2_constants import (
+    OBS_CALYX_PARENT_CD,
+    OBS_FRUIT_COLOR_PARENT_CD,
+    OBS_FRUIT_SHAPE_PARENT_CD,
+    OBS_PROGRESS_DONE_CDS,
+    OBS_SEVERITY_RANK,
+    OBS_SHOT_PARENT_CD,
+    OBS_STALK_PARENT_CD,
+    OBS_TARGET_FRUIT_CD,
+)
 
-# 로컬 참조용 별칭 (DBManager 상수와 동기)
-OBS_SHOT_PARENT_CD = DBManager.OBS_SHOT_PARENT_CD
-OBS_FRUIT_SHAPE_PARENT_CD = DBManager.OBS_FRUIT_SHAPE_PARENT_CD
-OBS_FRUIT_COLOR_PARENT_CD = DBManager.OBS_FRUIT_COLOR_PARENT_CD
-OBS_STALK_PARENT_CD = DBManager.OBS_STALK_PARENT_CD
-OBS_CALYX_PARENT_CD = DBManager.OBS_CALYX_PARENT_CD
-OBS_TARGET_FRUIT_CD = DBManager.OBS_TARGET_FRUIT_CD
-OBS_PROGRESS_DONE_CDS = DBManager.OBS_PROGRESS_DONE_CDS
-OBS_SEVERITY_RANK = DBManager.OBS_SEVERITY_RANK
+
+class ObservationStage2Db(Protocol):
+    """Stage2가 호출하는 DB 메서드만 정의 (DBManager / ServerDbBridge)."""
+
+    conn: Any
+
+    def execute_query(self, query, params=()): ...
+
+    def execute_transaction(self, queries_with_params): ...
+
+    def get_observation(self, farm_cd: str, obs_id: str) -> dict | None: ...
+
 
 _YN_Y = "Y"
 _YN_N = "N"
@@ -86,7 +98,7 @@ def _norm_yn(value, default: str = _YN_N) -> str:
     return default
 
 
-def ensure_observation_stage2_schema(db: DBManager) -> None:
+def ensure_observation_stage2_schema(db: ObservationStage2Db) -> None:
     """사진·열매측정 테이블·인덱스·공통코드·root_obs_id 백필(멱등)."""
     _ensure_observation_photo_table(db)
     _ensure_observation_fruit_table(db)
@@ -94,7 +106,7 @@ def ensure_observation_stage2_schema(db: DBManager) -> None:
     _ensure_observation_stage2_common_codes(db)
 
 
-def _ensure_observation_photo_table(db: DBManager) -> None:
+def _ensure_observation_photo_table(db: ObservationStage2Db) -> None:
     try:
         db.execute_query(
             """
@@ -132,7 +144,7 @@ def _ensure_observation_photo_table(db: DBManager) -> None:
         print(f"[DB] ensure t_observation_photo: {e}")
 
 
-def _ensure_observation_fruit_table(db: DBManager) -> None:
+def _ensure_observation_fruit_table(db: ObservationStage2Db) -> None:
     try:
         db.execute_query(
             """
@@ -167,7 +179,7 @@ def _ensure_observation_fruit_table(db: DBManager) -> None:
         print(f"[DB] ensure t_observation_fruit_measurement: {e}")
 
 
-def _backfill_root_obs_id(db: DBManager) -> None:
+def _backfill_root_obs_id(db: ObservationStage2Db) -> None:
     try:
         db.execute_query(
             """
@@ -180,7 +192,7 @@ def _backfill_root_obs_id(db: DBManager) -> None:
         print(f"[DB] backfill root_obs_id: {e}")
 
 
-def _ensure_observation_stage2_common_codes(db: DBManager) -> None:
+def _ensure_observation_stage2_common_codes(db: ObservationStage2Db) -> None:
     """촬영유형·열매형태·과피색·과경·꽃받침 공통코드 멱등 등록(농장별)."""
     try:
         cur = db.conn.cursor()
@@ -272,7 +284,7 @@ def _ensure_observation_stage2_common_codes(db: DBManager) -> None:
         _sync_calyx_status_codes(db, farm_cd)
 
 
-def _sync_calyx_status_codes(db: DBManager, farm_cd: str) -> None:
+def _sync_calyx_status_codes(db: ObservationStage2Db, farm_cd: str) -> None:
     """꽃받침: FY010100 정상, FY010200 숫배, FY010300 기타. 구 FY010400 비활성."""
     farm = (farm_cd or "").strip()
     if not farm:
@@ -321,7 +333,7 @@ from core.observation_photo_db import (  # noqa: E402
 
 
 def update_observation_photo_meta(
-    db: DBManager,
+    db: ObservationStage2Db,
     farm_cd: str,
     photo_id: str,
     shot_type_cd: str | None,
@@ -373,7 +385,7 @@ def update_observation_photo_meta(
 
 
 def soft_delete_observation_photo(
-    db: DBManager, farm_cd: str, photo_id: str, user_id: str
+    db: ObservationStage2Db, farm_cd: str, photo_id: str, user_id: str
 ) -> tuple[bool, str]:
     farm = (farm_cd or "").strip()
     pid = (photo_id or "").strip()
@@ -402,7 +414,7 @@ def soft_delete_observation_photo(
 
 
 def reorder_observation_photos(
-    db: DBManager,
+    db: ObservationStage2Db,
     farm_cd: str,
     obs_id: str,
     photo_ids: list,
@@ -441,7 +453,7 @@ def reorder_observation_photos(
 
 
 def get_fruit_measurement(
-    db: DBManager, farm_cd: str, obs_id: str
+    db: ObservationStage2Db, farm_cd: str, obs_id: str
 ) -> dict | None:
     farm = (farm_cd or "").strip()
     oid = (obs_id or "").strip()
@@ -494,7 +506,7 @@ def _parse_fruit_payload(data: dict) -> tuple[bool, str, dict]:
 
 
 def save_observation_bundle(
-    db: DBManager,
+    db: ObservationStage2Db,
     observation_data: dict,
     user_id: str,
     fruit_data: dict | None = None,
@@ -782,7 +794,7 @@ def save_observation_bundle(
 
 
 def save_fruit_measurement(
-    db: DBManager,
+    db: ObservationStage2Db,
     farm_cd: str,
     obs_id: str,
     data: dict,
@@ -903,7 +915,7 @@ def save_fruit_measurement(
 
 
 def list_observation_track(
-    db: DBManager, farm_cd: str, root_obs_id: str
+    db: ObservationStage2Db, farm_cd: str, root_obs_id: str
 ) -> list[dict]:
     """동일 root 계열 관찰을 시간순으로, 대표 썸네일·측정값 포함."""
     farm = (farm_cd or "").strip()
@@ -957,7 +969,7 @@ def list_observation_track(
     return [_row_dict(r) for r in rows]
 
 
-def count_observations_on_date(db: DBManager, farm_cd: str, obs_dt: str) -> int:
+def count_observations_on_date(db: ObservationStage2Db, farm_cd: str, obs_dt: str) -> int:
     farm = (farm_cd or "").strip()
     dt = _norm_ymd(obs_dt)
     if not farm or not dt:
@@ -977,7 +989,7 @@ def count_observations_on_date(db: DBManager, farm_cd: str, obs_dt: str) -> int:
 
 
 def get_observation_dashboard_summary(
-    db: DBManager, farm_cd: str, today_ymd: str
+    db: ObservationStage2Db, farm_cd: str, today_ymd: str
 ) -> dict:
     farm = (farm_cd or "").strip()
     today = _norm_ymd(today_ymd) or _today_ymd()
@@ -1078,7 +1090,7 @@ def _empty_obs_day_cell() -> dict:
 
 
 def get_observation_monthly_day_map(
-    db: DBManager, farm_cd: str, year: int, month: int
+    db: ObservationStage2Db, farm_cd: str, year: int, month: int
 ) -> dict:
     """일자별 관찰·재관찰 뱃지용 맵. key=YYYY-MM-DD."""
     farm = (farm_cd or "").strip()
