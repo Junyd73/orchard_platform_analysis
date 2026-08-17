@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from app.core.exceptions import EntityNotFoundError
+from app.core.ops_biz_date import now_ops
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection, map_sqlite_error
 from app.schemas.notification import (
     NotificationItem,
@@ -30,7 +30,8 @@ DEFAULT_USER_ID = "MOBILE_USER"
 
 
 def _now_local() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """알림 읽음·감사 시각 — Asia/Seoul (notification_writer 와 동일)."""
+    return now_ops().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _s(value: Any) -> str:

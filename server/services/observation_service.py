@@ -6,11 +6,10 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from datetime import date
 from pathlib import Path
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
-from app.core.ops_biz_date import today_ops
+from app.core.ops_biz_date import now_ops, today_ops
 from app.core.observation_constants import (
     MOBILE_BASIC_TARGET_CDS,
     OBS_AI_STATUS_NONE,
@@ -246,7 +245,7 @@ class ObservationService:
         self, farm_cd: str, *, as_of_date: str | None = None
     ) -> ObservationSummary:
         farm = self._ensure_farm(farm_cd)
-        day = str(as_of_date or "").strip() or date.today().isoformat()
+        day = str(as_of_date or "").strip() or today_ops().isoformat()
         return self._repo.get_summary(farm, as_of_date=day)
 
     def list_observations(
@@ -605,11 +604,9 @@ class ObservationService:
                         "SELECT name FROM sqlite_master WHERE type='table'"
                     ).fetchall()
                 }
-                from datetime import datetime as _dt
-
                 from app.core.observation_lifecycle import OBS_RECORD_DELETED
 
-                now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                now = now_ops().strftime("%Y-%m-%d %H:%M:%S")
                 purged = 0
                 for oid in targets:
                     # AI 자식 → 헤더

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
+from app.core.ops_biz_date import today_ops
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.schemas.work_log import (
     WorkLogAccountCodeOption,
@@ -172,7 +173,7 @@ def _norm_dt(raw) -> str:
 def _ensure_not_future(work_dt: str) -> None:
     if not _DATE_RE.match(work_dt):
         raise BusinessRuleError("작업일은 YYYY-MM-DD 형식이어야 합니다.")
-    if work_dt > date.today().isoformat():
+    if work_dt > today_ops().isoformat():
         raise BusinessRuleError(MSG_FUTURE)
 
 
@@ -184,7 +185,7 @@ def _ensure_date(work_dt: str) -> str:
 
 
 def _is_future_dt(work_dt: str) -> bool:
-    return work_dt > date.today().isoformat()
+    return work_dt > today_ops().isoformat()
 
 
 def _normalize_status_for_date(work_dt: str, status_cd: str | None) -> str | None:
