@@ -143,6 +143,16 @@ include:
   - src: ui/pages/sales_page.py
     dest: ui/pages/sales_page.py
 
+  # --- OPS P2 시간정책 검토용 (미러에 없던 helper만; features/**→views 는 기존 sync) ---
+  - src: ui/ops_qdate.py
+    dest: ui/ops_qdate.py
+
+  - src: mobile/src/shared/bizDate.ts
+    dest: mobile/src/shared/bizDate.ts
+
+  - src: mobile/src/shared/formatDateKo.ts
+    dest: mobile/src/shared/formatDateKo.ts
+
   # --- PC: 관찰 AI 분석 (키·.env 제외, 환경변수명만 참조) ---
   - src: core/ai/**
     dest: core/ai/**
