@@ -30,6 +30,10 @@ function goNotifications() {
   void router.push({ name: 'notifications' })
 }
 
+function goSettings() {
+  void router.push({ name: 'settings' })
+}
+
 onMounted(() => {
   void badgeStore.refresh(farmCd.value)
 })
@@ -40,15 +44,15 @@ onMounted(() => {
     <div class="wl-bar__inner">
       <button type="button" class="wl-bar__farm" aria-label="농장 선택" @click="showSoon('농장 선택')">
         <span class="wl-bar__farm-name">{{ farmName }}</span>
-        <img class="wl-bar__chev" :src="iconChevronDown" alt="" aria-hidden="true" />
+        <img class="wl-bar__chev" :src="iconChevronDown" alt="" aria-hidden="true">
       </button>
       <div class="wl-bar__right">
         <button type="button" class="wl-bar__icon" aria-label="알림" @click="goNotifications">
-          <img :src="iconBell" alt="" aria-hidden="true" />
+          <img :src="iconBell" alt="" aria-hidden="true">
           <span v-if="unreadBadge" class="wl-bar__badge">{{ unreadBadge }}</span>
         </button>
-        <button type="button" class="wl-bar__icon" aria-label="환경설정" @click="showSoon('환경설정')">
-          <img :src="iconSettings" alt="" aria-hidden="true" />
+        <button type="button" class="wl-bar__icon" aria-label="환경설정" @click="goSettings">
+          <img :src="iconSettings" alt="" aria-hidden="true">
         </button>
       </div>
     </div>

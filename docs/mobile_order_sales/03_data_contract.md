@@ -1,6 +1,6 @@
 # 03. Data contract — 기존 테이블
 
-> 상태: 단계 0 · 설계 수정 / 최종승인 대기.  
+> 상태: 단계 0 **최종승인 완료**. ALTER/migration은 단계 3 이전 금지.  
 > DDL은 저장소에 거의 없음. INSERT/UPDATE, `docs/판매관리테이블 생성.txt`, `server/docs/sqlite_schema_baseline.md` 기준.  
 > 문서와 코드가 다르면 **코드 우선**.  
 > **이번 작업에서 ALTER/migration 하지 않음.**

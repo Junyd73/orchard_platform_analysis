@@ -1,6 +1,6 @@
 # 05. API contract — 초안
 
-> 상태: 단계 0 · 설계 수정 / 최종승인 대기. 구현 금지.  
+> 상태: 단계 0 **최종승인 완료**. 단계 1 착수. 구현 금지 범위는 해당 단계 진입 전 DDL/API.  
 > 재검색: **과일 orders/sales/stock/customer/delivery/payment API 없음.**  
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.  
 > PC와 FastAPI가 SQL을 복제하지 않음. `core` 서비스 1곳 (DEC-007).
@@ -138,7 +138,7 @@ cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t
 8. `t_sales_detail` (`order_detail_id` 필수, 이번 `ship_qty`만)
 9. `t_order_master.sales_no`는 비어 있을 때만 최초 판매번호 기록 (legacy/reference). 전체 조회는 `t_sales_master.order_no`
 10. `t_sales_delivery` — 그 출고분만큼만. 주문 배송계획 전체 복사 금지
-11. 선입금 전표는 **첫 출고**에만 (DEC-009)
+11. 선입금 전표 배분은 **DEC-019 OPEN** (단계 4 전). 권장: 이번 판매금액 한도 내 순차 적용. 첫 출고에 `pre_pay_amt` 전액 부착하지 않음(미확정).
 12. 전 줄 `shipped_qty == qty`이면 `stock_status='Y'`
 
 금지 결과: 재고만 감소 / 판매만 생성 / 전량 완료인데 판매 없음 / 기존 판매 수량 증가.
@@ -197,7 +197,7 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 | 주문 접수 | order 3테이블. 재고·판매·전표 없음 |
 | 배정 | 줄 allocated + `t_order_alloc` + 지정 stock row reserved + HOLD + 그 row 가용 재검증 |
 | 배정해제 | release ≤ reserved_unshipped. LIFO alloc 감소 + reserved − + allocated − + CANCEL_HOLD |
-| 소매 출고 (1회) | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + `order_no`/`order_detail_id` + 출고분 배송 + (첫 출고 선입금 전표) |
+| 소매 출고 (1회) | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + `order_no`/`order_detail_id` + 출고분 배송 + 선입금(DEC-019) |
 | 가락 확정 | status + out/log + 선택 전표 |
 | 수금만 | cash + ledger + totals |
 | 주문 취소(출고 전) | 상태 + 모든 미출고 `t_order_alloc` 행별 reserved 복구 |

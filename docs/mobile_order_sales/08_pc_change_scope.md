@@ -1,6 +1,6 @@
 # 08. PC 변경 범위
 
-구현하지 않음. 공통 규칙에 맞추기 위한 **최소 수정 후보**.  
+구현하지 않음 (PC P0는 단계 2 이후). 공통 규칙에 맞추기 위한 **최소 수정 후보**.  
 근거: `ui/pages/order_page.py`, `sales_page.py`, `stock_page.py`, `market_price_page.py`, `core/db_manager.py`, `core/account_manager.py`.
 
 서비스 이름은 **가칭**. 기존 `AccountManager`/`DBManager` 관례를 우선하고 새 아키텍처를 지금 확정하지 않음.  

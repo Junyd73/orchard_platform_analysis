@@ -26,7 +26,7 @@ const props = withDefaults(
     /** history 모드에서 히스토리가 없을 때 이동할 route name */
     backFallback?: string
   }>(),
-  { showBack: false, backMode: 'history' },
+  { showBack: false, backMode: 'history', backFallback: 'home' },
 )
 
 const emit = defineEmits<{
@@ -40,7 +40,6 @@ const store = useAppStore()
 const badgeStore = useNotificationBadgeStore()
 const { farm, farmCd, farmTitle } = storeToRefs(store)
 const { unreadBadge } = storeToRefs(badgeStore)
-const toast = ref('')
 /** 0(Glass) ~ 1(Surface) */
 const progress = ref(0)
 
@@ -70,13 +69,6 @@ function onScroll() {
   })
 }
 
-function showSoon(label: string) {
-  toast.value = `${label} 준비 중`
-  window.setTimeout(() => {
-    toast.value = ''
-  }, 1600)
-}
-
 function onNotification() {
   emit('notification')
   void router.push({ name: 'notifications' })
@@ -84,7 +76,7 @@ function onNotification() {
 
 function onSettings() {
   emit('settings')
-  showSoon('환경설정')
+  void router.push({ name: 'settings' })
 }
 
 function historyPosition(): number {
@@ -170,7 +162,6 @@ onUnmounted(() => {
       </div>
     </div>
   </header>
-  <p v-if="toast" class="ods-appbar__toast" role="status">{{ toast }}</p>
 </template>
 
 <style scoped>
@@ -320,20 +311,6 @@ onUnmounted(() => {
   font-weight: 700;
   line-height: var(--ods-icon-md);
   text-align: center;
-}
-
-.ods-appbar__toast {
-  position: fixed;
-  left: 50%;
-  top: calc(12px + env(safe-area-inset-top, 0px));
-  transform: translateX(-50%);
-  z-index: 60;
-  margin: 0;
-  padding: var(--ods-space-8) var(--ods-space-16);
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-gray-900);
-  color: var(--ods-color-white);
-  font: var(--ods-font-caption);
 }
 
 @media (prefers-reduced-motion: reduce) {

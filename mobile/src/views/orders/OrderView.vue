@@ -1,47 +1,109 @@
 <script setup lang="ts">
-import MobileLayout from '@/layouts/MobileLayout.vue'
+import { computed, ref } from 'vue'
+
+import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
+import OdsAppBar from '@/components/ods/OdsAppBar.vue'
+import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
+import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
+import OdsFab from '@/components/ods/OdsFab.vue'
+import OdsSegmented from '@/components/ods/OdsSegmented.vue'
+import {
+  LABEL_FAB_ORDER,
+  LABEL_FAB_SALES,
+  LABEL_PAGE_TITLE,
+  LABEL_SEGMENT_ARIA,
+  MSG_ORDER_EMPTY_DESC,
+  MSG_ORDER_EMPTY_TITLE,
+  MSG_SALES_EMPTY_DESC,
+  MSG_SALES_EMPTY_TITLE,
+  MSG_STAGE_LATER,
+  ORDER_SALES_SEGMENT_OPTIONS,
+  TAB_ORDER,
+} from '@/views/orders/ordersConstants'
+
+const segment = ref<string>(TAB_ORDER)
+const toastMsg = ref('')
+let toastTimer = 0
+
+const segmentOptions = ORDER_SALES_SEGMENT_OPTIONS.map((opt) => ({
+  value: opt.value,
+  label: opt.label,
+}))
+
+const isOrderTab = computed(() => segment.value === TAB_ORDER)
+const fabLabel = computed(() => (isOrderTab.value ? LABEL_FAB_ORDER : LABEL_FAB_SALES))
+const emptyTitle = computed(() =>
+  isOrderTab.value ? MSG_ORDER_EMPTY_TITLE : MSG_SALES_EMPTY_TITLE,
+)
+const emptyDesc = computed(() =>
+  isOrderTab.value ? MSG_ORDER_EMPTY_DESC : MSG_SALES_EMPTY_DESC,
+)
+
+function showToast(msg: string) {
+  toastMsg.value = msg
+  window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => {
+    toastMsg.value = ''
+  }, 1800)
+}
+
+function onFab() {
+  showToast(MSG_STAGE_LATER)
+}
 </script>
 
 <template>
-  <MobileLayout>
-    <h1>주문관리</h1>
-    <p class="desc">고객·품목·배송·입금상태 관리</p>
-    <p class="note">준비중입니다. 다음 단계에서 구현됩니다.</p>
-    <RouterLink class="btn" to="/">홈으로 돌아가기</RouterLink>
-  </MobileLayout>
+  <div class="page">
+    <main class="content ods-page-content">
+      <OdsAppBar />
+      <header class="head">
+        <h1 class="head__title">{{ LABEL_PAGE_TITLE }}</h1>
+        <OdsSegmented
+          v-model="segment"
+          :options="segmentOptions"
+          :aria-label="LABEL_SEGMENT_ARIA"
+        />
+      </header>
+      <OdsEmptyState :title="emptyTitle" :description="emptyDesc" />
+    </main>
+    <!-- eslint-disable vue/attribute-hyphenation -->
+    <OdsFab :label="fabLabel" :ariaLabel="fabLabel" @click="onFab">
+      <img :src="iconPlus" alt="">
+    </OdsFab>
+    <!-- eslint-enable vue/attribute-hyphenation -->
+    <p v-if="toastMsg" class="toast" role="status">{{ toastMsg }}</p>
+    <OdsBottomNav />
+  </div>
 </template>
 
 <style scoped>
-h1 {
-  margin: 8px 0 0;
-  font-size: 22px;
-  color: #1a202c;
+.page {
+  min-height: 100dvh;
+  background: var(--ods-color-bg-muted);
+  padding-bottom: calc(140px + env(safe-area-inset-bottom));
 }
-.desc {
-  margin: 8px 0 0;
-  font-size: 16px;
-  color: #4a5568;
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
 }
-.note {
-  margin: 16px 0;
-  padding: 14px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #eae7e2;
-  color: #718096;
-  font-size: 15px;
+.head__title {
+  margin: 0;
+  font: var(--ods-font-title-2);
+  font-weight: 800;
+  color: var(--ods-color-text);
 }
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  padding: 0 16px;
-  border-radius: 10px;
-  background: #2d5a27;
-  color: #fff;
-  text-decoration: none;
-  font-size: 16px;
-  font-weight: 600;
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--ods-space-64) + var(--ods-space-8) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  margin: 0;
+  padding: var(--ods-space-8) var(--ods-space-16);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-gray-900);
+  color: var(--ods-color-white);
+  font: var(--ods-font-form-help);
 }
 </style>
