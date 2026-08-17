@@ -157,8 +157,24 @@ class SchedulerTimezoneKstTest(unittest.TestCase):
                 if jid == "noti_market_16":
                     self.assertEqual(kst_dt.hour, 16)
                     self.assertEqual(utc_dt.hour, 7)  # KST 16 = UTC 07
+                if jid == "prefetch_market_settlement":
+                    self.assertEqual(kst_dt.hour, 18)
+                    self.assertEqual(kst_dt.minute, PREFETCH_MARKET_MINUTE)
+                    self.assertEqual(PREFETCH_MARKET_MINUTE, 30)
+                    # KST 18:30 = UTC 09:30
+                    self.assertEqual(utc_dt.hour, 9)
+                    self.assertEqual(utc_dt.minute, 30)
         finally:
             sched.shutdown(wait=False)
+
+    def test_os_tz_utc_env_and_ops_tz_name(self) -> None:
+        """OS TZ=UTC 고정 · trigger timezone SSOT = Asia/Seoul."""
+        self.assertEqual(os.environ.get("TZ"), "UTC")
+        from app.core.ops_biz_date import OPS_TZ_NAME, now_ops
+
+        self.assertEqual(OPS_TZ_NAME, "Asia/Seoul")
+        now = now_ops()
+        self.assertEqual(str(now.tzinfo), "Asia/Seoul")
 
     def test_scheduler_module_registers_tz_on_all_jobs(self) -> None:
         """start_notification_scheduler 실제 등록 job의 trigger timezone."""
