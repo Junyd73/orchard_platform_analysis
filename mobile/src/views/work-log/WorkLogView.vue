@@ -29,6 +29,7 @@ import {
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
 import { todayBizParts } from '@/shared/bizDate'
+import { planBizDayRollover } from '@/views/work-log/workLogBizDayRollover'
 import { useAppStore } from '@/composables/stores/app'
 import type {
   WorkLogDayCell,
@@ -67,8 +68,8 @@ const todayCellCache = ref<WorkLogDayCell | null>(null)
 const todayMaster = ref<WorkLogMasterDto | null>(null)
 const filters = ref(defaultWorkFilters())
 const selectedDt = ref(todayIso())
-
-const today = computed(() => todayIso())
+/** 업무 '오늘' — computed가 아닌 ref (자정 rollover 시 명시 갱신) */
+const today = ref(todayIso())
 
 const todayCell = computed(() => days.value[today.value] || todayCellCache.value)
 const todayWorkCount = computed(() => Number(todayCell.value?.work_count || 0))
@@ -185,8 +186,7 @@ function goPrevYear() {
 
 function goNextYear() {
   if (!canGoNextYear.value) return
-  const cy = new Date().getFullYear()
-  const cm = new Date().getMonth() + 1
+  const { year: cy, month: cm } = todayBizParts()
   year.value += 1
   if (year.value === cy && month.value > cm) {
     month.value = cm
@@ -287,17 +287,19 @@ onMounted(async () => {
 
 const mainTabPanelIndex = inject<Ref<number> | null>('mainTabPanelIndex', null)
 const mainTabActiveIndex = inject<Ref<number> | null>('mainTabActiveIndex', null)
-let lastWorkLogToday = todayIso()
+let lastWorkLogToday = today.value
 
 async function refreshIfBizDayRolled() {
   const t = todayIso()
-  if (t === lastWorkLogToday) return
-  lastWorkLogToday = t
-  todayCellCache.value = null
-  selectedDt.value = t
   const parts = todayBizParts()
-  year.value = parts.year
-  month.value = parts.month
+  const plan = planBizDayRollover(lastWorkLogToday, t, parts)
+  if (!plan) return
+  lastWorkLogToday = plan.today
+  today.value = plan.today
+  selectedDt.value = plan.selectedDt
+  year.value = plan.year
+  month.value = plan.month
+  todayCellCache.value = null
   await Promise.all([loadMonth(), loadTodayWeather(), ensureTodayCellCache()])
 }
 
