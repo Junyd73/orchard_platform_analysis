@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from datetime import date
+
+from app.core.ops_biz_date import today_ops
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +94,7 @@ class WeatherService:
     ) -> WeatherDetailResponse:
         farm = self._ensure_farm(farm_cd)
         lat, lon, nx, ny, location = self._load_farm_geo(farm)
-        dt = _s(target_date)[:10] or date.today().isoformat()
+        dt = _s(target_date)[:10] or today_ops().isoformat()
 
         ensure_repo_root_on_path()
         from core.weather_manager import WeatherManager  # noqa: WPS433

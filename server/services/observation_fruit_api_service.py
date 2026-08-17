@@ -7,6 +7,7 @@ import re
 import sys
 from pathlib import Path
 
+from app.core.ops_biz_date import now_ops
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.core.observation_constants import OBS_TARGET_FRUIT_CD
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
@@ -265,7 +266,7 @@ class ObservationFruitApiService:
 
         from datetime import datetime
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = now_ops().strftime("%Y-%m-%d %H:%M:%S")
         with get_sqlite_write_connection(self._db_path) as conn:
             cur = conn.execute(
                 """

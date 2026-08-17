@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.core.config import Settings, get_settings
+from app.core.ops_biz_date import today_ops
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.services._core_path import ensure_repo_root_on_path
@@ -668,7 +669,7 @@ class GoogleCalendarService:
         work_mid_cd = _s(body.get("work_mid_cd")) or _DEFAULT_IMPORT_MID
         work_loc_id = _s(body.get("work_loc_id")) or None
         # 예정 테이블 폐기: 항상 실적(work)로 저장. 미래일은 준비중.
-        if work_dt > date.today().isoformat():
+        if work_dt > today_ops().isoformat():
             status_cd = STATUS_PREPARING_CD
         else:
             status_cd = _s(body.get("status_cd")) or STATUS_PREPARING_CD

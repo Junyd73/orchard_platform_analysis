@@ -42,7 +42,7 @@ def _freeze_ops(frozen_utc: datetime):
                 return frozen_utc.astimezone(tz)
             return frozen_utc.replace(tzinfo=None)
 
-    return patch("app.core.ops_biz_date.datetime", _FrozenDateTime)
+    return patch("core.ops_biz_date.datetime", _FrozenDateTime)
 
 
 class OpsBizDateP0UtcTest(unittest.TestCase):
@@ -187,14 +187,23 @@ class OpsBizDateP0UtcTest(unittest.TestCase):
             stamp = _now_local()
         self.assertTrue(stamp.startswith("2026-08-17 00:30"), stamp)
 
-    def test_integrated_save_biz_today_iso_kst(self) -> None:
-        from core.work_log_integrated_save_service import _biz_today_iso
+    def test_integrated_save_uses_today_ops_ssot(self) -> None:
+        from core.ops_biz_date import today_ops as core_today
+        from app.core.ops_biz_date import today_ops as app_today
 
+        self.assertIs(core_today, app_today)
         with patch(
-            "app.core.ops_biz_date.today_ops",
+            "core.ops_biz_date.datetime",
+            wraps=__import__("datetime").datetime,
+        ):
+            pass
+        with patch(
+            "core.work_log_integrated_save_service.today_ops",
             return_value=date(2026, 8, 17),
         ):
-            self.assertEqual(_biz_today_iso(), "2026-08-17")
+            from core.work_log_integrated_save_service import today_ops as wl_today
+
+            self.assertEqual(wl_today().isoformat(), "2026-08-17")
 
 
 if __name__ == "__main__":

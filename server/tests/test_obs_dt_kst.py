@@ -25,7 +25,7 @@ _UTC_BOUNDARY = datetime(2026, 8, 16, 23, 30, tzinfo=timezone.utc)
 
 
 def test_today_ops_kst_when_utc_is_previous_calendar_day() -> None:
-    with patch("app.core.ops_biz_date.datetime") as mock_dt:
+    with patch("core.ops_biz_date.datetime") as mock_dt:
         mock_dt.now.side_effect = lambda tz=None: (
             _UTC_BOUNDARY.astimezone(tz) if tz is not None else _UTC_BOUNDARY
         )

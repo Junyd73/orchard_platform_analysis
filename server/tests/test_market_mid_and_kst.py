@@ -359,7 +359,7 @@ class NotificationCreatedAtKstTest(unittest.TestCase):
                     return frozen.replace(tzinfo=None)
                 return frozen.astimezone(tz)
 
-        with patch("app.core.ops_biz_date.datetime", _FrozenDateTime):
+        with patch("core.ops_biz_date.datetime", _FrozenDateTime):
             from app.core.ops_biz_date import now_ops
 
             self.assertEqual(now_ops().strftime("%Y-%m-%d %H:%M"), "2026-08-17 06:30")
@@ -398,7 +398,7 @@ class NotificationCreatedAtKstTest(unittest.TestCase):
                     return frozen.replace(tzinfo=None)
                 return frozen.astimezone(tz)
 
-        with patch("app.core.ops_biz_date.datetime", _FrozenDateTime):
+        with patch("core.ops_biz_date.datetime", _FrozenDateTime):
             self.assertEqual(_resolve_market_slot(None), "09")
 
         # UTC 08:00 = KST 17:00 → slot 16
@@ -411,7 +411,7 @@ class NotificationCreatedAtKstTest(unittest.TestCase):
                     return frozen2.replace(tzinfo=None)
                 return frozen2.astimezone(tz)
 
-        with patch("app.core.ops_biz_date.datetime", _Frozen2):
+        with patch("core.ops_biz_date.datetime", _Frozen2):
             self.assertEqual(_resolve_market_slot(None), "16")
 
 

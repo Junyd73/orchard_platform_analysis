@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime
+from core.ops_biz_date import now_ops, today_ops
 import sqlite3
 from typing import Any, Protocol
 
@@ -51,11 +52,11 @@ _FLAG_YN_KEYS = (
 
 
 def _now_str() -> str:
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_ops().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _today_ymd() -> str:
-    return datetime.date.today().strftime("%Y-%m-%d")
+    return today_ops().isoformat()
 
 
 def _row_dict(row) -> dict:

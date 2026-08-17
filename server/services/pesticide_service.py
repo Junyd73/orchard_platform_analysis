@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.core.ops_biz_date import today_ops
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection
 from app.schemas.pesticide import (
@@ -238,7 +239,7 @@ class PesticideService(PesticideOpsMixin):
         farm = self._ensure_farm(farm_cd)
         span = max(1, min(int(days), 90))
         day_cap = max(1, min(int(max_days), 30))
-        date_from = (date.today() - timedelta(days=span - 1)).isoformat()
+        date_from = (today_ops() - timedelta(days=span - 1)).isoformat()
         last_dt = self._fetch_last_spray_dt(farm)
         sql = f"""
             SELECT

@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
+from app.core.ops_biz_date import now_ops, today_ops
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.schemas.smart_spray import (
     OutbreakParamDeleteRequest,
@@ -49,7 +50,7 @@ def _s(value: Any) -> str:
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_ops().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _card_to_dict(card: SmartSprayBriefingCard) -> dict[str, Any]:
@@ -140,7 +141,7 @@ class SmartSprayService:
             except ValueError as exc:
                 raise BusinessRuleError(str(exc)) from exc
             if body.as_farm_default:
-                self._mark_snapshot_dirty(bridge, farm, date.today().isoformat())
+                self._mark_snapshot_dirty(bridge, farm, today_ops().isoformat())
         return OutbreakParamMutationResponse(
             item=OutbreakParamItem(**item),
             message="저장되었습니다.",
@@ -172,7 +173,7 @@ class SmartSprayService:
             except ValueError as exc:
                 raise BusinessRuleError(str(exc)) from exc
             if body.as_farm_default:
-                self._mark_snapshot_dirty(bridge, farm, date.today().isoformat())
+                self._mark_snapshot_dirty(bridge, farm, today_ops().isoformat())
         return OutbreakParamMutationResponse(message="삭제되었습니다.")
 
     def stock_count_for_pest(
@@ -335,7 +336,7 @@ class SmartSprayService:
             )
             top = [r for r in top if int(r.get("score") or 0) > 0]
         cards: list[SmartSprayBriefingCard] = []
-        as_of = date.fromisoformat(work_dt) if len(work_dt) >= 10 else date.today()
+        as_of = date.fromisoformat(work_dt) if len(work_dt) >= 10 else today_ops()
         for row in top:
             pest = _s(row.get("pest_nm"))
             if not pest:
@@ -447,7 +448,7 @@ class SmartSprayService:
             wth = mgr.get_weather_summary(farm) or {}
         except Exception:
             wth = {}
-        month = int(work_dt[5:7]) if len(work_dt) >= 7 else int(date.today().month)
+        month = int(work_dt[5:7]) if len(work_dt) >= 7 else int(today_ops().month)
         ctx: dict[str, Any] = {
             **wth,
             "farm_cd": farm,
@@ -622,7 +623,7 @@ class SmartSprayService:
     ) -> tuple[list[SmartSprayBriefingCard], bool, bool]:
         patched_obs = False
         patched_stock = False
-        as_of = date.fromisoformat(work_dt) if len(work_dt) >= 10 else date.today()
+        as_of = date.fromisoformat(work_dt) if len(work_dt) >= 10 else today_ops()
         out: list[SmartSprayBriefingCard] = []
         for card in cards:
             pest = card.pest_nm
@@ -677,7 +678,7 @@ class SmartSprayService:
         user_id: str | None,
     ) -> SmartSprayBriefingResponse:
         farm = self._ensure_farm(farm_cd)
-        today = date.today().isoformat()
+        today = today_ops().isoformat()
         source = "snapshot"
         patched = SmartSprayBriefingPatched()
 

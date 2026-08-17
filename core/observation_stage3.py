@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime
+from core.ops_biz_date import now_ops, today_ops
 import json
 import sqlite3
 from typing import Any
@@ -29,7 +30,7 @@ PROMPT_VERSION = "obs_ai_v1"
 
 
 def _now_str() -> str:
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_ops().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _row_dict(row) -> dict:
@@ -261,7 +262,7 @@ def _ensure_stage3_ai_status_codes(db: Any) -> None:
 
 def generate_analysis_id(db: Any, farm_cd: str) -> str:
     farm = (farm_cd or "").strip()
-    digits = datetime.date.today().strftime("%Y%m%d")
+    digits = today_ops().strftime("%Y%m%d")
     prefix = f"AIA{digits}-"
     rows = db.execute_query(
         """
@@ -282,7 +283,7 @@ def generate_analysis_id(db: Any, farm_cd: str) -> str:
 
 def generate_snapshot_id(db: Any, farm_cd: str) -> str:
     farm = (farm_cd or "").strip()
-    digits = datetime.date.today().strftime("%Y%m%d")
+    digits = today_ops().strftime("%Y%m%d")
     prefix = f"PSS{digits}-"
     rows = db.execute_query(
         """
@@ -846,7 +847,7 @@ def replace_pesticide_snapshots(
             """,
             (farm, oid, crop, disease),
         )
-        digits = datetime.date.today().strftime("%Y%m%d")
+        digits = today_ops().strftime("%Y%m%d")
         prefix = f"PSS{digits}-"
         cur.execute(
             """

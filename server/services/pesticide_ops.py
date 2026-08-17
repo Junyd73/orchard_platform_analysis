@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from app.core.ops_biz_date import today_ops
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.schemas.pesticide_ext import (
@@ -149,7 +150,7 @@ class PesticideOpsMixin:
         year: int | None = None,
     ) -> PesticideInfoDetailDto:
         farm = self._ensure_farm(farm_cd)
-        y = int(year) if year else date.today().year
+        y = int(year) if year else today_ops().year
         with get_sqlite_connection(self._db_path) as conn:
             mgr = self._mgr(conn)
             row = mgr.get_pesticide_info_detail(int(info_id), farm, y)

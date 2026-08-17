@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime
+from core.ops_biz_date import now_ops, today_ops
 from typing import Any
 
 
@@ -14,7 +15,7 @@ _YN_Y = "Y"
 
 
 def _now_str() -> str:
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_ops().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _row_dict(row) -> dict:
@@ -28,7 +29,7 @@ def _row_dict(row) -> dict:
 def generate_photo_id(db, farm_cd: str) -> str:
     """PHO{YYYYMMDD}-{seq:03d}"""
     farm = (farm_cd or "").strip()
-    digits = datetime.date.today().strftime("%Y%m%d")
+    digits = today_ops().strftime("%Y%m%d")
     prefix = f"PHO{digits}-"
     rows = db.execute_query(
         """
@@ -50,7 +51,7 @@ def generate_photo_id(db, farm_cd: str) -> str:
 
 def _generate_photo_id_with_cur(cur, farm_cd: str) -> str:
     farm = (farm_cd or "").strip()
-    digits = datetime.date.today().strftime("%Y%m%d")
+    digits = today_ops().strftime("%Y%m%d")
     prefix = f"PHO{digits}-"
     cur.execute(
         """

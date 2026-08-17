@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
+from core.ops_biz_date import today_ops
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -342,7 +343,7 @@ def build_observation_ai_context(
         obs = {}
 
     obs_dt_raw = _as_str(obs.get("obs_dt"))
-    obs_day = _parse_ymd(obs_dt_raw) or date.today()
+    obs_day = _parse_ymd(obs_dt_raw) or today_ops()
     out["obs_dt"] = obs_day.isoformat()
     crop = _resolve_crop_hint(db, farm, crop_hint)
     out["crop_hint"] = crop

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.core.ops_biz_date import today_ops
+
 from fastapi import APIRouter, Depends, Header, Query
 
 from app.api.dependencies import get_pesticide_service
@@ -76,7 +78,7 @@ def get_yearly_stats(
     year: int | None = Query(None),
     service: PesticideService = Depends(get_pesticide_service),
 ) -> PesticideYearlyStatsResponse:
-    return service.get_yearly_stats(farm_cd, year or date.today().year)
+    return service.get_yearly_stats(farm_cd, year or today_ops().year)
 
 
 @router.get("/info", response_model=PesticideInfoListResponse)
@@ -97,7 +99,7 @@ def get_pesticide_info(
     service: PesticideService = Depends(get_pesticide_service),
 ) -> PesticideInfoDetailDto:
     return service.get_info_detail(
-        farm_cd, info_id, year=year or date.today().year
+        farm_cd, info_id, year=year or today_ops().year
     )
 
 

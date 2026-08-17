@@ -8,6 +8,7 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
+from app.core.ops_biz_date import today_ops
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.schemas.work_schedule import (
@@ -333,7 +334,7 @@ class WorkScheduleService:
         farm = self._ensure_farm(farm_cd)
         sid = _s(sched_id)
         uid = _s(user_id) or "MOBILE"
-        today = date.today().isoformat()
+        today = today_ops().isoformat()
 
         with get_sqlite_write_connection(self._db_path) as conn:
             row = conn.execute(
