@@ -73,8 +73,8 @@ POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, lines(규격
 `allocated_qty=0`. `order_dt` ISO.  
 **금지:** `t_sales_*`, `reserved_qty` Hold, `t_cash_ledger`, `t_ledger`.
 
-PUT: `stock_status=Y` → 409.  
-cancel: 출고 전만. 배정분 CANCEL_HOLD + allocated 0 + 주문상태 취소. 판매 있으면 409.
+PUT: `stock_status=Y` → 409. 부분출고(`shipped_qty>0`) 후 주문 헤더/줄 수정은 1차 거부 권고.  
+cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t_order_alloc` 행 단위** (DEC-018). 이미 출고된 allocation은 단순 취소 금지.
 
 ---
 
@@ -85,19 +85,21 @@ cancel: 출고 전만. 배정분 CANCEL_HOLD + allocated 0 + 주문상태 취소
 | POST | `/farms/{farm_cd}/orders/{order_no}/allocations` |
 | POST | `/farms/{farm_cd}/orders/{order_no}/allocations/release` |
 
-배정 요청: `{ "order_detail_id", "qty": 30 }` (증분).
+배정 요청: `{ "order_detail_id", "qty": 30 }` (증분). 내부적으로 FIFO(`storage_dt ASC`) stock row에 분해 (DEC-018).
 
 **동일 트랜잭션:**
 
 1. 줄 잠금/재조회: `allocated_qty + qty <= 주문 qty`
-2. **가용재고 재조회** (`in-out-reserved`) — 요청 > 가용이면 rollback 400/409
-3. `allocated_qty +=`
-4. `reserved_qty +=` (Hold 키 = 생산과 동일 자연키, item/weight/wh 포함)
-5. `t_stock_log` HOLD
+2. 가용재고를 TX 안에서 재조회 (`in-out-reserved`) — 초과 시 rollback
+3. FIFO로 stock row 선택
+4. `t_order_alloc` 증가/생성
+5. `t_order_detail.allocated_qty +=` (누적)
+6. 해당 stock row `reserved_qty +=`
+7. `t_stock_log` HOLD (이력. 가능한 범위에서 줄·자연키)
 
-배정해제: `allocated_qty −`, `reserved_qty −`, log CANCEL_HOLD. 미출고분 초과 해제 금지. 동일 TX.
+배정해제: `release_qty <= allocated_qty - shipped_qty`. 기본 순서 **LIFO**(최근 잡은 행부터). `t_order_alloc` 감소, `allocated_qty −`, `reserved_qty −`, CANCEL_HOLD. 동일 TX.
 
-단계 3 전 DDL 없으면 이 API를 **구현하지 않음**.
+단계 3 전 `allocated_qty` DDL 및 `t_order_alloc`이 없으면 이 API를 **구현하지 않음**. 이번 문서 작업에서 CREATE/ALTER 금지.
 
 동시성: SQLite 트랜잭션 안에서 재검증 (위험 9·10).
 
@@ -121,22 +123,27 @@ cancel: 출고 전만. 배정분 CANCEL_HOLD + allocated 0 + 주문상태 취소
 |--------|------|
 | POST | `/farms/{farm_cd}/orders/{order_no}/ship` |
 
-요청: 줄별 `ship_qty` 또는 “미출고 배정 전량”.
+요청: 줄별 `ship_qty` 또는 “미출고 배정 전량”.  
+`ship_qty <= allocated_qty - shipped_qty`.
 
 **한 트랜잭션 (실패 시 전부 rollback):**
 
-1. 배정·미출고분 검증 (`ship_qty <= allocated - shipped`)
-2. `reserved_qty −`
-3. `out_qty +`
-4. stock log OUT
-5. `stock_status` (전량이면 Y), 주문상태(DEC-011 후)
-6. `t_sales_master` (`ORDER`+`CONFIRMED`, `order_no`, `sales_dt` ISO)
-7. `t_sales_detail` (`order_detail_id`)
-8. 주문 `sales_no` 연결
-9. `t_sales_delivery`
-10. `pre_pay_amt>0`이면 같은 TX에서 수금 바구니 + `sync_ledger_by_basket` (DEC-009). 선수금 계정 아님.
+1. 출고 가능한 미출고 `t_order_alloc` 조회
+2. FIFO(`storage_dt ASC`) 순서대로 `ship_qty` 배분
+3. 각 `t_order_alloc.shipped_qty` 증가
+4. 각 stock row `reserved_qty −`
+5. 각 stock row `out_qty +`
+6. stock log OUT
+7. **항상 새** `t_sales_master` (`order_no` 연결, `sales_source=ORDER`, `sales_status=CONFIRMED`, `sales_dt`=출고 업무일). 기존 CONFIRMED 판매·전표 수정 금지
+8. `t_sales_detail` (`order_detail_id` 필수, 이번 `ship_qty`만)
+9. `t_order_master.sales_no`는 비어 있을 때만 최초 판매번호 기록 (legacy/reference). 전체 조회는 `t_sales_master.order_no`
+10. `t_sales_delivery` — 그 출고분만큼만. 주문 배송계획 전체 복사 금지
+11. 선입금 전표는 **첫 출고**에만 (DEC-009)
+12. 전 줄 `shipped_qty == qty`이면 `stock_status='Y'`
 
-금지 결과: 재고만 감소 / 판매만 생성 / 주문 완료·판매 없음.
+금지 결과: 재고만 감소 / 판매만 생성 / 전량 완료인데 판매 없음 / 기존 판매 수량 증가.
+
+부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017).
 
 ---
 
@@ -188,12 +195,12 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 | 유스케이스 | 한 트랜잭션 |
 |------------|-------------|
 | 주문 접수 | order 3테이블. 재고·판매·전표 없음 |
-| 배정 | allocated + reserved + HOLD log + 가용 재검증 |
-| 배정해제 | allocated − + reserved − + CANCEL_HOLD |
-| 소매 출고 | reserved/out/log + 판매 생성 + 연결 + 배송 + (선입금 시 전표) |
+| 배정 | 줄 allocated + `t_order_alloc` + 지정 stock row reserved + HOLD + 그 row 가용 재검증 |
+| 배정해제 | release ≤ reserved_unshipped. LIFO alloc 감소 + reserved − + allocated − + CANCEL_HOLD |
+| 소매 출고 (1회) | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + `order_no`/`order_detail_id` + 출고분 배송 + (첫 출고 선입금 전표) |
 | 가락 확정 | status + out/log + 선택 전표 |
 | 수금만 | cash + ledger + totals |
-| 주문 취소(출고 전) | 상태 + 잔여 Hold 해제 |
+| 주문 취소(출고 전) | 상태 + 모든 미출고 `t_order_alloc` 행별 reserved 복구 |
 
 ---
 

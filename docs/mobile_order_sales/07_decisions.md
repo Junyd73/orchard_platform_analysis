@@ -18,6 +18,8 @@
 | DEC-C | 출고확정(소매)·가락 확정을 단일 업무 트랜잭션 | DEC-010, DEC-014 |
 | DEC-D | 주문 선입금은 금액만. 전표는 판매확정 시 | DEC-009 |
 | DEC-E | 신규 `order_dt`/`sales_dt` = `YYYY-MM-DD` | DEC-012 |
+| DEC-017 | 출고 1회 = 판매 1건. 주문 1 : 판매 N | DEC-017 |
+| DEC-018 | 재고행 allocation 전용 테이블. FIFO 배정/출고, LIFO 해제 | DEC-018 |
 
 ---
 
@@ -56,7 +58,7 @@
 | | |
 |--|--|
 | 상태 | **APPROVED** |
-| 결정 | `qty` = 주문수량, `allocated_qty` = 배정수량, 미배정 = `qty - allocated_qty` (계산값, 컬럼 없음). |
+| 결정 | `qty` = 주문수량, `allocated_qty` = **누적 배정수량**(출고 후에도 유지). `unallocated_qty = qty - allocated_qty`, `shipped_qty`·`reserved_unshipped_qty`는 계산값(컬럼 없음). |
 | 이유 | 주문 100 / 재고 30 → 배정 30, 이후 생산분 추가 배정. |
 | 영향 | 단계 3. DEC-008 DDL은 단계 3 착수 시 migration. |
 | 승인 | 2026-08-17 대표 |
@@ -126,7 +128,7 @@
 | | |
 |--|--|
 | 상태 | **APPROVED** (설계). **migration은 미실시.** |
-| 결정 | 컬럼 추가를 권장안으로 확정. 타입은 `qty`와 동일 계열(코드 `float` / 문서 DDL `REAL`). `NOT NULL DEFAULT 0`. 미배정 컬럼은 만들지 않음. |
+| 결정 | 컬럼 추가를 권장안으로 확정. 의미는 **누적 배정수량**(현재 Hold 잔량이 아님). 타입은 `qty`와 동일 계열. `NOT NULL DEFAULT 0`. `unallocated_qty`/`shipped_qty` 컬럼은 만들지 않음. |
 | 이유 | 줄 단위 부분배정 영속에 기존 컬럼이 없다. |
 | 영향 | 단계 3 DDL. 기존 HOLD 데이터와 초기값 충돌 가능 → [03](./03_data_contract.md) migration 계획·운영 점검. |
 | 승인 | 2026-08-17 대표 (DEC-A) |
@@ -214,19 +216,19 @@
 | 상태 | **APPROVED** |
 | 결정 | 배정수량 검증 → reserved− → out+ → stock log → 이행/주문상태 → `t_sales_master/detail` → `order_no`/`order_detail_id` 연결 → 배송 연결. 한 단계라도 실패하면 rollback. 금지: 재고만 감소, 판매만 생성, 주문 완료인데 판매 없음. |
 | 이유 | 부분 성공 시 장부·재고가 복구 불능에 가깝다. |
-| 영향 | 단계 4. 출고 TX에서 판매는 `CONFIRMED`. `pre_pay_amt>0`이면 **같은 TX**에서 판매 수금 바구니 + `sync_ledger_by_basket('SALE', …)`. 선수금 계정 설계는 하지 않음 (DEC-009). |
+| 영향 | 단계 4. 출고 TX에서 판매는 `CONFIRMED`. `pre_pay_amt>0`이면 **같은 TX**에서 판매 수금 바구니 + `sync_ledger_by_basket('SALE', …)`. 선수금 계정 설계는 하지 않음 (DEC-009). **출고 1회 = 판매 1건** (DEC-017). |
 | 승인 | 2026-08-17 대표 (DEC-C) |
 
 ---
 
 ## DEC-015
 
-**기존 주문의 `allocated_qty` 초기값.**
+**기존 HOLD → `allocated_qty` / `t_order_alloc` 백필.**
 
 | | |
 |--|--|
 | 상태 | **OPEN** |
-| 결정 | 무조건 0 금지. 운영 HOLD/`reserved_qty` 점검 후 migration 스크립트에서 백필 여부 결정. |
+| 결정 | 무조건 0 금지. 운영 HOLD/`reserved_qty` 점검 후 migration에서 `allocated_qty` 및 `t_order_alloc` 백필 여부 결정. 현재 로그로는 행 복원이 어려울 수 있음. |
 | 이유 | 이미 전량 Hold된 주문에 0을 넣으면 미배정으로 보이며 이중 Hold 가능. |
 | 영향 | 단계 3 직전 운영 점검 체크리스트. |
 
@@ -244,9 +246,48 @@
 
 ---
 
+## DEC-017
+
+**부분출고와 판매: 출고 1회 = 판매 1건 (주문 1 : 판매 N).**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 출고 이벤트마다 새 `sales_no`. 기존 CONFIRMED 판매·전표를 후속 출고로 수정하지 않음. SSOT = `t_sales_master.order_no` + `t_sales_detail.order_detail_id`. `t_order_master.sales_no`는 **legacy/reference**(최초 출고 번호 또는 대표 참조). 주문 전체 판매 조회는 반드시 `t_sales_master.order_no` 기준. 새 컬럼 없음. |
+| 이유 | 실제 출고일과 판매일·재고 출고·배송·수금·회계를 일치시킨다. |
+| 현재 PC | 부분출고 없음. 주문 저장 시 판매 1건. |
+| 영향 | 단계 4. DEC-014와 함께: 출고 1회 TX 안에 판매 1건 생성. |
+| 승인 | 2026-08-17 대표 |
+
+판매마스터: `order_no` 저장, `sales_source=ORDER`, `sales_status=CONFIRMED`, `sales_dt` = 실제 출고 업무일 `YYYY-MM-DD`.  
+판매상세: `order_detail_id` 필수, 해당 출고분 `ship_qty`만 저장.  
+배송: 그 출고분에 해당하는 판매배송만 연결. 주문 배송계획 전체를 매번 복사하지 않음. 한 계획이 여러 출고로 나뉘면 실제 출고수량만큼 판매배송행 생성. 상세 알고리즘은 단계 4 전 `t_order_delivery` 기준으로 재검토하되 1:N 원칙은 변경하지 않음.
+
+전량 출고: 모든 주문상세 `shipped_qty == qty` → `stock_status='Y'`, 이행상태=출고완료. 주문상태 완료 매핑은 DEC-011 `ST01` 확인 후.
+
+---
+
+## DEC-018
+
+**재고행 allocation은 전용 `t_order_alloc`(가칭). `t_stock_log`는 이력이며 현재상태 SSOT가 아니다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (설계). **CREATE TABLE 금지.** 실제 테이블명은 구현 시 네이밍 대조. |
+| 결정 | 줄↔stock 자연키 배정은 `t_order_alloc`. 자동배정 **FIFO**(`storage_dt ASC`). 배정해제 **LIFO**(최근 잡은 행부터). 출고 소비 **FIFO**. 로그에 allocation SSOT용 컬럼을 억지로 넣지 않음. 향후 HOLD/CANCEL_HOLD/OUT에는 가능한 범위에서 `order_no`/`order_detail_id`/`sales_no`/stock 자연키를 이력으로 남길 수 있음. 현재상태 복원은 `t_order_alloc`, 감사 이력은 `t_stock_log`. |
+| 근거 | 현재 로그에 `wh_cd`/`storage_dt`/`order_detail_id` 없음 → 행 복원 불가. |
+| 영향 | 단계 3 DDL. DEC-008 줄 총량과 병행. |
+| 승인 | 2026-08-17 대표 |
+
+**하위 운영규칙:** 배정해제 기본 순서는 FIFO의 역순인 LIFO. 먼저 잡은 오래된 재고를 유지해 FIFO 출고 원칙을 깨지 않기 위함. 동일 `storage_dt` 정렬은 기존 stock 자연키/row 규칙을 쓰며, 임의 규칙은 이번 단계에서 만들지 않음. 1차 모바일은 자동 FIFO. 향후 수동 재고행 선택은 열어 둠.
+
+최소 추적: `order_no`, `order_detail_id`, stock 자연키(`farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt`), `allocated_qty`, `shipped_qty`, 생성/수정 감사정보. PK/UNIQUE는 구현 전 schema 대조.
+
+---
+
 ## 상태 요약
 
 | ID | 상태 |
 |----|------|
-| DEC-001 ~ 010, 012 ~ 014 | APPROVED |
-| DEC-011, 015, 016 | OPEN |
+| DEC-001 ~ 010, 012 ~ 014, **017, 018** | APPROVED |
+| DEC-011, 015, 016 | OPEN (단계 1을 막지 않음. 011→단계2 전, 015→단계3 전, 016→단계6 전) |

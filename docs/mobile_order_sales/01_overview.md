@@ -16,11 +16,11 @@ PC에만 있는 과일 **주문 · 재고배정 · 출고 · 판매 · 배송 ·
 |------|-----|------|
 | 주문 저장과 판매 생성 분리 | DEC-005 | APPROVED |
 | 선주문 허용 (재고 0이어도 등록) | DEC-002 | APPROVED |
-| 부분배정 (`qty` ≠ `allocated_qty`) | DEC-003, DEC-008 | APPROVED |
-| 소매 출고확정이 주문→판매 경계 (단일 TX) | DEC-014 | APPROVED |
+| 부분배정 (`qty` ≠ 누적 `allocated_qty`) | DEC-003, DEC-008 | APPROVED |
+| 소매 출고확정이 주문→판매 경계 (단일 TX). 출고 1회 = 판매 1건 | DEC-014, 017 | APPROVED |
 | PC / core / FastAPI / mobile 동일 업무로직 | DEC-007 | APPROVED |
 | 신규 `order_dt`/`sales_dt` = `YYYY-MM-DD` | DEC-012 | APPROVED |
-| DB 변경 최소화. 유일한 1차 DDL 후보 = `allocated_qty` | DEC-008 | 설계 APPROVED, migration 미실시 |
+| DB 변경 최소화. 1차 DDL = `allocated_qty` + 가칭 `t_order_alloc` | DEC-008, 018 | 둘 다 설계 APPROVED. 이번엔 CREATE/ALTER 금지 |
 | 주문상태 ≠ 이행상태 | DEC-013 | APPROVED (ST01 실코드는 OPEN) |
 | 주문 선입금은 금액만. 전표는 판매 기준 | DEC-009 | APPROVED |
 | 규격 = 품종×중량×등급×크기 | DEC-004 | APPROVED |
@@ -65,13 +65,14 @@ PC에만 있는 과일 **주문 · 재고배정 · 출고 · 판매 · 배송 ·
 고객(m_customer)
     ↓
 주문(t_order_*)     ←── 선주문: 재고 없어도 접수, allocated_qty=0
-    ↓ 재고배정 (부분 허용, qty와 분리)
+    ↓ 재고배정 (부분 허용, FIFO, t_order_alloc)
 상품재고(t_stock_master FR010100)  ← 선별생산 ← 원물(FR010300, 신고)
-    ↓ 출고확정 TX (reserved → out + 판매 생성)
+    ↓ 출고확정 TX (reserved → out + 새 판매 1건, 주문 1:N)
 판매(t_sales_*)     ←── 경매 DRAFT(AUCTION_RT) 도 확정 TX에서 합류
+    │   SSOT: t_sales_master.order_no + t_sales_detail.order_detail_id
     ↓ CONFIRMED
 수금(t_cash_ledger) + 전표(t_ledger)   ←── 주문 시점 전표 없음
-배송(t_order_delivery / t_sales_delivery)
+배송(t_order_delivery / t_sales_delivery)  ←── 출고분만큼만 판매배송
 ```
 
 **현재 PC:** 주문 저장 시 판매 행을 **즉시 INSERT** (`save_entire_order`).  
@@ -92,10 +93,14 @@ PC에만 있는 과일 **주문 · 재고배정 · 출고 · 판매 · 배송 ·
 
 ## 8. 신규 구조 최소화
 
-- 새 테이블 없음.
+수량 용어:
+
+- `allocated_qty` = **누적 배정수량** (출고 후 유지)
+- `shipped_qty` / `reserved_unshipped_qty` / `unallocated_qty` = 계산값, 컬럼 없음
+
 - 새 상태코드 임의 추가 없음.
-- 1차 DDL 후보는 **`t_order_detail.allocated_qty`만** (DEC-008). 실제 ALTER는 단계 3.
-- 이행상태·미배정수량은 **컬럼을 만들지 않고 계산**.
+- 1차 DDL 후보: **`t_order_detail.allocated_qty`** (DEC-008) + 가칭 **`t_order_alloc`** (DEC-018, 현재상태 SSOT). 실제 ALTER/CREATE는 단계 3. 이번 문서 작업에서 DDL 금지.
+- `t_stock_log`는 HOLD/CANCEL_HOLD/OUT **이력**. allocation 현재상태 SSOT로 쓰지 않음.
 
 ## 9. 단계별 개발계획
 
@@ -106,8 +111,8 @@ PC에만 있는 과일 **주문 · 재고배정 · 출고 · 판매 · 배송 ·
 | 0 | 설계 · **최종승인** | 본 문서 대표 승인 |
 | 1 | 하단탭·라우트 셸 | 단계 0 최종승인 |
 | 2 | 주문 조회/등록 (판매 미생성) | 단계 1 승인. ST01은 OPEN이어도 접수는 `'10'` 유지 가능 |
-| 3 | 재고배정 | 단계 2 승인 + `allocated_qty` migration + 운영 HOLD 점검 |
-| 4 | 출고 → 판매 (단일 TX) | 단계 3 승인 |
+| 3 | 재고배정 | 단계 2 승인 + `allocated_qty`/`t_order_alloc` migration + 운영 HOLD 점검 (DEC-015) |
+| 4 | 출고 → 판매 (단일 TX, 1출고=1판매) | 단계 3 승인 |
 | 5 | 판매 목록/직접판매 | 단계 4 승인 |
 | 6 | 경매 확정 · 수금 · 회계 | 단계 5 승인 |
 | 7 | 회귀 · 운영 검증 | 단계 6 승인 |
@@ -116,12 +121,16 @@ PC에만 있는 과일 **주문 · 재고배정 · 출고 · 판매 · 배송 ·
 
 ## 10. 남은 승인·점검
 
-최종승인 전 문서만으로 닫히지 않는 것:
+DEC-017·018은 2026-08-17 승인 완료. 아래 3건은 **단계 1 착수를 막지 않는다.** 각 단계 진입 전에 해결한다.
 
-1. **단계 0 설계 최종승인** (본 수정본)
-2. DEC-011: 운영 `ST01` 실코드 — `운영 DB 확인 필요`
-3. DEC-015: 기존 주문 `allocated_qty` 백필 — migration 직전 점검
-4. DEC-016: 가락 확정 시 배송행 생성 여부
-5. 출고 후 판매취소/역분개 운영 정책 (1차 권고: 삭제 비활성)
+| ID | 내용 | 해결 시점 |
+|----|------|-----------|
+| DEC-011 | 운영 `ST01` 실코드 | 단계 2 전 |
+| DEC-015 | 기존 HOLD → allocated / `t_order_alloc` 백필 | 단계 3 migration 전 |
+| DEC-016 | 가락 확정 시 `t_sales_delivery` | 단계 6 전 |
 
-구현 착수 금지.
+문서에 모인 규칙: 선주문 · 부분배정 · 누적 allocated · 부분출고 · 주문 1:N 판매 · 재고행별 allocation · FIFO · 출고→판매 단일 TX · 날짜 ISO · 주문/판매 분리 · 공통 core · PC 최소 수정범위.
+
+출고 후 판매취소 정책은 기존대로 단계 6 OPEN.
+
+대표/ChatGPT가 analysis mirror에서 최종 확인하기 전, 문서 상태를 「최종승인 완료」로 바꾸지 않는다. 단계 1 착수 금지.

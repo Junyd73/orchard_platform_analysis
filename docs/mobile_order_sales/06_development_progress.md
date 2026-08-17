@@ -11,7 +11,7 @@
 0 설계 최종승인
  → 1 메뉴/라우트
  → 2 주문 조회/등록
- → 3 재고배정  (allocated_qty migration + 운영 HOLD 점검)
+ → 3 재고배정  (allocated_qty + t_order_alloc + 운영 HOLD 점검)
  → 4 출고→판매
  → 5 판매관리
  → 6 경매/수금/회계
@@ -23,8 +23,8 @@
 | 0. 설계 | 본 폴더 문서 · 규칙 합의 | **설계 수정 / 최종승인 대기** | — | — | — | — | 문서 리뷰 | **최종승인 대기** |
 | 1. 메뉴/라우트 | 하단 주문/판매 · 내정보 이동 | 예정 | 없음 | 없음 | 없음 | 셸 | 라우트 스모크 | 단계0 최종승인 후 |
 | 2. 주문 조회/등록 | 선주문 저장 (판매·전표 없음) | 예정 | 주문저장 분리 | OrderService | GET/POST orders | 목록·폼 | 재고0 저장 | 단계1 승인 후 |
-| 3. 재고배정 | 부분배정 · Hold | 예정 | Hold 키 · allocated | Allocation | allocations | 상세 배정 | 100/30/70 · 동시성 | 단계2 + DDL + 운영점검 |
-| 4. 출고→판매 | 단일 TX | 예정 | ship | OrderShip | POST ship | 출고 CTA | T-SHP-* | 단계3 승인 후 |
+| 3. 재고배정 | 부분배정 · Hold · `t_order_alloc` | 예정 | Hold 키 · allocated · alloc | Allocation | allocations | 상세 배정 | 100/30/70 · 동시성 | 단계2 + DDL + 운영점검 |
+| 4. 출고→판매 | 단일 TX · 출고 1회=판매 1건 | 예정 | ship | OrderShip | POST ship | 출고 CTA | T-SHP-* | 단계3 승인 후 |
 | 5. 판매관리 | 목록·직접판매·order_no | 예정 | 재저장 보존 | SalesService | GET/PUT sales | 판매 탭 | T-SAL-01 | 단계4 승인 후 |
 | 6. 경매/수금/회계 | confirm TX · payments | 예정 | 확정 버튼 | Confirm+Account | confirm/payments | DRAFT CTA | T-AUC/PAY | 단계5 승인 후 |
 | 7. 회귀/운영 | PC+모바일+관찰/일지/농약 | 예정 | 회귀 | — | health | 스모크 | T-REG-01 | 배포 승인 |
@@ -33,8 +33,11 @@
 
 - [x] 01–08 초안
 - [x] 대표 5항 반영 (allocated_qty, 상태분리, 출고 TX, 선입금, 날짜)
-- [ ] **단계 0 설계 최종승인**
-- [ ] ST01 운영 DB 확인 (DEC-011 OPEN)
+- [x] DEC-017 / DEC-018 설계 확정 (2026-08-17)
+- [ ] **단계 0 설계 최종승인** (대표·ChatGPT analysis mirror 확인 후. 임의로 「최종승인 완료」로 바꾸지 않음)
+- [ ] ST01 운영 DB 확인 (DEC-011 OPEN — 단계 2 전. 단계 1을 막지 않음)
+- [ ] 기존 HOLD 백필 (DEC-015 OPEN — 단계 3 전)
+- [ ] 가락 확정 시 `t_sales_delivery` (DEC-016 OPEN — 단계 6 전)
 - [ ] 구현 착수 허가 (최종승인 후 단계 1)
 
 ## 테스트 계획 (착수 후 · 지금 테스트 코드 추가 금지)
@@ -45,7 +48,8 @@
 | T-ORD-02 | 주문 100 / 가용 30 → 배정 30, 미배정 70 | 3 |
 | T-ORD-03 | 추가 생산 후 잔여 70 배정 | 3 |
 | T-ORD-04 | 동시 배정이 가용 합을 넘지 않음 | 3 |
-| T-SHP-01 | 출고 TX: reserved− out+ 판매 1건 연결 | 4 |
+| T-SHP-01 | 출고 TX: reserved− out+ **새 판매 1건** 연결 (`order_no`) | 4 |
+| T-SHP-04 | 같은 주문 2회 출고 → 판매 2건. 기존 CONFIRMED 수량 불변 | 4 |
 | T-SHP-02 | 미배정만 출고 409, 재고·판매 불변 | 4 |
 | T-SHP-03 | 출고 중 실패 시 전체 rollback | 4 |
 | T-SAL-01 | 판매 PUT 후 order_no 유지 | 5 |

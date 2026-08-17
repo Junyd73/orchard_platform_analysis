@@ -3,6 +3,20 @@
 > 상태: 단계 0 · 설계 수정 / 최종승인 대기.  
 > 범례: **현재** = 오늘 PC 코드 · **확정** = 대표 APPROVED · **OPEN** = 미확정.
 
+수량 용어(문서 전체 동일, DEC-003/008 정의 정리):
+
+| 이름 | 정의 | 저장 |
+|------|------|------|
+| `qty` | 주문상세 주문수량 | `t_order_detail.qty` |
+| `allocated_qty` | 해당 줄에 지금까지 확정된 **누적 배정수량**. 출고 후 0으로 내리지 않음 | `t_order_detail.allocated_qty` (설계, DDL 미실시) |
+| `shipped_qty` | 해당 `order_detail_id`로 생성된 모든 **CONFIRMED** 판매상세 수량 합계 | 계산. 컬럼 없음 |
+| `reserved_unshipped_qty` | 아직 재고 Hold 중인 배정분 | 계산. `allocated_qty - shipped_qty` |
+| `unallocated_qty` | 아직 배정하지 않은 주문분 | 계산. `qty - allocated_qty` |
+
+정합성: `0 <= shipped_qty <= allocated_qty <= qty`.  
+배정해제: `release_qty <= allocated_qty - shipped_qty`.  
+출고: `ship_qty <= reserved_unshipped_qty`. 출고 시 `allocated_qty`는 감소하지 않음. stock `reserved_qty -= ship_qty`, `out_qty += ship_qty`, `shipped_qty += ship_qty`(계산 결과).
+
 ---
 
 ## 1. 세 경로 (확정 운영)
@@ -74,57 +88,89 @@
 | 필드 | 값 |
 |------|----|
 | `qty` | 100 |
-| `allocated_qty` | 30 |
-| 미배정 (계산) | 70 |
+| `allocated_qty` (누적 배정) | 30 |
+| `unallocated_qty` | 70 |
+| `shipped_qty` | 0 |
+| `reserved_unshipped_qty` | 30 |
 | `t_stock_master.reserved_qty` | +30 |
 
-추가 포장 후 `allocated_qty`를 70·100까지 증가시킬 수 있다.  
-제약: `0 <= allocated_qty <= qty`. 증분 배정은 **트랜잭션 안에서** 가용재고를 재조회한 뒤만 허용 (초과예약 금지).
+추가 포장 후 `allocated_qty`를 70·100까지 **증가**시킬 수 있다.  
+제약: `0 <= allocated_qty <= qty`. 증분 배정은 **트랜잭션 안에서** 해당 stock row 가용재고를 재조회한 뒤만 허용.
 
-**현재:** 컬럼 없음. Hold = 주문수량 전체.
+**현재:** 컬럼 없음. Hold = 주문수량 전체. `StockMatrixPopup.get_stock_map`은 규격 GROUP BY라 `storage_dt`를 숨긴다.
 
 ---
 
 ## 4. 출고 조건
 
-출고하려는 수량은 **반드시 해당 줄의 미출고 배정수량 이하**.
-
 ```
-ship_qty <= allocated_qty - already_shipped_qty
-already_shipped_qty = SUM(t_sales_detail.qty WHERE order_detail_id = 줄)
+ship_qty <= allocated_qty - shipped_qty     -- reserved_unshipped_qty
+shipped_qty = SUM(t_sales_detail.qty WHERE order_detail_id = 줄
+                  AND 해당 판매 sales_status = CONFIRMED)
 ```
 
-미배정 수량만 있는 주문/줄은 출고 **거부** (409).
+미배정만 있는 줄은 출고 **거부** (409).  
+**현재 PC는 부분출고 API/버튼이 없다.** 주문 저장 시 전량 판매 생성.
 
 ---
 
-## 5. 출고확정 — 소매 단일 트랜잭션 (DEC-014 APPROVED)
+## 4.1 부분출고와 판매 건 (DEC-017 APPROVED)
 
-한 DB 트랜잭션. 어느 한 단계라도 실패하면 **전체 rollback**.
+**규칙: 출고 1회 = 판매 1건. 주문 1 : 판매 N.**
 
-1. 주문상세 현재 배정수량·미출고분 검증
-2. `reserved_qty` 감소 (`ship_qty`)
-3. `out_qty` 증가 (`ship_qty`)
-4. `t_stock_log` `OUT` (판매출고 remark, 생산 원물소모와 문구 구분)
-5. 주문/이행 관련 필드 갱신 (`stock_status`, 필요 시 `status_cd`, `sales_no`)
-6. `t_sales_master` 생성 (`sales_source=ORDER`, `sales_status=CONFIRMED`, `order_no` 연결)
-7. `t_sales_detail` 생성 (`order_detail_id` 연결)
-8. 주문↔판매 연결 (`t_order_master.sales_no`, 상세 키)
-9. 배송: `t_order_delivery` → `t_sales_delivery` (택배 분할 규칙은 기존 PC)
+예: 주문 30박스
 
-금지 상태:
+- 8/20 10박스 출고 → 판매 A 생성 (`sales_dt` = 그 출고 업무일)
+- 8/21 20박스 출고 → 판매 B 생성 (판매 A를 수정하여 수량을 올리지 않음)
 
-- 재고만 빠지고 판매 없음
-- 판매만 생성되고 재고 미차감
-- 주문은 완료인데 판매 없음
+실제 출고일과 판매일·재고 출고·배송·수금·회계를 일치시키기 위한 것이다. 이미 CONFIRMED 된 판매/전표를 다음 출고 때문에 수정하지 않는다.
 
-**출고 후 `allocated_qty`:** 줄의 **배정 누적**으로 유지한다. 출고 시 0으로 되돌리지 않는다.  
-이유: 0으로 내리면 미배정으로 오인되고 이중 배정된다.  
-재고 Hold 잔량 = `allocated_qty - already_shipped`. 출고 시 stock `reserved_qty`만 줄인다.
+**현재 PC:** 지원하지 않음. `save_entire_order()`가 주문과 판매를 같은 TX에서 한 번에 만들고, `t_order_master.sales_no` 1개 + 판매 상세 전량. `stock_status='Y'` 세팅 없음.
 
-선입금 전표: 주문 시점 없음 (DEC-009). 출고로 판매가 CONFIRMED가 되면, `pre_pay_amt>0`인 경우 **같은 TX**에서 판매 수금 바구니 + `sync_ledger_by_basket('SALE', …)` 로 입금·미수를 맞춘다. 선수금 전용 계정 설계는 하지 않음.
+연결 SSOT:
 
-**현재:** 주문은 reserved만 증감. `out_qty` 불변. `stock_status='Y'` 세팅 코드 없음. 판매 저장은 `t_stock_master` 미갱신.
+- `t_sales_master.order_no`
+- `t_sales_detail.order_detail_id`
+
+`t_order_master.sales_no`는 **legacy/reference 성격**이며, 주문 전체 판매 조회는 반드시 `t_sales_master.order_no` 기준으로 한다. 기존 호환을 위해 최초 출고 판매번호 또는 대표 참조값으로만 유지한다. 새 컬럼은 추가하지 않는다.
+
+- `shipped_qty` = 해당 `order_detail_id`로 생성된 모든 CONFIRMED 판매상세 수량 합계.
+- 출고 후에도 `allocated_qty`는 감소하지 않는다.
+- `stock_status`: 부분출고면 `'N'`. 모든 주문상세 `shipped_qty == qty`일 때만 `'Y'`.
+- 이행: 출고완료는 전 줄 `shipped_qty == qty`. 주문상태 완료 매핑은 DEC-011 `ST01` 확인 후 적용.
+- 화면에는 주문/배정/미배정/출고를 숫자로 보여 준다.
+
+부분출고 **취소** (해당 판매 1건만) — 정책은 단계 6 OPEN. 방향만:
+
+| | 재고 | 판매 | 회계 | 주문 |
+|--|------|------|------|------|
+| 방향 | `out_qty −`, `reserved_qty +` (`allocated_qty` 유지 → reserved_unshipped 복구) | 그 판매만 취소/역분개. 다른 출고 판매는 유지 | 그 `sales_no` 전표만 | `stock_status` N, 주문 완료 해제 |
+
+1차 구현은 출고 후 취소 비활성 권고. 출고 후 판매취소는 단계 6 OPEN.
+
+---
+
+## 5. 출고확정 — 소매 단일 트랜잭션 (DEC-014 · DEC-017 APPROVED)
+
+한 출고 **이벤트**의 DB 트랜잭션. 실패 시 전체 rollback. **항상 새 `sales_no`.** 기존 CONFIRMED 판매를 수정하지 않는다.
+
+1. 출고 가능한 미출고 `t_order_alloc` 조회
+2. FIFO(`storage_dt ASC`) 순서대로 `ship_qty` 배분
+3. 각 `t_order_alloc.shipped_qty` 증가
+4. 각 stock row `reserved_qty` 감소
+5. 각 stock row `out_qty` 증가
+6. `t_stock_log` OUT
+7. **새 판매** 생성: `order_no`, `sales_source=ORDER`, `sales_status=CONFIRMED`, `sales_dt` = 실제 출고 업무일 `YYYY-MM-DD`
+8. 판매상세: `order_detail_id` 필수, 해당 출고분 `ship_qty`만
+9. 그 출고분에 해당하는 판매배송만 연결
+10. 회계/수금. 선입금 전표는 첫 출고 TX에서만 (DEC-009)
+11. 모든 주문상세 `shipped_qty == qty`이면 `stock_status='Y'`, 이행=출고완료 (주문상태 완료 매핑은 DEC-011)
+
+금지: 재고만 감소 / 판매만 생성 / 전량 완료인데 판매 없음 / 기존 CONFIRMED 판매·전표 수정.
+
+출고 시 `allocated_qty` **유지**. stock `reserved_qty -= ship_qty`, `out_qty += ship_qty`.
+
+**현재:** reserved만 증감. out 불변. `stock_status='Y'` 세팅 없음. 판매 저장은 재고 미갱신.
 
 ---
 
@@ -184,10 +230,12 @@ UI 예: `주문상태: 접수` / `재고상태: 부분배정`
 
 | 이행상태 | 계산 (확정 설계) |
 |----------|------------------|
-| 미배정 | `SUM(allocated_qty)=0` 이고 출고 없음 |
-| 부분배정 | `0 < SUM(allocated_qty) < SUM(qty)` 또는 줄 간 불균등. 일부 출고여도 전량 출고 전이면 여기 |
-| 배정완료 | 전 줄 `allocated_qty = qty` 이고 전량 출고 전 |
-| 출고완료 | 전량 출고 (`stock_status='Y'` 또는 출고수량 = `SUM(qty)`) |
+| 미배정 | `SUM(allocated_qty)=0` 이고 `SUM(shipped_qty)=0` |
+| 부분배정 | `0 < SUM(allocated_qty) < SUM(qty)` (출고 일부가 있어도 미배정이 남으면 여기) |
+| 배정완료 | 전 줄 `allocated_qty = qty` 이고 `SUM(shipped_qty) < SUM(qty)` |
+| 출고완료 | `SUM(shipped_qty) = SUM(qty)` 이며 이때 `stock_status='Y'` |
+
+화면 숫자는 주문 / 배정(`allocated_qty`) / 미배정 / 출고(`shipped_qty`) 네 칸. 내부에서만 누적 배정임을 구분한다.
 
 보조 필드:
 
@@ -234,14 +282,17 @@ UI 예: `주문상태: 접수` / `재고상태: 부분배정`
 
 | 경우 | 재고 | 판매 | 회계 | 주문 |
 |------|------|------|------|------|
-| 미배정 주문 취소 | 변경 없음 (`allocated_qty=0`) | 없음 | 없음 | 주문상태=취소 |
-| 일부배정 · 출고 전 | `CANCEL_HOLD`로 해당 reserved 해제, `allocated_qty→0` | 없음 | 없음 | 취소 |
-| 배정완료 · 출고 전 | 잔여 Hold 전량 해제 | 없음 | 없음 | 취소 |
-| 출고 후 판매취소 | `out_qty` 복구 필요. 단순 DELETE 금지 | 취소/역분개 | `t_ledger` 역분개 필요. 현재 `delete_sales_data`는 전표·재고 미처리 | 주문 완료 유지 또는 별도 정책 |
+| 미배정 주문 취소 | 변경 없음 | 없음 | 없음 | 주문상태=취소 |
+| 일부배정 · 출고 전 | 모든 미출고 `t_order_alloc`의 stock row `reserved_qty` 복구. CANCEL_HOLD. allocation 정리. `allocated_qty` 감소/0 | 없음 | 없음 | 취소 |
+| 배정완료 · 출고 전 | 잔여 Hold = `reserved_unshipped` 전량 해제 (alloc row 기준) | 없음 | 없음 | 취소 |
+| 부분출고 후 · 해당 판매만 취소 | 그 회차 `out−` `reserved+`. `allocated_qty` 유지 | 그 `sales_no`만 | 그 전표만 역분개 | `stock_status` N. **단계 6 OPEN** |
+| 전량 출고 후 판매취소 | 전량 `out` 복구. 단순 DELETE 금지 | 연결된 판매 전부 | `t_ledger` 역분개. 현재 `delete_sales_data`는 전표·재고 없음 | 별도 정책. **단계 6 OPEN** |
 
-1차 권고: 출고 후 취소는 **비활성**. 운영 정책은 단계 6 승인 사항.
+출고 전 취소: 모든 미출고 `t_order_alloc`을 조회하여 각 stock row별 `reserved_qty`를 정확히 복구. 이미 출고된 allocation은 단순 취소 금지.
 
-**현재 주문 삭제 함수 없음.**
+1차 권고: 출고 후 전량 취소는 **비활성**. 출고 후 판매취소 정책은 단계 6 OPEN.
+
+**현재 주문 삭제 함수 없음.** 수정 시 CANCEL_HOLD는 주문 `qty` 전량·규격 키만 (`storage_dt` 없음).
 
 ---
 
@@ -256,6 +307,8 @@ UI 예: `주문상태: 접수` / `재고상태: 부분배정`
 
 주문: `t_order_delivery`. 주석 `t_dlvry_detail`은 **실제 테이블 아님**.  
 출고예정일: 배송 `planned_dt` 집계. 마스터 전용 컬럼 추가하지 않음.
+
+부분출고 배송 (DEC-017): 각 출고 이벤트 판매에는 그 출고분에 해당하는 배송 데이터만 연결한다. 주문 배송계획 전체를 매번 복사하지 않는다. 한 주문배송 계획이 여러 출고로 나뉠 경우, 실제 출고수량만큼 판매배송행을 생성한다. 상세 알고리즘은 단계 4 구현 전 현재 `t_order_delivery` 구조를 기준으로 재검토하되, 1:N 판매 원칙은 변경하지 않는다.
 
 채번: 주문 배송 실제 `{order_detail_id}-P{NN}` vs 워크스페이스 규칙 `{detail}-{3자리}` — 코드 우선.
 
@@ -278,15 +331,118 @@ UI 예: `주문상태: 접수` / `재고상태: 부분배정`
 
 ---
 
-## 13. 재고가 생기는 시점 (참고)
+## 13. 재고행별 allocation (DEC-018 APPROVED)
+
+### 13.1 역할 분리
+
+`t_stock_log`를 allocation **현재상태**의 SSOT로 사용하지 않는다.
+
+| 대상 | 역할 |
+|------|------|
+| 가칭 `t_order_alloc` | 현재 주문상세 ↔ 실제 재고행 배정 관계 |
+| `t_stock_log` | HOLD / CANCEL_HOLD / OUT **이력** |
+
+실제 테이블명은 기존 DB 네이밍 규칙 확인 후 구현단계에서 최종 확정 가능. 이번 문서 작업에서는 CREATE TABLE 금지.
+
+현재 로그에 부족한 `wh_cd` / `storage_dt` / `order_detail_id`를 allocation SSOT 목적으로 억지로 추가하지 않는다. 앞으로 생성되는 HOLD / CANCEL_HOLD / OUT 로그에는 가능한 범위에서 `order_no`, `order_detail_id`, `sales_no`, stock 자연키 식별정보를 남기는 방향을 설계할 수 있다. **현재 상태 복원은 `t_order_alloc`, 감사 이력은 `t_stock_log`.**
+
+기존 HOLD → `t_order_alloc` 백필은 DEC-015 OPEN (단계 3 migration 전).
+
+### 13.2 현재 `t_stock_log` (코드 INSERT — 이력 SSOT로 쓰기 부족)
+
+`t_stock_master` 자연키:  
+`farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt`
+
+주문 HOLD (`order_page.py` 2941행):  
+`farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, weight, io_type, qty, parent_raw_size, remark, reg_id, reg_dt`  
+remark = `주문예약:{order_no}`
+
+주문 CANCEL_HOLD (2818행): 동일 규격 키 + remark `주문수정전 복구:{order_no}`  
+reserved UPDATE는 `storage_dt`/`wh_cd` **없음** (규격+연도만, 복수 row 오염 가능).
+
+저장/생산 로그: `wh_cd`/`storage_dt`/`order_detail_id` **없음**.
+
+| 필요 정보 | HOLD 로그 |
+|-----------|-----------|
+| farm/item/variety/grade/size/weight/year | 있음 |
+| qty, io_type HOLD/CANCEL_HOLD | 있음 |
+| OUT (판매출고) | **현재 없음** (생산·폐기 OUT만) |
+| wh_cd | 없음 |
+| storage_dt | 없음 |
+| order_detail_id / ref_id | 없음 (`order_no`만 remark) |
+
+Hold 대상 row는 `MIN(storage_dt)` 1개만 고르는 **단일 바구니**에 가깝다. 이 때문에 로그 replay로는 줄×row 현재상태를 복원할 수 없다 → 전용 `t_order_alloc`.
+
+### 13.3 `t_order_alloc` 최소 책임
+
+과도한 구조를 만들지 않는다. 최소 추적 대상:
+
+- `order_no`
+- `order_detail_id`
+- 실제 stock row 자연키 (`t_stock_master` 기준): `farm_cd`, `wh_cd`, `item_cd`, `variety_cd`, `grade_cd`, `size_cd`, `weight`, `harvest_year`, `storage_dt`
+- `allocated_qty`
+- `shipped_qty`
+- 생성/수정 감사정보
+
+PK/UNIQUE는 구현 전 실제 schema와 대조하여 확정.
+
+의미 예:
+
+- 주문상세 신고 15kg 특 25과 20박스
+- stock A `storage_dt=2026-09-01` 8박스, stock B `storage_dt=2026-09-03` 12박스
+- `t_order_alloc`: A allocated 8, B allocated 12
+- `t_order_detail.allocated_qty` = 20
+
+이 구조로 출고·배정해제·주문취소 시 정확한 stock row의 `reserved_qty`를 조정한다.
+
+### 13.4 FIFO / LIFO (DEC-018 하위 운영규칙)
+
+| 동작 | 기본 순서 | 비고 |
+|------|-----------|------|
+| 자동 재고배정 | FIFO `storage_dt ASC` | 동일 `storage_dt`는 기존 stock 자연키/row 정렬. 임의 규칙은 이번 단계에서 만들지 않음. 1차 모바일은 자동 FIFO. 향후 수동 재고행 선택 가능 |
+| 배정해제 | LIFO (최근 잡은 stock row부터) | 먼저 잡은 오래된 재고를 유지해 FIFO 출고 원칙을 깨지 않기 위함 |
+| 출고 소비 | FIFO `storage_dt ASC` | allocation row 기준 |
+
+### 13.5 배정 TX
+
+모두 한 트랜잭션. 실패 시 전체 rollback.
+
+1. 주문상세 `qty` / allocated 검증
+2. 가용재고를 TX 안에서 재조회
+3. FIFO로 stock row 선택
+4. `t_order_alloc` 증가/생성
+5. `t_order_detail.allocated_qty` 증가
+6. 해당 stock row `reserved_qty` 증가
+7. `t_stock_log` HOLD 기록
+
+### 13.6 배정해제 TX
+
+미출고 allocation만 가능. `release_qty <= allocated_qty - shipped_qty`.
+
+- `t_order_alloc` 감소
+- `t_order_detail.allocated_qty` 감소
+- 해당 stock `reserved_qty` 감소
+- CANCEL_HOLD log
+
+기본 해제 순서는 LIFO.
+
+### 13.7 출고 TX
+
+§5와 동일. allocation row 기준 FIFO 소비 → 새 판매 1건 → 단일 TX (DEC-014).
+
+동시성: 같은 stock row를 여러 주문이 배정할 때 TX 안에서 그 row 가용(`in-out-reserved`) 재검증.
+
+---
+
+## 14. 재고가 생기는 시점 (참고)
 
 | 이벤트 | 테이블 | 수량 |
 |--------|--------|------|
 | 원물 입고 (신고 저장) | `FR010300` `in_qty` | 20kg 단위 |
 | 선별 생산 | 상품 `FR010100` `in_qty` +, 원물 `out_qty` + | 박스 |
 | 폐기/실사 | `out_qty` / in·out 재기록 | — |
-| 배정 | `reserved_qty` +, `allocated_qty` + | 박스 |
-| 배정 해제 | reserved −, allocated − | 박스 |
-| 출고확정 | reserved −, out + | 박스 (`allocated_qty` 유지) |
+| 배정 | 행 `reserved_qty` +, 줄 `allocated_qty` + | 박스 |
+| 배정 해제 | reserved −, allocated − (미출고분) | 박스 |
+| 출고확정 | reserved −, out + | 박스 (`allocated_qty` 유지, `shipped_qty` 증가) |
 
 원황/조생은 원물 입고 없이 상품 `in_qty`만 실사/생산으로 올릴 수 있음 (운영).
