@@ -81,6 +81,7 @@ Analysis (orchard_platform_analysis)
 | `docs/ODS/` | `mobile/docs/ODS/` |
 | `docs/mobile/` | `mobile/docs/screens/`, `architecture/`, `api/` |
 | `docs/design/` | `docs/mobile_observation_design.md`, `docs/ODS_LOCATION.md`, `docs/GEMINI_COLLAB_PROMPT.md`, `docs/NTF-001_notification_system_design.md` |
+| `docs/mobile_order_sales/` | `docs/mobile_order_sales/**` (단계 0 설계. 기능 코드 제외. `docs/design/`로 옮기지 않음) |
 | `docs/architecture/` | `mobile/docs/architecture/`, `server/docs/` (화이트리스트) |
 
 ### 3.5 Scripts (`scripts/`)
@@ -227,4 +228,4 @@ Private 커밋과 **분리**한다. Analysis 커밋 메시지 접두사:
 
 ---
 
-*최종 수정: SCR-004 보완 점검 — api-mirror·import 치환*
+*최종 수정: 주문/판매 단계 0 설계 `docs/mobile_order_sales/**` whitelist*

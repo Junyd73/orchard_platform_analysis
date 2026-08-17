@@ -42,5 +42,25 @@ def test_manifest_includes_pc_observation_ai() -> None:
     assert not any(".orchard.env" in f for f in files)
 
 
+def test_manifest_includes_mobile_order_sales_docs() -> None:
+    files = collect_mirror_files(_REPO)
+    expected = [
+        "docs/mobile_order_sales/README.md",
+        "docs/mobile_order_sales/01_overview.md",
+        "docs/mobile_order_sales/02_domain_flow.md",
+        "docs/mobile_order_sales/03_data_contract.md",
+        "docs/mobile_order_sales/04_mobile_screen.md",
+        "docs/mobile_order_sales/05_api_contract.md",
+        "docs/mobile_order_sales/06_development_progress.md",
+        "docs/mobile_order_sales/07_decisions.md",
+        "docs/mobile_order_sales/08_pc_change_scope.md",
+    ]
+    for rel in expected:
+        assert rel in files
+    pairs = dict(collect_mirror_pairs(_REPO))
+    for rel in expected:
+        assert pairs[rel] == rel
+
+
 def test_preflight_passes_on_whitelist() -> None:
     assert run_preflight(_REPO) == 0

@@ -121,6 +121,10 @@ include:
   - src: docs/NTF-001_notification_system_design.md
     dest: docs/design/NTF-001_notification_system_design.md
 
+  # OPS 주문/판매 단계 0 설계 (공개 검토용). 기능 코드·DDL 아님.
+  - src: docs/mobile_order_sales/**
+    dest: docs/mobile_order_sales/**
+
   - src: core/notification_schema.py
     dest: core/notification_schema.py
 
