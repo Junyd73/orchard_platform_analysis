@@ -127,6 +127,22 @@ include:
   - src: mobile/src/api-mirror/notifications.ts
     dest: mobile/src/api/notifications.ts
 
+  # --- OPS P1 시간정책 (KST SSOT · 공개 검토용, api_config/키 제외) ---
+  - src: core/ops_biz_date.py
+    dest: core/ops_biz_date.py
+
+  - src: core/weather_manager.py
+    dest: core/weather_manager.py
+
+  - src: core/db_manager.py
+    dest: core/db_manager.py
+
+  - src: core/work_log_integrated_save_service.py
+    dest: core/work_log_integrated_save_service.py
+
+  - src: ui/pages/sales_page.py
+    dest: ui/pages/sales_page.py
+
   # --- PC: 관찰 AI 분석 (키·.env 제외, 환경변수명만 참조) ---
   - src: core/ai/**
     dest: core/ai/**
@@ -188,6 +204,12 @@ include:
 
   - src: server/app/core/observation_delete_policy.py
     dest: server/models/observation_delete_policy.py
+
+  - src: server/app/core/ops_biz_date.py
+    dest: server/models/ops_biz_date.py
+
+  - src: server/app/jobs/mid_forecast_job.py
+    dest: server/jobs/mid_forecast_job.py
 
   - src: server/tests/**
     dest: server/tests/**

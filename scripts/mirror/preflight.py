@@ -48,10 +48,26 @@ _CONTENT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         "api key / token",
     ),
-    (re.compile(r"(?i)password\s*[=:]\s*['\"]?[^\s'\"#]{4,}"), "password"),
+    # 단독 password 또는 *_password 대입. 타입힌트(password: str) 오탐 제외.
+    # (?<![A-Za-z0-9_])만 쓰면 admin_password= 리터럴을 놓치므로 *_password 분기 유지.
+    (
+        re.compile(
+            r"(?i)(?:(?<![A-Za-z0-9_])password|[A-Za-z0-9_]+_password)\s*[=:]\s*"
+            r"(?!str\b|bytes\b|bool\b|int\b|float\b|None\b|Optional\b)"
+            r"['\"]?[^\s'\"#]{4,}"
+        ),
+        "password",
+    ),
     (re.compile(r"(?i)Bearer\s+[A-Za-z0-9_\-\.]{20,}"), "bearer token"),
     (re.compile(r"\b\d{6}-\d{7}\b"), "주민번호 형식"),
     (re.compile(r"\b01[016789]-?\d{3,4}-?\d{4}\b"), "휴대폰 번호"),
+)
+
+# 명백한 더미/플레이스홀더 연락처 (실제 번호 탐지는 유지)
+_DUMMY_PHONE = re.compile(
+    r"\b01[016789]-(?:0000|1111|2222|3333|4444|5555|6666|7777|8888|9999)"
+    r"-(?:0000|1111|2222|3333|4444|5555|6666|7777|8888|9999)\b"
+    r"|\b01[016789]-0{3,4}-0{4}\b"
 )
 
 # 사설 IP (문서·코드 내 하드코딩)
@@ -85,9 +101,22 @@ def _is_blocked_path(path: Path) -> str | None:
     return None
 
 
+def _phone_hits_without_dummies(text: str) -> bool:
+    """실제 휴대폰 형식만 True. 010-0000-0000·반복자리 더미는 무시."""
+    phone_pat = next(p for p, label in _CONTENT_PATTERNS if label == "휴대폰 번호")
+    for m in phone_pat.finditer(text):
+        if not _DUMMY_PHONE.fullmatch(m.group(0)):
+            return True
+    return False
+
+
 def _scan_text(rel: str, text: str, *, relaxed: bool = False) -> list[str]:
     issues: list[str] = []
     for pat, label in _CONTENT_PATTERNS:
+        if label == "휴대폰 번호":
+            if _phone_hits_without_dummies(text):
+                issues.append(f"{rel}: {label}")
+            continue
         if pat.search(text):
             issues.append(f"{rel}: {label}")
     if relaxed:
