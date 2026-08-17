@@ -13,7 +13,7 @@ from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from core.account_manager import AccountManager
-from core.ops_biz_date import today_ops
+from core.ops_biz_date import materialize_now_ops_sql, today_ops
 from core.pesticide_manager import (
     PesticideManager,
     is_nutrient_category,
@@ -543,12 +543,14 @@ class WorkLogIntegratedSaveService:
             # 기존 soft_delete_work_photo 와 동일 정책 (use_yn='N', 파일은 유지)
             try:
                 cur.execute(
-                    """
+                    materialize_now_ops_sql(
+                        """
                     UPDATE t_work_photo
                     SET use_yn = 'N', mod_id = ?, mod_dt = datetime('now','localtime')
                     WHERE farm_cd = ? AND work_id = ?
                       AND COALESCE(use_yn, 'Y') = 'Y'
-                    """,
+                    """
+                    ),
                     (user_id, self.farm_cd, wid),
                 )
             except sqlite3.OperationalError:
@@ -1203,7 +1205,7 @@ class WorkLogIntegratedSaveService:
 
         def _run(cur: sqlite3.Cursor) -> None:
             for query, params in queries:
-                cur.execute(query, params)
+                cur.execute(materialize_now_ops_sql(query), params)
             for op in cursor_ops or []:
                 op(cur)
 

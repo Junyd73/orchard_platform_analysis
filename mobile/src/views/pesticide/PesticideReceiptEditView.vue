@@ -438,6 +438,9 @@ watch(
 )
 
 onMounted(async () => {
+  if (!String(receiptId.value || '').trim()) {
+    receiptDt.value = todayIso()
+  }
   await loadMasters()
   await loadDetail()
   syncLinkedNamesFromMasters()

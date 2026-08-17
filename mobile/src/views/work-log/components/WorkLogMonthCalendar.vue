@@ -50,11 +50,11 @@ const emit = defineEmits<{
   'next-year': []
 }>()
 
-const today = todayIso()
+const today = computed(() => todayIso())
 const title = computed(() => monthLabel(props.year, props.month))
 const slideDir = ref<'left' | 'right' | 'up' | 'down' | 'none'>('none')
 const monthKey = computed(() => `${props.year}-${props.month}`)
-const selectedIso = computed(() => props.selectedDt || today)
+const selectedIso = computed(() => props.selectedDt || today.value)
 
 watch(
   () => monthKey.value,
@@ -109,6 +109,7 @@ const cells = computed((): CalCell[] => {
   const start = firstWeekdaySun0(props.year, props.month)
   const out: CalCell[] = []
   const selected = selectedIso.value
+  const todayStr = today.value
   const showWeather = Boolean(props.filters[WORK_FILTER_WEATHER])
 
   function pushCell(partial: Omit<CalCell, 'lines' | 'extra' | 'weatherIcon' | 'weatherLabel' | 'hasSchedule'> & {
@@ -137,7 +138,7 @@ const cells = computed((): CalCell[] => {
       day: d,
       iso,
       inMonth: false,
-      future: isFutureDate(iso, today),
+      future: isFutureDate(iso, todayStr),
       isToday: false,
       isSelected: false,
       isRest: isRestDay(iso),
@@ -152,8 +153,8 @@ const cells = computed((): CalCell[] => {
       day: d,
       iso,
       inMonth: true,
-      future: isFutureDate(iso, today),
-      isToday: iso === today,
+      future: isFutureDate(iso, todayStr),
+      isToday: iso === todayStr,
       isSelected: iso === selected,
       isRest: isRestDay(iso),
       cell: props.days[iso] || null,
@@ -169,7 +170,7 @@ const cells = computed((): CalCell[] => {
       day: n,
       iso,
       inMonth: false,
-      future: isFutureDate(iso, today),
+      future: isFutureDate(iso, todayStr),
       isToday: false,
       isSelected: false,
       isRest: isRestDay(iso),

@@ -283,12 +283,11 @@ export function formatHeroWonWithUnit(amount?: number | null): string {
   return formatWonWithUnit(amount)
 }
 
-export function todayIso(): string {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+/** OPS 업무 '오늘' — Asia/Seoul (기기 TZ 비의존). @see shared/bizDate */
+import { todayBizIso } from '@/shared/bizDate'
+
+export function todayIso(now?: Date): string {
+  return todayBizIso(now)
 }
 
 export function pad2(n: number): string {

@@ -15,7 +15,9 @@ from core.ops_biz_date import (  # noqa: E402
     OPS_TZ_NAME,
     _OPS_TZ,
     now_ops,
+    now_ops_str,
     today_ops,
+    today_ops_iso,
 )
 
 __all__ = [
@@ -23,5 +25,7 @@ __all__ = [
     "OPS_TZ_NAME",
     "_OPS_TZ",
     "now_ops",
+    "now_ops_str",
     "today_ops",
+    "today_ops_iso",
 ]

@@ -40,7 +40,7 @@ const emit = defineEmits<{
   'toggle-detail': []
 }>()
 
-const today = todayIso()
+const today = computed(() => todayIso())
 
 const cells = computed(() => {
   return buildRangeIsos(props.rangeStart, 7).map((iso) => {
@@ -52,9 +52,9 @@ const cells = computed(() => {
       day: d.getDate(),
       wd: WEEKDAY_LABELS[wdIdx],
       isRest: wdIdx === 0 || wdIdx === 6,
-      isToday: iso === today,
+      isToday: iso === today.value,
       isSelected: iso === props.selectedDt,
-      future: isFutureDate(iso, today),
+      future: isFutureDate(iso, today.value),
       counts,
     }
   })

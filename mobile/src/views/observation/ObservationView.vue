@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, ref, type Ref } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
@@ -89,6 +89,27 @@ const sort = ref<'obs_dt_desc' | 'obs_dt_asc'>('obs_dt_desc')
 /** 기본·「최근」= 오늘 포함 과거 7일 */
 const dateFrom = ref(pastRangeStart(todayIso()))
 const dateTo = ref(todayIso())
+
+let lastSyncedToday = todayIso()
+
+/** 자정 경과 후 탭 재진입/표시 시 기본 '오늘' 구간만 재동기화 */
+function syncBizTodayDefaults(): boolean {
+  const t = todayIso()
+  if (t === lastSyncedToday) return false
+  const prev = lastSyncedToday
+  lastSyncedToday = t
+  if (
+    isDefaultHomeWeekRange(dateFrom.value, dateTo.value, prev) ||
+    (calSelectedDt.value === prev && dateTo.value === prev)
+  ) {
+    const home = homeWeekRange(t)
+    calRangeStart.value = home.from
+    calSelectedDt.value = t
+    dateFrom.value = home.from
+    dateTo.value = t
+  }
+  return true
+}
 
 const appliedKeyword = ref('')
 const appliedSiteId = ref('')
@@ -312,6 +333,7 @@ function onOpenRecentAiAll() {
 }
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', onVisibilityRefresh)
   if (!farm.value) {
     await store.refreshAll()
   }
@@ -325,6 +347,26 @@ onMounted(async () => {
       toastMessage.value = ''
     }, 3200)
   }
+})
+
+watch(
+  () => mainTabActiveIndex?.value,
+  async (idx) => {
+    if (mainTabPanelIndex == null || idx !== mainTabPanelIndex.value) return
+    if (!syncBizTodayDefaults()) return
+    await refreshAll()
+  },
+)
+
+function onVisibilityRefresh() {
+  if (document.visibilityState !== 'visible') return
+  if (!fabVisible.value) return
+  if (!syncBizTodayDefaults()) return
+  void refreshAll()
+}
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityRefresh)
 })
 </script>
 

@@ -23,7 +23,7 @@ from core.observation_ai_constants import (
     OBS_AI_STATUS_VALUES as _AI_VALUES,
 )
 from core import observation_stage2_constants as _OBS_S2_C
-from core.ops_biz_date import now_ops, today_ops
+from core.ops_biz_date import materialize_now_ops_sql, now_ops, now_ops_str, today_ops
 
 class DBManager:
     # ---------------------------------------------------------
@@ -2512,10 +2512,17 @@ class DBManager:
             (),
         )
 
+    @staticmethod
+    def _materialize_ops_now_sql(query: str) -> str:
+        """DML의 datetime('now','localtime') → KST now_ops_str 리터럴.
+
+        DDL DEFAULT 구문은 스키마에 그대로 둔다(전수 변경 금지).
+        """
+        return materialize_now_ops_sql(query)
     def execute_query(self, query, params=()):
         try:
             cur = self.conn.cursor()
-            cur.execute(query, params)
+            cur.execute(self._materialize_ops_now_sql(query), params)
             query_start = query.strip().upper()
             if query_start.startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "REPLACE")):
                 self.conn.commit()
@@ -2530,7 +2537,7 @@ class DBManager:
             cur = self.conn.cursor()
             cur.execute("BEGIN TRANSACTION")
             for query, params in queries_with_params:
-                cur.execute(query, params)
+                cur.execute(self._materialize_ops_now_sql(query), params)
             self.conn.commit()
             return True
         except Exception as e:

@@ -8,9 +8,10 @@ from PyQt6.QtCore import Qt, QDate, QRegularExpression, QEvent
 from PyQt6.QtGui import QBrush, QColor, QRegularExpressionValidator
 
 from core.code_manager import CodeManager
-from core.ops_biz_date import today_ops
+from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
+from ui.ops_qdate import qdate_today_ops
 
 # 배송 리스트 팝업
 class DeliveryDetailDialog(QDialog):
@@ -818,7 +819,7 @@ class SalesSearchDialog(QDialog):
         lbl_date = QLabel("판매일자:"); lbl_date.setStyleSheet(MainStyles.LBL_GRID_HEADER) # 라벨 스타일 (선택)
         search_layout.addWidget(lbl_date)
         
-        self.date_edit = QDateEdit(QDate.currentDate())
+        self.date_edit = QDateEdit(qdate_today_ops())
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setFixedWidth(130)
         self.date_edit.setFixedHeight(30)
@@ -1138,12 +1139,12 @@ class SalesPage(QWidget):
         self.receipt_yn = QComboBox(); self.receipt_yn.addItems(["N", "Y"]); 
         self.receipt_yn.setStyleSheet(MainStyles.COMBO)        
         self.receipt_yn.installEventFilter(self)
-        self.receipt_dt = QDateEdit(QDate.currentDate(), calendarPopup=True); 
+        self.receipt_dt = QDateEdit(qdate_today_ops(), calendarPopup=True); 
         self.receipt_dt.setStyleSheet(MainStyles.COMBO)
         self.receipt_dt.installEventFilter(self)
         
         # 판매일자 & 판매유형 & 비고
-        self.sales_dt = QDateEdit(QDate.currentDate(), calendarPopup=True); 
+        self.sales_dt = QDateEdit(qdate_today_ops(), calendarPopup=True); 
         self.sales_dt.setStyleSheet(MainStyles.COMBO)
         self.sales_dt.installEventFilter(self)
         self.sales_tp = QComboBox(); 
@@ -1563,7 +1564,7 @@ class SalesPage(QWidget):
         # 2. 마스터 입력 필드 초기화
         self.slip_no.clear()
         self.sales_no.clear()
-        self.sales_dt.setDate(QDate.currentDate())
+        self.sales_dt.setDate(qdate_today_ops())
         self.custm_nm.clear()
         self.sales_tp.setCurrentIndex(0)
         self.rmk.clear()
@@ -2082,7 +2083,7 @@ class SalesPage(QWidget):
 
         # 2. 날짜 (DateEdit)
         dt_edit = QDateEdit(calendarPopup=True)
-        dt_edit.setDate(QDate.currentDate())
+        dt_edit.setDate(qdate_today_ops())
         dt_edit.setStyleSheet(MainStyles.DATE_EDIT)
         # [센서 연결] 날짜 변경 시 수정 여부 체크
         dt_edit.dateChanged.connect(lambda: self.check_row_modified(row_index))
@@ -2711,13 +2712,14 @@ class SalesPage(QWidget):
                     tot_sales_amt, tot_ship_fee, tot_item_amt, tot_paid_amt, tot_unpaid_amt,
                     auction_fee, extra_cost, bill_yn, bill_dt, bill_no, 
                     pay_method_cd, status_cd, rmk, reg_id, reg_dt, sales_status, sales_source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             queries.append((sql_master, (
                 s_no, self.farm_cd, sales_date_str, self.sales_tp.currentData(), getattr(self, 'custm_id', None),
                 t_total, t_ship, t_sales, t_paid, t_unpaid,
                 get_amt(self.auction_fee), get_amt(self.extra_cost),
                 ui_bill_yn, ui_bill_dt, ui_bill_no, ui_pay_method, ui_status_cd, ui_master_rmk, self.user_id,
+                now_ops_str(),
                 sales_status, sales_source
             )))
 

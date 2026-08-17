@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
@@ -28,6 +28,7 @@ import {
   todayIso,
   type WorkFilterKey,
 } from '@/views/work-log/workLogConstants'
+import { todayBizParts } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import type {
   WorkLogDayCell,
@@ -42,9 +43,9 @@ const router = useRouter()
 const route = useRoute()
 const { farmCd, farm } = storeToRefs(store)
 
-const now = new Date()
-const year = ref(now.getFullYear())
-const month = ref(now.getMonth() + 1)
+const _bizNow = todayBizParts()
+const year = ref(_bizNow.year)
+const month = ref(_bizNow.month)
 const loading = ref(true)
 const weatherLoading = ref(false)
 const bootstrapping = ref(true)
@@ -67,9 +68,9 @@ const todayMaster = ref<WorkLogMasterDto | null>(null)
 const filters = ref(defaultWorkFilters())
 const selectedDt = ref(todayIso())
 
-const today = todayIso()
+const today = computed(() => todayIso())
 
-const todayCell = computed(() => days.value[today] || todayCellCache.value)
+const todayCell = computed(() => days.value[today.value] || todayCellCache.value)
 const todayWorkCount = computed(() => Number(todayCell.value?.work_count || 0))
 const todayResourceCount = computed(() => Number(todayCell.value?.resource_count || 0))
 const todayLaborHourSum = computed(() => Number(todayCell.value?.labor_hour_sum || 0))
@@ -80,15 +81,15 @@ const todayExpenseSum = computed(() => {
 })
 
 const canGoNext = computed(() => {
-  // 일정 등록을 위해 미래 월 허용 (오늘 기준 최대 18개월)
-  const t = new Date()
-  const max = new Date(t.getFullYear(), t.getMonth() + 18, 1)
+  // 일정 등록을 위해 미래 월 허용 (오늘 기준 최대 18개월, KST)
+  const { year: ty, month: tm } = todayBizParts()
+  const max = new Date(ty, tm - 1 + 18, 1)
   const cur = new Date(year.value, month.value - 1, 1)
   return cur < max
 })
 
 const canGoNextYear = computed(() => {
-  const cy = new Date().getFullYear()
+  const cy = todayBizParts().year
   return year.value < cy + 1
 })
 
@@ -98,7 +99,7 @@ const showWeatherSkeleton = computed(
 )
 
 function rememberTodayCell(map: Record<string, WorkLogDayCell>) {
-  const cell = map[today]
+  const cell = map[today.value]
   if (cell) todayCellCache.value = cell
 }
 
@@ -124,14 +125,10 @@ async function loadMonth() {
 
 /** 표시 월이 오늘이 아닐 때도 Hero KPI용 오늘 셀을 확보 */
 async function ensureTodayCellCache() {
-  if (todayCellCache.value || days.value[today]) return
-  const t = new Date()
+  if (todayCellCache.value || days.value[today.value]) return
+  const { year: ty, month: tm } = todayBizParts()
   try {
-    const res = await fetchWorkLogMonthly(
-      farmCd.value,
-      t.getFullYear(),
-      t.getMonth() + 1,
-    )
+    const res = await fetchWorkLogMonthly(farmCd.value, ty, tm)
     rememberTodayCell(res.days || {})
   } catch {
     // Hero는 0으로 두고 월간 조회 실패 토스트는 loadMonth에서 처리
@@ -141,12 +138,12 @@ async function ensureTodayCellCache() {
 async function loadTodayWeather() {
   weatherLoading.value = true
   try {
-    const daily = await fetchWorkLogDaily(farmCd.value, today)
+    const daily = await fetchWorkLogDaily(farmCd.value, today.value)
     let master = daily.master
     // DB(마스터·캐시)에 없으면 PC와 동일하게 외부 API 자동 조회
-    if (!hasWorkLogWeather(master) && !isFutureDate(today)) {
+    if (!hasWorkLogWeather(master) && !isFutureDate(today.value)) {
       try {
-        const fetched = await fetchWorkLogWeather(farmCd.value, today)
+        const fetched = await fetchWorkLogWeather(farmCd.value, today.value)
         if (fetched.master) master = fetched.master
       } catch {
         // 자동 조회 실패 시 조용히 DB 결과만 유지
@@ -197,10 +194,10 @@ function goNextYear() {
 }
 
 function goTodayMonth() {
-  const t = new Date()
-  year.value = t.getFullYear()
-  month.value = t.getMonth() + 1
-  selectedDt.value = today
+  const t = todayBizParts()
+  year.value = t.year
+  month.value = t.month
+  selectedDt.value = today.value
 }
 
 function onSelectDay(workDt: string) {
@@ -213,8 +210,8 @@ function onBlocked(msg: string) {
 }
 
 function onFabRegister() {
-  selectedDt.value = today
-  void router.push({ name: 'work-log-daily', params: { workDt: today } })
+  selectedDt.value = today.value
+  void router.push({ name: 'work-log-daily', params: { workDt: today.value } })
 }
 
 function onSummaryDetail() {
@@ -258,6 +255,7 @@ watch(
 )
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', onWorkLogVisibility)
   applyYearMonthFromQuery()
   if (!farm.value) {
     await store.refreshAll()
@@ -285,6 +283,39 @@ onMounted(async () => {
       },
     })
   }
+})
+
+const mainTabPanelIndex = inject<Ref<number> | null>('mainTabPanelIndex', null)
+const mainTabActiveIndex = inject<Ref<number> | null>('mainTabActiveIndex', null)
+let lastWorkLogToday = todayIso()
+
+async function refreshIfBizDayRolled() {
+  const t = todayIso()
+  if (t === lastWorkLogToday) return
+  lastWorkLogToday = t
+  todayCellCache.value = null
+  selectedDt.value = t
+  const parts = todayBizParts()
+  year.value = parts.year
+  month.value = parts.month
+  await Promise.all([loadMonth(), loadTodayWeather(), ensureTodayCellCache()])
+}
+
+function onWorkLogVisibility() {
+  if (document.visibilityState !== 'visible') return
+  void refreshIfBizDayRolled()
+}
+
+watch(
+  () => mainTabActiveIndex?.value,
+  (idx) => {
+    if (mainTabPanelIndex == null || idx !== mainTabPanelIndex.value) return
+    void refreshIfBizDayRolled()
+  },
+)
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onWorkLogVisibility)
 })
 </script>
 

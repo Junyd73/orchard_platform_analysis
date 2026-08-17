@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
@@ -19,6 +19,7 @@ import {
   loadHomeDashboard,
 } from '@/views/home/homeData'
 import type { HomeBriefingItem, HomeRecentItem } from '@/views/home/homeMock'
+import { todayBizIso } from '@/shared/bizDate'
 
 const router = useRouter()
 const store = useAppStore()
@@ -35,6 +36,7 @@ const briefing = ref<HomeBriefingItem[]>([])
 const recent = ref<HomeRecentItem[]>([])
 
 let loadSeq = 0
+let lastHomeToday = ''
 
 async function reloadHomeDashboard() {
   const cd = String(farmCd.value || '').trim()
@@ -50,13 +52,25 @@ async function reloadHomeDashboard() {
   weather.value = data.weather
   briefing.value = data.briefing
   recent.value = data.recent
+  lastHomeToday = todayBizIso()
+}
+
+function onHomeVisibility() {
+  if (document.visibilityState !== 'visible') return
+  const t = todayBizIso()
+  if (t !== lastHomeToday) void reloadHomeDashboard()
 }
 
 onMounted(() => {
+  document.addEventListener('visibilitychange', onHomeVisibility)
   void (async () => {
     await store.refreshAll()
     await reloadHomeDashboard()
   })()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onHomeVisibility)
 })
 
 watch(farmCd, () => {
