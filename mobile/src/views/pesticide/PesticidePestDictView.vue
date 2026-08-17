@@ -23,6 +23,7 @@ import {
   type PestDictEntry,
   type PestDictKind,
 } from '@/views/pesticide/pestDictConstants'
+import { todayBizParts } from '@/shared/bizDate'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,7 +31,7 @@ const keyword = ref('')
 const kindFilter = ref<'all' | PestDictKind>('all')
 const detail = ref<PestDictEntry | null>(null)
 const detailOpen = ref(false)
-const refMonth = computed(() => new Date().getMonth() + 1)
+const refMonth = computed(() => todayBizParts().month)
 
 /** 스마트방제 CTA 등에서 지정한 병해충 — 상세 페이지로 바로 표시(모달 없음) */
 const pestQuery = computed(() => String(route.query.pest_nm || '').trim())

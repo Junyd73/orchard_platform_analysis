@@ -17,12 +17,13 @@ import {
   holdingsCategoryKeyOf,
   type HoldingsCategoryKey,
 } from '@/views/pesticide/pesticideConstants'
+import { todayBizParts } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import type { PesticideYearlyStatsItem } from '@/types/pesticide'
 
 const { farmCd } = storeToRefs(useAppStore())
 
-const year = ref(new Date().getFullYear())
+const year = ref(todayBizParts().year)
 const loading = ref(true)
 const errorMsg = ref('')
 const items = ref<PesticideYearlyStatsItem[]>([])
@@ -41,7 +42,7 @@ const openMap = ref<Record<HoldingsCategoryKey, boolean>>(
 )
 
 const yearOptions = computed(() => {
-  const y = new Date().getFullYear()
+  const y = todayBizParts().year
   return [y, y - 1, y - 2, y - 3]
 })
 

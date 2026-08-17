@@ -2,6 +2,8 @@
  *  발병여건 병해충 콤보는 PEST_DICT_NAMES 사용. 불일치 시 test_pest_dict_seed_matches_pest_rules 실패.
  */
 
+import { todayBizParts } from '@/shared/bizDate'
+
 export type PestDictKind = 'disease' | 'pest'
 
 export type PestDictRuleLine = {
@@ -371,7 +373,7 @@ export function isGenerationWindowActive(
 
 export function activeGenerationWindows(
   entry: PestDictEntry,
-  month: number = new Date().getMonth() + 1,
+  month: number = todayBizParts().month,
 ): PestDictGenerationWindow[] {
   const wins = entry.generation_windows || []
   return wins.filter((w) => isGenerationWindowActive(w, month))
