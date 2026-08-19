@@ -16,7 +16,7 @@
 |------|------|
 | 목적 | 소매(및 일부 도매) 주문 헤더 |
 | PK | 코드상 `order_no` 단일 조건. `farm_cd` 저장 |
-| 채번 | `ORD`+`YYYYMMDD`+`-`+3자리. 페이지 `get_next_seq`. core `generate_order_no` 없음 → P0 공통화 |
+| 채번 | `ORD`+`YYYYMMDD`+`-`+3자리. **core `generate_order_no`** (farm 스코프, TX 안 MAX). UUID 금지 |
 
 | 컬럼 | 코드 사용 | 주문/판매 의미 | 모바일 | 수정 |
 |------|-----------|----------------|--------|------|
@@ -24,11 +24,11 @@
 | farm_cd | INSERT | 농장 | 세션 | 유지 |
 | order_dt | 현재 `YYYYMMDD` | 주문일 | 신규 **YYYY-MM-DD** (DEC-012). 조회 시 혼재 파싱 | PC P0 |
 | custm_id | INSERT | 고객 | 필수 | 유지 |
-| status_cd | 신규 `'10'` 고정 | **주문상태만** (DEC-013). ST01 실코드 OPEN | 표시 | DEC-011 후 |
+| status_cd | Stage 2 신규 `ST010100` | **주문상태만** (DEC-013). 운영 ST01 SSOT (DEC-011 CLOSED) | 표시 | PC `'10'`/`'20'` 폐기 |
 | stock_status | `'N'` | 출고완료 플래그. `'Y'` 전환 없음 | 이행 계산에 사용 | 출고 TX에서 Y |
 | tot_order_amt / tot_ship_fee / tot_pay_amt / pre_pay_amt | 금액 | 선입금은 전표 없음 (DEC-009) | 표시 | 유지 |
 | season_type_cd | SS01 | 시즌 | 콤보 | 유지 |
-| sales_no | 주문 저장 시 즉시 채번 | **legacy/reference.** 부분출고 N건을 담지 못함. 출고 전 NULL, 이후 최초 출고 판매번호(또는 대표 참조)만 유지. **주문 전체 판매 조회는 반드시 `t_sales_master.order_no` 기준.** SSOT로 사용하지 않음 | | DEC-005 · **017 APPROVED** |
+| sales_no | Stage 2 신규는 빈 값 | **legacy/reference.** 출고 전 비움. 이후 최초 출고 판매번호만. **주문 전체 판매 조회는 반드시 `t_sales_master.order_no` 기준.** | | DEC-005 · **017 APPROVED** |
 | rmk, reg_id, reg_dt, mod_* | 감사 | `now_ops_str` | 동일 | 유지 |
 
 출고예정일 마스터 컬럼 **추가하지 않음.** `MIN(t_order_delivery.planned_dt)`.
@@ -333,4 +333,17 @@ SELECT
 FROM t_sales_master;
 ```
 
-ST01 목록을 확인하기 전에는 신규 주문상태 코드를 확정하지 않는다.
+ST01 운영 실코드는 DEC-011 CLOSED (`ST010100`~`ST010500`).
+
+## 16. 운영 테스트데이터 초기화 (2026-08-17 대표 완료)
+
+기존 주문/판매/재고는 테스트 데이터였으며 **운영 DB 초기화 완료**.  
+2026년 실제 신규 수확부터 재고관리를 시작한다. Stage 3 DDL을 당겨오지 않음.
+
+| 영역 | 결과 |
+|------|------|
+| 주문 | `t_order_master` 0 · `t_order_detail` 0 · `t_order_delivery` 0 |
+| 판매 | `t_sales_master` 0 · `t_sales_detail` 0 · `t_sales_delivery` 0 |
+| 재고 OR001 | `t_stock_master` 0 · `t_stock_log` 0 |
+| 회계 | 관련 `t_cash_ledger` 0 · `t_ledger` 0 |
+| 백업 | `/var/www/orchard/backups/orchard_20260817.db` |

@@ -152,6 +152,16 @@ class DBManager:
                 new_seq = 1
         return f"{date_part}-{new_seq:02d}"
 
+    def generate_order_no(self, farm_cd: str, order_dt: str) -> str:
+        """주문번호 생성 공통 규칙: ORD + YYYYMMDD + - + SEQ(3자리)."""
+        from core.order_service import generate_order_no as _gen_order_no
+
+        cur = self.conn.cursor()
+        try:
+            return _gen_order_no(cur, farm_cd, order_dt)
+        finally:
+            cur.close()
+
     def login_check(self, user_id, user_pw):
         self.last_auth_error = None
         uid = str(user_id or "").strip()

@@ -1,9 +1,9 @@
 # 05. API contract — 초안
 
-> 상태: 단계 0 **최종승인 완료**. 단계 1 착수. 구현 금지 범위는 해당 단계 진입 전 DDL/API.  
-> 재검색: **과일 orders/sales/stock/customer/delivery/payment API 없음.**  
+> 상태: 단계 0 **최종승인 완료**. 단계 2 **완료 / 대표 승인** (2026-08-19. GET/POST/PUT orders, GET/POST customers).  
+> 단계 3 API(allocations)·sales·ship 미구현. DDL 금지.  
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.  
-> PC와 FastAPI가 SQL을 복제하지 않음. `core` 서비스 1곳 (DEC-007).
+> PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
 기존 패턴: `/api/v1/farms/{farm_cd}/…`, Header `X-User-Id`.  
 날짜 요청/응답: **`YYYY-MM-DD`**. 내부 저장 신규도 ISO (DEC-012). 읽기는 YYYYMMDD 호환.  
@@ -35,11 +35,11 @@ FastAPI 라우터는 위 함수만 호출.
 
 | method | path | 설명 |
 |--------|------|------|
-| GET | `/farms/{farm_cd}/customers` | `q`, `use_yn=Y` |
-| GET | `/farms/{farm_cd}/customers/{custm_id}` | 상세 |
-| POST | `/farms/{farm_cd}/customers` | nm, mobile 필수. ID `C`+KST |
+| GET | `/farms/{farm_cd}/customers` | `q`, `use_yn=Y`. Stage 2 (`m_customer`) |
+| GET | `/farms/{farm_cd}/customers/{custm_id}` | 상세 — Stage 2 비범위 |
+| POST | `/farms/{farm_cd}/customers` | 신규등록 — Stage 2 보완. PC 주문 팝업 SSOT (`C`+`yyMMddHHmmss`, `custm_tp=CT01`). 모바일 전용 테이블 금지 |
 
-TX: 단건 INSERT. core: CustomerService.
+Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 ---
 
@@ -57,13 +57,13 @@ TX: 단건 INSERT. core: CustomerService.
 
 ## 3. orders — 등록은 재고 없어도 성공
 
-| method | path |
-|--------|------|
-| GET | `/farms/{farm_cd}/orders` |
-| GET | `/farms/{farm_cd}/orders/{order_no}` |
-| POST | `/farms/{farm_cd}/orders` |
-| PUT | `/farms/{farm_cd}/orders/{order_no}` |
-| POST | `/farms/{farm_cd}/orders/{order_no}/cancel` |
+| method | path | Stage 2 |
+|--------|------|---------|
+| GET | `/farms/{farm_cd}/orders` | 구현 |
+| GET | `/farms/{farm_cd}/orders/{order_no}` | 구현 |
+| POST | `/farms/{farm_cd}/orders` | 구현. 재고 0이어도 200 |
+| PUT | `/farms/{farm_cd}/orders/{order_no}` | 비범위 (PC 수정은 core `replace_order`) |
+| POST | `/farms/{farm_cd}/orders/{order_no}/cancel` | 비범위 |
 
 POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, lines(규격+`qty`), deliveries.
 
@@ -206,6 +206,6 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 ## 11. FastAPI 현황 (재확인)
 
-`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes.
+`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers**.
 
-**orders/sales/customers/fruit-stock 없음.**
+**Stage 2:** GET/POST orders, GET customers. **sales / fruit-stock / allocations / ship 없음.**

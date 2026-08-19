@@ -1,7 +1,7 @@
 # 08. PC 변경 범위
 
-구현하지 않음 (PC P0는 단계 2 이후). 공통 규칙에 맞추기 위한 **최소 수정 후보**.  
-근거: `ui/pages/order_page.py`, `sales_page.py`, `stock_page.py`, `market_price_page.py`, `core/db_manager.py`, `core/account_manager.py`.
+단계 2: 주문 저장 경로만 공통 `OrderService`에 맞춤 (화면 전면 재설계 없음).  
+근거: `ui/pages/order_page.py`, `core/order_service.py`, `core/db_manager.py`.
 
 서비스 이름은 **가칭**. 기존 `AccountManager`/`DBManager` 관례를 우선하고 새 아키텍처를 지금 확정하지 않음.  
 PC와 FastAPI가 **같은 함수**를 호출한다 (DEC-007).
@@ -29,8 +29,11 @@ PC와 FastAPI가 **같은 함수**를 호출한다 (DEC-007).
 | 13 | 채번 공통화 | `get_next_seq` vs `generate_sales_no` | core만 |
 | 14 | 재고행 allocation | MIN(storage_dt) + 로그에 row키 없음 | 가칭 `t_order_alloc` (DEC-018). FIFO 배정/출고, LIFO 해제 |
 
-P1: 판매 삭제 시 `t_ledger` (1차는 삭제 비활성). 주문 `status_cd` 실코드 (DEC-011).  
+P1: 판매 삭제 시 `t_ledger` (1차는 삭제 비활성).  
 P2: 배송 팝업 키 `delivery_qty` vs `dlvry_qty`, `load_existing_data` 주석화.
+
+단계 2에서 반영: A1 판매 분리, A8 신규 날짜 ISO, A9 `generate_order_no`, A11 신규 `ST010100`.  
+Hold 키·allocated·출고 TX는 단계 3–4.
 
 ---
 
@@ -85,9 +88,9 @@ PC·API 공통 confirm. 재고+CONFIRMED 한 TX. 운영 DRAFT 건수 점검 후 
 
 현재 delivery/cash/detail/master만 DELETE. 1차 삭제 버튼 비활성.
 
-### A11. status_cd 미저장 — P1 / DEC-011 OPEN
+### A11. status_cd 미저장 — P1 / DEC-011 CLOSED
 
-UI ST01, INSERT `'10'`. 실코드 확인 전 신규 코드 추가 금지.
+UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기. 확정 워크플로 버튼은 Stage 2 비범위.
 
 ### A12. 배송 팝업 키 — P2
 

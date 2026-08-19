@@ -8,6 +8,8 @@ import ObservationNewView from '@/views/observation/ObservationNewView.vue'
 import ObservationPhotoView from '@/views/observation/ObservationPhotoView.vue'
 import ObservationView from '@/views/observation/ObservationView.vue'
 import OrderView from '@/views/orders/OrderView.vue'
+import OrderNewView from '@/views/orders/OrderNewView.vue'
+import OrderDetailView from '@/views/orders/OrderDetailView.vue'
 import SettingsView from '@/views/settings/SettingsView.vue'
 import PesticideStockView from '@/views/pesticide/PesticideStockView.vue'
 import PesticideItemDetailView from '@/views/pesticide/PesticideItemDetailView.vue'
@@ -130,6 +132,17 @@ const router = createRouter({
       component: PesticideItemDetailView,
     },
     { path: '/orders', name: 'orders', component: OrderView },
+    { path: '/orders/new', name: 'order-new', component: OrderNewView },
+    {
+      path: '/orders/:orderNo/edit',
+      name: 'order-edit',
+      component: OrderNewView,
+    },
+    {
+      path: '/orders/:orderNo',
+      name: 'order-detail',
+      component: OrderDetailView,
+    },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView },
   ],

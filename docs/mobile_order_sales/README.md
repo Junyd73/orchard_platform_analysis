@@ -1,7 +1,7 @@
 # 주문/판매관리 통합 설계 (ORD-001)
 
-> **상태:** 단계 0 **최종승인 완료** → 단계 1 **완료 / 대표 승인** (2026-08-17)  
-> **갱신:** 2026-08-17 (단계 1 private main 반영. 단계 2 미착수. 단계 0은 다시 열지 않음)
+> **상태:** 단계 0 **최종승인 완료** → 단계 1 **완료 / 대표 승인** → 단계 2 **완료 / 대표 승인** (2026-08-19)  
+> **갱신:** 2026-08-19 (단계 2 대표 승인 · private main merge. DEC-011 CLOSED. 단계 3 미착수)
 
 PC(PyQt) · core · FastAPI · Vue PWA가 **동일 업무 규칙**을 쓰기 위한 설계다.
 
@@ -14,7 +14,7 @@ PC(PyQt) · core · FastAPI · Vue PWA가 **동일 업무 규칙**을 쓰기 위
 | `mobile/docs/screens/` | 승인된 ODS/SCR SSOT. 아직 SCR ID 없음 |
 | 관찰/농약 단일 md | 주문/판매는 PC 변경·migration 조건까지 포함해 분할 |
 
-단계 1 화면 명세: `mobile/docs/screens/SCR-030.md` (주문/판매 셸 · 환경설정).
+단계 1–2 화면 명세: `mobile/docs/screens/SCR-030.md` (주문/판매 셸 · 목록/등록).
 
 ## 목차
 
@@ -48,7 +48,6 @@ PC(PyQt) · core · FastAPI · Vue PWA가 **동일 업무 규칙**을 쓰기 위
 
 | ID | 내용 | 해결 시점 |
 |----|------|-----------|
-| DEC-011 | 운영 `ST01` 실코드 | **단계 2 전** |
 | DEC-015 | 기존 HOLD → allocated / `t_order_alloc` 백필 | **단계 3 migration 전** |
 | DEC-019 | 선입금의 부분출고별 배분 | **단계 4 전** |
 | DEC-016 | 가락 확정 시 `t_sales_delivery` | **단계 6 전** |
@@ -56,8 +55,8 @@ PC(PyQt) · core · FastAPI · Vue PWA가 **동일 업무 규칙**을 쓰기 위
 ## 단계 0 상태
 
 단계 0 설계 **최종승인 완료** (2026-08-17 대표). 단계 0을 다시 열지 않는다.  
-단계 1(메뉴/라우트 셸) **완료 / 대표 승인**. 단계 2(주문 조회/등록)는 미착수.  
-DDL/주문 API/출고 TX는 해당 단계 진입 후.
+단계 1(메뉴/라우트 셸) **완료 / 대표 승인**. 단계 2(주문 조회/등록) **완료 / 대표 승인**. 단계 3 미착수.  
+배정 DDL(`allocated_qty` / `t_order_alloc`)·출고 TX는 단계 3 이후.
 
 ## 코드 근거 (재검증)
 
@@ -65,9 +64,10 @@ DDL/주문 API/출고 TX는 해당 단계 진입 후.
 - `ui/pages/sales_page.py` — `execute_full_save`, `delete_sales_data`
 - `ui/pages/stock_page.py` — 원물 IN / 선별생산
 - `ui/pages/market_price_page.py` — `save_realtime_auction_draft`
-- `core/db_manager.py` — `generate_sales_no`, `ensure_sales_workflow_schema`, `classify_work_log_status` (ST01 폴백)
+- `core/db_manager.py` — `generate_sales_no`, `generate_order_no`, `classify_work_log_status` (ST01 폴백 · **Stage 2에서 수정 금지**)
+- `core/order_service.py` — 주문 3테이블 CRUD (판매·HOLD·전표 금지)
 - `core/account_manager.py` — `sync_ledger_by_basket`
-- `server/app/api/v1/router.py` — 과일 orders/sales 없음
-- `mobile/src/features/orders/OrderView.vue` — 단계 1 셸 (`/orders`, 세그먼트)
+- `server/app/api/v1/router.py` — Stage 2: orders + customers GET. sales 없음
+- `mobile/src/features/orders/OrderView.vue` — 주문 목록 · FAB → `/orders/new`
 - `docs/판매관리테이블 생성.txt` — `qty REAL`
 - `server/docs/sqlite_schema_baseline.md` — 테이블 목록. ST01 시드 없음
