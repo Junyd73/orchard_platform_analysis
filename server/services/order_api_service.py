@@ -5,11 +5,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.exceptions import BusinessRuleError, EntityNotFoundError
+from app.core.exceptions import BusinessRuleError, DataIntegrityError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection, get_sqlite_write_connection
 from app.schemas.order import (
+    AllocationCreateRequest,
+    AllocationReleaseRequest,
+    AllocationSummaryOut,
     CustomerCreateRequest,
     CustomerListItem,
+    FruitStockItemOut,
     OrderCreateRequest,
     OrderDetail,
     OrderLineIn,
@@ -39,6 +43,10 @@ from core.order_service import (  # noqa: E402
     OrderSaveInput,
     OrderService,
     OrderValidationError,
+)
+from core.order_allocation_service import (  # noqa: E402
+    AllocationConflictError,
+    OrderAllocationService,
 )
 
 
@@ -222,3 +230,115 @@ class OrderApiService:
         except OrderSaveError as exc:
             raise BusinessRuleError(exc.message, error_code=exc.code) from exc
         return self.get_order(farm_cd, order_no)
+
+    def list_allocations(self, farm_cd: str, order_no: str) -> AllocationSummaryOut:
+        try:
+            with get_sqlite_connection(self._db_path) as conn:
+                data = OrderAllocationService(conn).get_allocation_summary(
+                    farm_cd, order_no
+                )
+        except OrderNotFoundError as exc:
+            raise EntityNotFoundError(exc.message) from exc
+        except OrderValidationError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        return AllocationSummaryOut.model_validate(data)
+
+    def allocate(
+        self,
+        farm_cd: str,
+        order_no: str,
+        body: AllocationCreateRequest,
+        *,
+        user_id: str | None,
+    ) -> AllocationSummaryOut:
+        auto = bool(body.auto or body.qty is None)
+        try:
+            with get_sqlite_write_connection(self._db_path) as conn:
+                data = OrderAllocationService(conn).allocate(
+                    farm_cd,
+                    order_no,
+                    order_detail_id=body.order_detail_id,
+                    qty=body.qty,
+                    auto=auto,
+                    user_id=user_id or "MOBILE",
+                )
+        except OrderNotFoundError as exc:
+            raise EntityNotFoundError(exc.message) from exc
+        except AllocationConflictError as exc:
+            raise DataIntegrityError(exc.message) from exc
+        except OrderValidationError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        except OrderSaveError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        return AllocationSummaryOut.model_validate(data)
+
+    def release_allocation(
+        self,
+        farm_cd: str,
+        order_no: str,
+        body: AllocationReleaseRequest,
+        *,
+        user_id: str | None,
+    ) -> AllocationSummaryOut:
+        try:
+            with get_sqlite_write_connection(self._db_path) as conn:
+                data = OrderAllocationService(conn).release(
+                    farm_cd,
+                    order_no,
+                    order_detail_id=body.order_detail_id,
+                    qty=body.qty,
+                    user_id=user_id or "MOBILE",
+                )
+        except OrderNotFoundError as exc:
+            raise EntityNotFoundError(exc.message) from exc
+        except AllocationConflictError as exc:
+            raise DataIntegrityError(exc.message) from exc
+        except OrderValidationError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        except OrderSaveError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        return AllocationSummaryOut.model_validate(data)
+
+    def list_fruit_stock(
+        self,
+        farm_cd: str,
+        *,
+        item_cd: str | None = None,
+        variety_cd: str | None = None,
+        wh_cd: str | None = None,
+        include_zero: bool = False,
+    ) -> list[FruitStockItemOut]:
+        with get_sqlite_connection(self._db_path) as conn:
+            rows = OrderAllocationService(conn).get_available_stock(
+                farm_cd, item_cd=item_cd, variety_cd=variety_cd,
+                wh_cd=wh_cd, include_zero=include_zero,
+            )
+        return [FruitStockItemOut.model_validate(r) for r in rows]
+
+    def list_stock_logs(
+        self,
+        farm_cd: str,
+        *,
+        item_cd: str | None = None,
+        variety_cd: str | None = None,
+        grade_cd: str | None = None,
+        size_cd: str | None = None,
+        weight: float | None = None,
+        storage_dt: str | None = None,
+        harvest_year: int | None = None,
+        limit: int = 50,
+    ) -> list["StockLogOut"]:
+        from app.schemas.order import StockLogOut
+        with get_sqlite_connection(self._db_path) as conn:
+            rows = OrderAllocationService(conn).list_stock_logs(
+                farm_cd,
+                item_cd=item_cd,
+                variety_cd=variety_cd,
+                grade_cd=grade_cd,
+                size_cd=size_cd,
+                weight=weight,
+                storage_dt=storage_dt,
+                harvest_year=harvest_year,
+                limit=limit,
+            )
+        return [StockLogOut.model_validate(r) for r in rows]

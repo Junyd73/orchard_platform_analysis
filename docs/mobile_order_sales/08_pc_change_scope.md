@@ -1,10 +1,19 @@
 # 08. PC 변경 범위
 
-단계 2: 주문 저장 경로만 공통 `OrderService`에 맞춤 (화면 전면 재설계 없음).  
-근거: `ui/pages/order_page.py`, `core/order_service.py`, `core/db_manager.py`.
+주문/판매 P0 + **재고/생산은 StockPage 유지·확장** (전면 교체 금지).  
+생산/재고 SSOT: [09_production_inventory_flow.md](./09_production_inventory_flow.md) · PC: `ui/pages/stock_page.py`.
 
-서비스 이름은 **가칭**. 기존 `AccountManager`/`DBManager` 관례를 우선하고 새 아키텍처를 지금 확정하지 않음.  
-PC와 FastAPI가 **같은 함수**를 호출한다 (DEC-007).
+## 재고/생산 (PC 현재 — 폐기 금지)
+
+| 기능 | StockPage | 비고 |
+|------|-----------|------|
+| 원물 등록 | `register_raw_material` | FR010300 IN |
+| 생산확정 | `save_production_log` | 원물 OUT + FR010100 IN + 수율 |
+| 상품 실사 | `audit_product_stock` | AUDIT 로그 |
+| 폐기 | `dispose_raw_material` | |
+| 작업 완료 | `t_work_detail` DONE | 생산확정 TX |
+
+**확장(후속 P+S):** 생산→바로판매 A안 · 전량 IN 후 판매 OUT (OPEN-PROD-03 **CLOSED**). **이번 작업 DDL 없음.**
 
 ---
 

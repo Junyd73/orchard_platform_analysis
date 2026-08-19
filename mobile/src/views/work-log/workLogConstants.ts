@@ -29,6 +29,10 @@ export const WORK_MID_CD_PESTICIDE = 'WK010200'
 export const WORK_MID_CD_FERTILIZER = 'WK010800'
 /** m_common_code WK01 — 기타작업 (= 기타 필터 · 메모 미리보기) */
 export const WORK_MID_CD_OTHER = 'WK010600'
+/** m_common_code WK01 — 수확작업 */
+export const WORK_MID_CD_HARVEST = 'WK010300'
+/** 배 품종 부모코드 (t_work_detail.variety_cd) */
+export const PEAR_VARIETY_PARENT_CD = 'FR010100'
 
 export const MSG_FUTURE_WORK_LOG =
   '미래 일자는 준비중으로만 등록할 수 있습니다. 인력·경비·농약·사진은 당일에 입력해 주세요.'
@@ -67,6 +71,11 @@ export const MSG_WEATHER_FETCH_FAILED = '날씨를 가져오지 못했습니다.
 export const MSG_SAVE_OK = '저장되었습니다.'
 export const MSG_DRAFT_OK = '임시 저장되었습니다.'
 export const MSG_WORK_CONTENT_REQUIRED = '작업구분을 선택해 주세요.'
+export const MSG_HARVEST_VARIETY_REQUIRED = '수확 품종을 선택해 주세요.'
+export const MSG_HARVEST_QTY_REQUIRED = '수확량은 1 이상 상자 수입니다.'
+export const LABEL_HARVEST_VARIETY = '품종'
+export const LABEL_HARVEST_QTY = '수확량'
+export const SUFFIX_HARVEST_BOX = '상자'
 export const MSG_SAVE_FAILED = '저장에 실패했습니다.'
 export const MSG_DELETE_OK = '작업이 삭제되었습니다.'
 export const MSG_DELETE_CONFIRM_TITLE = '이 작업을 삭제하시겠습니까?'
@@ -398,6 +407,10 @@ export function isFertilizerWork(midCd: string, midNm: string): boolean {
   return nm.includes('비료') || nm.includes('영양제')
 }
 
+export function isHarvestWork(midCd: string, _midNm = ''): boolean {
+  return String(midCd || '').trim().toUpperCase() === WORK_MID_CD_HARVEST
+}
+
 /** 기타작업 — 캘린더 「기타」에 작업 메모(rmk)로 표시 */
 export function isOtherWork(midCd: string, midNm: string): boolean {
   const cd = String(midCd || '').trim().toUpperCase()
@@ -718,6 +731,9 @@ export type DailyWorkFormModel = {
   /** 저장 시 구글 캘린더 반영 */
   syncGoogle: boolean
   googleEventId: string | null
+  varietyCd: string
+  varietyNm: string
+  harvestContainerQty: string
 }
 
 export function createEmptyWorkForm(): DailyWorkFormModel {
@@ -734,6 +750,9 @@ export function createEmptyWorkForm(): DailyWorkFormModel {
     rmk: '',
     syncGoogle: false,
     googleEventId: null,
+    varietyCd: '',
+    varietyNm: '',
+    harvestContainerQty: '',
   }
 }
 
@@ -843,6 +862,9 @@ export type DailyTimelineItem = {
   location: string
   /** 작업 메모 (PC rmk) */
   rmk: string
+  varietyCd?: string
+  varietyNm?: string
+  harvestContainerQty?: number | null
 }
 
 /** Shell용 더미 타임라인 (시안: 적과→SS방제→제초→비료) */
@@ -1124,6 +1146,9 @@ export function mapWorkItemToTimeline(
     end_tm?: string | null
     status_cd?: string | null
     status_nm?: string | null
+    variety_cd?: string | null
+    variety_nm?: string | null
+    harvest_container_qty?: number | null
   },
   index = 0,
 ): DailyTimelineItem {
@@ -1154,6 +1179,12 @@ export function mapWorkItemToTimeline(
     statusLabel: String(work.status_nm || '').trim() || '—',
     location: String(work.work_loc_nm || '').trim() || '—',
     rmk: String(work.rmk || '').trim(),
+    varietyCd: String(work.variety_cd || '').trim(),
+    varietyNm: String(work.variety_nm || '').trim(),
+    harvestContainerQty:
+      work.harvest_container_qty == null || Number.isNaN(Number(work.harvest_container_qty))
+        ? null
+        : Number(work.harvest_container_qty),
   }
 }
 

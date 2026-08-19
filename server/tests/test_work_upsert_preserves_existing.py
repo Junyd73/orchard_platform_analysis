@@ -50,7 +50,8 @@ def _build_db() -> tuple[sqlite3.Connection, Path]:
         INSERT INTO m_common_code VALUES
           ('OR001','WK010100','전정','WK01'),
           ('OR001','WK010200','방제','WK01'),
-          ('OR001','WK010300','시비','WK01'),
+          ('OR001','WK010300','수확','WK01'),
+          ('OR001','WK010400','시비','WK01'),
           ('OR001','WO010100','준비중','WO01'),
           ('OR001','WO010200','진행중','WO01'),
           ('OR001','WO010300','완료','WO01');
@@ -223,13 +224,13 @@ class TestBasicSaveDoesNotDeleteMissing(unittest.TestCase):
         self._save(
             [
                 WorkDetailDto(work_id=a, work_mid_cd="WK010200", rmk="A"),
-                WorkDetailDto(work_id=b, work_mid_cd="WK010300", rmk="B"),
+                WorkDetailDto(work_id=b, work_mid_cd="WK010400", rmk="B"),
             ]
         )
         self._save(
             [
                 WorkDetailDto(work_id=a, work_mid_cd="WK010200", rmk="A"),
-                WorkDetailDto(work_id=b, work_mid_cd="WK010300", rmk="B"),
+                WorkDetailDto(work_id=b, work_mid_cd="WK010400", rmk="B"),
                 WorkDetailDto(work_id=c, work_mid_cd="WK010100", rmk="C"),
             ]
         )
@@ -242,7 +243,7 @@ class TestBasicSaveDoesNotDeleteMissing(unittest.TestCase):
         self._save(
             [
                 WorkDetailDto(work_id=a, work_mid_cd="WK010200", rmk="A"),
-                WorkDetailDto(work_id=b, work_mid_cd="WK010300", rmk="B"),
+                WorkDetailDto(work_id=b, work_mid_cd="WK010400", rmk="B"),
             ]
         )
         self.assertEqual(_count(self.conn, self.DT), 2)
@@ -263,7 +264,7 @@ class TestBasicSaveDoesNotDeleteMissing(unittest.TestCase):
         self._save(
             [
                 WorkDetailDto(work_id=a, work_mid_cd="WK010200"),
-                WorkDetailDto(work_id=b, work_mid_cd="WK010300"),
+                WorkDetailDto(work_id=b, work_mid_cd="WK010400"),
             ]
         )
         # 과거일로 강제 (integrated는 미래 거부지만 core 직접 호출)
@@ -277,7 +278,7 @@ class TestBasicSaveDoesNotDeleteMissing(unittest.TestCase):
                 master=master,
                 works=[
                     WorkDetailDto(work_id=a2, work_mid_cd="WK010200"),
-                    WorkDetailDto(work_id=b2, work_mid_cd="WK010300"),
+                    WorkDetailDto(work_id=b2, work_mid_cd="WK010400"),
                 ],
             ),
         )
@@ -316,7 +317,7 @@ class TestUpsertWorksApiPreserves(unittest.TestCase):
     def test_sequential_abc_and_monthly_count(self) -> None:
         for mid, rmk in (
             ("WK010200", "A"),
-            ("WK010300", "B"),
+            ("WK010400", "B"),
             ("WK010100", "C"),
         ):
             # 매번 신규만 추가 전송(기존 누락) — 버그 재현 경로
@@ -365,7 +366,7 @@ class TestUpsertWorksApiPreserves(unittest.TestCase):
             "OR001",
             self.DT,
             WorkLogWorksUpsertRequest(
-                works=[WorkLogWorkUpsertItem(work_mid_cd="WK010300", rmk="B")]
+                works=[WorkLogWorkUpsertItem(work_mid_cd="WK010400", rmk="B")]
             ),
             user_id="T1",
         )
@@ -394,7 +395,7 @@ class TestUpsertWorksApiPreserves(unittest.TestCase):
                     WorkLogWorkUpsertItem(
                         work_id=f"{self.digits}-01", work_mid_cd="WK010200", rmk="A"
                     ),
-                    WorkLogWorkUpsertItem(work_mid_cd="WK010300", rmk="B"),
+                    WorkLogWorkUpsertItem(work_mid_cd="WK010400", rmk="B"),
                 ]
             ),
             user_id="T1",
@@ -445,7 +446,7 @@ class TestUpsertWorksApiPreserves(unittest.TestCase):
             "OR001",
             self.DT,
             WorkLogWorksUpsertRequest(
-                works=[WorkLogWorkUpsertItem(work_mid_cd="WK010300", rmk="B")]
+                works=[WorkLogWorkUpsertItem(work_mid_cd="WK010400", rmk="B")]
             ),
             user_id="T1",
         )

@@ -1,30 +1,53 @@
 # 06. Development progress
 
-> 추적 문서. **단계 0 = 최종승인 완료** (2026-08-17 대표). 다시 열지 않음.  
-> **단계 1 = 완료 / 대표 승인** (2026-08-17). **단계 2 = 완료 / 대표 승인** (2026-08-19). 단계 3 미착수.
+> **Stage 6 로컬 완료** (DIRECT+STOCK+allocation). main 미머지 · 운영 미적용.  
+> OPEN-PROD-01~03 **CLOSED**. DEC-026 harvest_year **APPROVED**.  
+> 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
 범례: `—` · `예정` · `진행` · `완료` · `차단` · `대기`
 
-## 게이트
+## 현재 Stage 표 (2026-08-19)
+
+| 단계 | 목표 | 상태 |
+|------|------|------|
+| 0 | 주문·판매·재고 전체 설계 / PC 기준 분석 / 업무규칙 확정 | **완료** |
+| 1 | 모바일 주문/판매 진입구조·메뉴·라우팅 | **완료** |
+| 2 | 주문관리 — 조회·등록·수정·취소·고객·배송지 | **완료** |
+| 3 (=H) | 수확기록 확장 — 영농일지 품종·콘테이너 수량 | **완료** (main 미머지) |
+| 4 (=P) | 생산/변환 — PACK·PROCESS·원물 OUT·생산품 IN | **완료** (main 미머지) |
+| 5A (=3A) | 재고배정 Core — HOLD / RELEASE / allocation | **완료** (main 미머지) |
+| 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료** (main 미머지) |
+| 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **Core+HTTP 완료** (Mobile UI 후속 · main 미머지) |
+| 6 | 모바일 출고·배정·판매 UX | **로컬 완료** (main 미머지 · 운영 미적용) |
+| 7 | 가락시장 경매→판매확정·정산 | **예정** |
+| 8 | 통합 회귀·PC/PWA 정합·운영 Migration·배포 | **예정** |
+
+역사적 게이트 번호(3A/H/P/S)는 코드·커밋 메시지에 남아 있다. 위 표가 현재 SSOT.
+
+## 게이트 (기존 번호 유지)
 
 ```
 0 설계 최종승인 (완료)
  → 1 메뉴/라우트
  → 2 주문 조회/등록
- → 3 재고배정  (allocated_qty + t_order_alloc + 운영 HOLD 점검)
- → 4 출고→판매  (DEC-019 선입금 배분 확정 후)
+ → 3A 저장재고형 선택적 재고배정  (구현 완료 · main 미머지)
+ → [권장] 수확기록 → 생산확장 → 판매/출고 OUT TX
+ → 3B 모바일 배정 UI  (3A 직후 아님)
  → 5 판매관리
  → 6 경매/수금/회계
  → 7 회귀/운영검증
 ```
+
+기존 단계 4(출고→판매)는 **권장 후속의 판매/출고 공통 TX**와 같음. 번호만 유지.
 
 | 단계 | 목표 | 상태 | PC | Core | API | Mobile | Test | 대표 승인 |
 |------|------|------|----|------|-----|--------|------|-----------|
 | 0. 설계 | 본 폴더 문서 · 규칙 합의 | **완료** | — | — | — | — | 문서 리뷰 | **최종승인 완료** (2026-08-17) |
 | 1. 메뉴/라우트 | 하단 주문/판매 · 내정보 이동 | **완료 / 대표 승인** | 없음 | 없음 | 없음 | 셸 | T-NAV-* | **승인** (2026-08-17) |
 | 2. 주문 조회/등록 | 선주문 저장 (판매·전표 없음) | **완료 / 대표 승인** | 주문만 저장 | OrderService | GET/POST orders | 목록·등록·수정 | T-ORD-01 | **승인** (2026-08-19) |
-| 3. 재고배정 | 부분배정 · Hold · `t_order_alloc` | 예정 | Hold 키 · allocated · alloc | Allocation | allocations | 상세 배정 | 100/30/70 · 동시성 | 단계2 + DDL + 운영점검 |
-| 4. 출고→판매 | 단일 TX · 출고 1회=판매 1건 | 예정 | ship | OrderShip | POST ship | 출고 CTA | T-SHP-* | 단계3 + DEC-019 |
+| 3A. 재고배정 | 저장재고형 **선택** 배정 · Hold · `t_order_alloc` | **구현 완료** | Hold 키 | Allocation | allocations | 조회만 | 42 passed | **구현 승인 대기 · main 미머지** |
+| 3B. 배정 UI | 모바일 배정 UX (필수단계처럼 보이지 않게) | **후순위** | — | 3A 재사용 | 3A 재사용 | 미착수 | — | 수확·생산·OUT TX 이후 |
+| 4. 출고→판매 | 상품 OUT + 판매 · STOCK/DIRECT | Core+HTTP 완료 / UI 후속 | 미위임 | OrderShip | POST shipments/confirm | 출고 CTA | T-SHIP-* / T-SHIP-API-* | Mobile UX 후속 |
 | 5. 판매관리 | 목록·직접판매·order_no | 예정 | 재저장 보존 | SalesService | GET/PUT sales | 판매 탭 | T-SAL-01 | 단계4 승인 후 |
 | 6. 경매/수금/회계 | confirm TX · payments | 예정 | 확정 버튼 | Confirm+Account | confirm/payments | DRAFT CTA | T-AUC/PAY | 단계5 승인 후 |
 | 7. 회귀/운영 | PC+모바일+관찰/일지/농약 | 예정 | 회귀 | — | health | 스모크 | T-REG-01 | 배포 승인 |
@@ -36,9 +59,12 @@
 - [x] DEC-017 / DEC-018 설계 확정 (2026-08-17)
 - [x] **단계 0 설계 최종승인** (2026-08-17 대표). 다시 열지 않음
 - [x] DEC-019 OPEN 기록 (선입금 부분출고 배분 · 단계 4 전)
+- [x] OPEN-PROD-01~03 **CLOSED** (2026-08-19 대표 최종승인. [09 §5·§9](./09_production_inventory_flow.md))
+- [x] DEC-026 harvest_year 원료 수확연도 승계 (2026-08-19)
+- [x] Stage 5B 재고조회/이력 (로컬 · main 미머지)
 - [x] ST01 운영 DB 확인 (DEC-011 **CLOSED** — 2026-08-17)
-- [ ] 기존 HOLD 백필 (DEC-015 OPEN — 단계 3 전)
-- [ ] 선입금 배분 확정 (DEC-019 OPEN — 단계 4 전)
+- [ ] 기존 HOLD 백필 (DEC-015 OPEN — **CLOSED 후보**. 운영 테스트데이터 초기화로 대상 없음. 운영 DB 재확인 SQL: `scripts/ops/check_order_alloc_preflight.sql`. 재확인 전 CLOSED 금지)
+- [ ] 선입금 배분 확정 (DEC-019 OPEN — 출고 TX 단계 전)
 - [ ] 가락 확정 시 `t_sales_delivery` (DEC-016 OPEN — 단계 6 전)
 
 ## 단계 1 산출물
@@ -54,7 +80,7 @@
 ## 단계 2
 
 **완료 / 대표 승인** (2026-08-19). 주문 조회/등록/수정/취소만. 판매 생성 · HOLD · 회계 · 배정 DDL 없음.  
-private main merge 완료. 단계 3 착수 금지.
+private main merge 완료. 단계 3는 별도 브랜치.
 
 - 공통 `core/order_service.py` (`OrderService`)
 - PC `save_entire_order` → 주문 3테이블만
@@ -69,11 +95,118 @@ private main merge 완료. 단계 3 착수 금지.
 - 상품 Accordion · 택배 배송지 N건 · 상태별 수정 제한
 - 대표 수동 UI 승인 (2026-08-19). private main merge 완료.
 
-## 단계 3
+## 단계 3A
 
-예정 / **미착수**. `allocated_qty` / `t_order_alloc` DDL 및 배정 API는 당기지 않음.
+**구현 완료** (Core·API·테스트). **private main merge 아님.** 운영 DB migration **미실행.**
 
-영농일지 `classify_work_log_status`의 ST010300/400/500 폴백은 **별도 이슈. Stage 2에서 수정 금지.**
+목표 = **이미 있는 상품재고를 주문에 예약** (저장재고형 **선택**).  
+모든 주문이 fully allocated일 필요는 없다. `allocated_qty=0`은 정상(즉시출고·생산→바로판매).  
+생산→즉시판매에 alloc **강제 없음**. Stage 3A와 확정 생산모델 **충돌 없음**.
+
+- `OrderAllocationService`: FIFO 배정, LIFO 해제, `reserved_qty` + HOLD/CANCEL_HOLD
+- GET/POST allocations, POST allocations/release, GET fruit-stock (조회 전용)
+- 주문 취소 시 미출고 배정이 있으면 동일 TX 해제. 없으면 상태만 변경
+- 배정된 상세 규격 변경 금지, qty < allocated 금지
+- T-ORD-02/03/04/05 + FIFO 분할/LIFO/동시성 + 미배정 주문 정상
+- 품종 코드로 STOCK/DIRECT 분기하지 않음 (DEC-020)
+- `allocated_qty` / `t_order_alloc` DDL은 로컬·테스트만 (`core/order_alloc_migrate.py`)
+
+구분: **구현 완료** ≠ **main merge 승인**.
+
+### 3B UI — 후순위 (3A 직후 금지)
+
+잘못된 표현: 「미배정 70 → 반드시 처리 필요」  
+권장 표시: 주문 100 · 배정 30 · 미배정 70.  
+안내: 「저장재고 출고 시 재고를 배정합니다.」  
+즉시출고형 주문은 미배정 수량이 있어도 오류 상태로 표시하지 않는다.
+
+영농일지 ST01 폴백은 **Stage 3에서 수정 금지.**
+
+---
+
+## 단계 H (수확기록)
+
+**구현 완료** (Core·API·PC·모바일·테스트). **private main merge 아님.** 운영 DB migration **미실행.**
+
+- `WK010300` 수확작업: 품종(`FR010100` 공통코드) · 콘테이너 상자 수
+- `t_work_detail.variety_cd` · `harvest_container_qty` — `core/work_harvest_schema.py` 멱등 ALTER
+- 수확 저장 ≠ `t_stock_master` / `t_stock_log` 변경 (DEC-022)
+- PC `work_log_page` · 모바일 `WorkLogDailyWorkForm` · API optional 필드 + Core validation SSOT
+- T-HARVEST-01~08 (`server/tests/test_work_harvest.py`) + Stage 3A 회귀
+
+---
+
+## 판매관리 Shell (2026-08-19)
+
+**구현 완료.** 포장/생산(Stage P)·재고(Stage 5B) 실기능. 판매 OUT 없음.
+
+- 하단: **주문/판매** → **판매관리** (5탭 유지, `/orders`·`nav-orders` 유지)
+- 상단: **[포장/생산] [재고] [주문] [판매]** — 초기 선택 **주문**
+- 포장/생산: `PackProdPanel` · 재고: `StockView` (조회 전용)
+- 주문·판매: Stage 2 Shell. 판매 탭은 prefill 수신만 (5C 전)
+- PC 대메뉴 **미변경**
+
+---
+
+## 권장 후속 개발순서 (2026-08-19)
+
+판단 기준: 기반 의존성 · PC 재사용 · DDL 최소 · 2026 수확철 실사용 · 중복입력 감소 · 독립 테스트 · Stage 3A 무충돌.
+
+```
+3A/5A  상품재고 → 주문 배정          [구현 완료 · merge 대기]
+ ↓
+H/3    수확기록 최소 확장            [구현 완료 · merge 대기]
+ ↓
+P/4    생산/변환 확장                [구현 완료 · merge 대기]
+ ↓
+5B     재고관리 조회·이력            [구현 완료 · merge 대기]
+ ↓
+5C/S   판매/출고 공통 TX             [Core 완료 · API/UI 후속]
+ ↓
+6      모바일 출고·배정 UX           [저장배 경로만]
+ ↓
+7      가락 경매확정/정산
+ ↓
+8      회귀·운영 migration
+```
+
+| 순서 | 내용 | 왜 지금 | DDL | 3A 충돌 |
+|------|------|---------|-----|:-------:|
+| **H 수확** | `variety_cd` · `harvest_container_qty`. PC/모바일 영농일지. 통계 기초 | **구현 완료** (2026-08-19). `core/work_harvest_schema.py` 멱등 ALTER. 운영 자동실행 금지 | `t_work_detail` 2컬럼 | 없음 |
+| **P 생산** | 기존 `save_production_log` 유지·확장. HARVEST/RAW_STOCK. PACK/PROCESS. 배즙 **박스**. [재고저장]/[바로판매] prefill. 전량 IN. 원물 N건 투입 | **구현 완료** | 없음 | 없음 (IN≠HOLD) |
+| **5B 재고** | GET fruit-stock · logs. 현재/배정/가용 Core 계산. 조회 전용 | **구현 완료** | 없음 | 없음 |
+| **5C/S 판매 OUT** | `OrderShipService.confirm()` 단일 TX (로컬) | 출고 추적 | `stock_seq`/`ref_*` | STOCK consume = shipped_qty |
+| **6 (구 3B)** | 모바일 출고·배정 UX | 5C 이후. 저장배 경로만 | 없음 | 5A 재사용 |
+| **7** | 가락 CONFIRMED + OUT | DRAFT≠확정. 5C의 OUT 시점 규칙 필요 | DEC-016 | — |
+| **8** | 회귀·운영 migration | merge·배포 승인 후 | 운영 ALTER | — |
+
+**3B를 뒤로 미루는 근거:** 배정 UI는 저장배 소매에만 필요. 수확·포장·바로판매가 2026 현장의 최소 흐름. 3B를 먼저 만들면 배정이 **필수 단계처럼 보임** (DEC-021 위반).
+
+### 단계별 DDL · production 적용
+
+| 단계 | 변경 | 적용 시점 |
+|------|------|-----------|
+| 3A | `t_order_detail.allocated_qty` · `t_order_alloc` | **로컬/테스트만.** 운영 = **main merge + 별도 승인 후** |
+| H 수확 | `t_work_detail.variety_cd TEXT` · `harvest_container_qty INTEGER` | **로컬/테스트만** (`ensure_work_harvest_schema`). 운영 = main merge + 별도 승인 후 |
+| P 생산 | 신규 테이블 **없음** | — |
+| 5C 추적 | `t_sales_detail.stock_seq` · `t_stock_log.stock_seq/ref_type/ref_id` | **로컬/테스트** (`ensure_sales_stock_trace_schema`). **운영 자동실행 금지.** alloc migrate와 분리 |
+
+### 배즙 단위
+
+사용자 단위 = **박스**. PC 「포」는 **P 생산 단계**에서 UI 표기만 수정. qty 변환 migration **없음**.
+
+---
+
+## 업무모델 vs 단계계획
+
+| 항목 | 상태 |
+|------|------|
+| OPEN-PROD-01~03 | **CLOSED** (설계). **Stage P·5B·5C Core** 로컬 · API/UI 후속 |
+| Stage 3A/5A allocation | **구현 완료** · main 미머지 · 운영 DDL 미적용 |
+| Stage 5B 재고조회 | **구현 완료** · main 미머지 |
+| Stage 6 (구 3B 포함 판매 UX) | **로컬 완료** (`/orders/ship` DIRECT+STOCK). 배정 UI(3B)는 후순위. main 미머지 |
+| Stage 5C = S 판매/출고 OUT | Core+HTTP 완료. Mobile UI = Stage 6. DEC-019·020 저장 OPEN |
+| 생산확정→바로판매 A안 | 설계 CLOSED. 코드 = P + 5C |
 
 ## 운영 테스트데이터 초기화 (2026-08-17 대표 완료)
 
@@ -97,18 +230,111 @@ private main merge 완료. 단계 3 착수 금지.
 | T-NAV-01 | 하단 주문/판매 탭 진입, 세그먼트 주문↔판매 | 1 |
 | T-NAV-02 | AppBar 톱니 → 환경설정에서 농장·세션 표시 | 1 |
 | T-ORD-01 | 재고 0 주문 저장 성공, 판매행 없음 | 2 |
-| T-ORD-02 | 주문 100 / 가용 30 → 배정 30, 미배정 70 | 3 |
+| T-ORD-02 | 저장재고형: 주문 100 / 가용 30 → 배정 30, 미배정 70 | 3 |
 | T-ORD-03 | 추가 생산 후 잔여 70 배정 | 3 |
 | T-ORD-04 | 동시 배정이 가용 합을 넘지 않음 | 3 |
-| T-SHP-01 | 출고 TX: reserved− out+ **새 판매 1건** 연결 (`order_no`) | 4 |
+| T-ORD-05 | allocated_qty=0 주문 등록/조회 정상. 미배정은 오류 아님 | 3 |
+| T-SHP-01 | STOCK 출고 TX: reserved− out+ **새 판매 1건** | 4 |
 | T-SHP-04 | 같은 주문 2회 출고 → 판매 2건. 기존 CONFIRMED 수량 불변 | 4 |
-| T-SHP-02 | 미배정만 출고 409, 재고·판매 불변 | 4 |
+| T-SHP-02 | STOCK: 미배정분만 재고출고 요청 시 409. DIRECT는 이 테스트 비대상 | 4 |
 | T-SHP-03 | 출고 중 실패 시 전체 rollback | 4 |
 | T-SHP-05 | 선입금 배분 (DEC-019 확정 후) | 4 |
+| T-SHP-06 | DIRECT 즉시출고 (수량추적 OPEN 해소 후) | 4 |
 | T-SAL-01 | 판매 PUT 후 order_no 유지 | 5 |
 | T-AUC-01 | DRAFT 확정 시 출고+CONFIRMED, 실패 시 DRAFT 유지 | 6 |
 | T-PAY-01 | CONFIRMED 수금 → cash+ledger. 주문 API는 전표 없음 | 6 |
 | T-CAN-01 | 출고 전 취소 Hold 0 | 2–4 |
 | T-REG-01 | 관찰·영농일지·농약 회귀 | 7 |
+| T-PROD-01~11 | 생산확정 PACK/PROCESS · HARVEST/RAW_STOCK · rollback · prefill | P |
+| T-HARVEST-01~08 | 수확기록 (Stage H) | H |
+
+## Stage P — 포장/생산 (2026-08-19 구현 완료 · 로컬)
+
+- Core: `core/production_service.py`, `core/stock_constants.py` (StockPage TX SSOT)
+- API: `/production/harvest-records`, `/raw-stock`, `/confirm`
+- Mobile: `PackProdPanel.vue` · 판매관리 포장/생산 탭 · `salesPrefill` store
+- PC: `stock_page.save_production_log` → Core 위임 · 생산 후 [재고로 저장]=UI reset / [바로 판매]=prefill (판매 OUT은 Stage 5C)
+- **금지 준수:** `t_production_*` 없음 · HARVEST kg 환산 없음 · 판매 OUT/allocation consume 없음
+- **다음:** Stage 6-1 DIRECT E2E 확인. STOCK/Allocation 전환은 별도 승인
+
+## Stage 5B — 재고관리 (2026-08-19 구현 완료 · 로컬)
+
+- API: `GET /farms/{farm}/fruit-stock` (`include_zero`) · `GET .../fruit-stock/logs`
+- Mobile: `StockView.vue` · 원물/상품/배즙 · 현재/배정/가용 · 이력
+- 계산 SSOT: [09 §14](./09_production_inventory_flow.md). DEC-026 harvest_year
+- 수기 재고 수정 **없음**
+
+## Stage 5C 1차 — 설계 SSOT + 멱등 DDL (2026-08-19)
+
+- DEC-027 APPROVED. 문서: [03](./03_data_contract.md) · [05](./05_api_contract.md) · [09 §21](./09_production_inventory_flow.md)
+- Helper: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema` — `db_manager.connect()` **미호출**
+- alloc preflight/HOLD 정리 **없음**
+
+## Stage 5C 2차 — OrderShipService.confirm() (2026-08-19)
+
+- Core: `core/order_ship_service.py` `confirm()` — `BEGIN IMMEDIATE` 1회. public `allocate()`/`release()` 미호출
+- STOCK: alloc `shipped_qty +=` · reserved− · out+ · `allocated_qty` 유지
+- DIRECT: available FIFO OUT. alloc 미변경. 무주문+DIRECT 허용. 무주문+STOCK 거부
+- 판매: `sales_status=CONFIRMED` · 1 sales_detail = 1 stock_seq · `t_stock_log` SALE
+- 주문 SSOT: CONFIRMED sales_detail SUM. `t_order_detail.out_qty` 미사용
+- ST01: 부분 `ST010300` · 전량 `ST010400`+`stock_status=Y` · ST010200 강제 없음
+- Schema: 실행 중 ALTER 없음. 부족 시 `SCHEMA_PRECONDITION`. STOCK만 alloc 스키마 필수, DIRECT는 alloc 테이블 없이 가능
+- FastAPI: `POST /api/v1/farms/{farm_cd}/shipments/confirm` — wrapper만. FIFO/재고 SQL 없음
+- PC `sales_page.py` **미위임**. Mobile 판매 UI: Stage 6 `/orders/ship`
+- 로컬 개발 DB: **trace DDL 적용 가능**(기존 row NULL 유지). allocation schema는 Stage 6-2 로컬 적용. 운영 DB 미변경
+- 테스트: `server/tests/test_order_ship_service.py` · `server/tests/test_order_ship_api.py`
+
+## Stage 5C 3차 — HTTP API (2026-08-19)
+
+- Endpoint: `POST /api/v1/farms/{farm_cd}/shipments/confirm`
+- Adapter: `app/services/order_ship_api_service.py` → `OrderShipService.confirm()`
+- TX: Core 단독. API는 connection 전달만
+- HTTP: 400 검증 · 409 충돌/SCHEMA_PRECONDITION · 404 주문없음
+- 주문 전용 `/orders/{order_no}/ship` 미생성
+
+## Stage 6 — 판매/출고 UX (2026-08-19)
+
+- 문서: [04 §9](./04_mobile_screen.md). Vue **1차 구현** `ShipConfirmView` `/orders/ship`
+- 한 화면 · 세 진입(생산 바로판매 / 주문출고 / 재고직접판매)
+- 잔여 화면 SSOT = `remaining_order[]`
+- 연속출고 UI · 로트 수동선택 · STOCK/DIRECT 용어 노출 **1차 제외**
+- 생산 1차: 주문검색 없음(무주문 DIRECT)
+
+## Stage 6-1 DIRECT E2E (2026-08-19 로컬)
+
+- **상태:** DIRECT E2E ✅ (로컬 개발 API + 로컬 개발 SQLite DB)
+- 판매: `20260819-01` 무주문 DIRECT · `20260819-02` 무주문 DIRECT · `20260819-03` 주문 DIRECT `ORD20260819-001` → `ST010300`
+- **Stage 6-2 STOCK/Allocation 전환:** 로컬 A안 적용 (reserved 103 해제 + AUDIT, HOLD 보존, 백필 없음, active reserved-only preflight)
+
+## Stage 6-2 로컬 Allocation + STOCK E2E (2026-08-19)
+
+- 대상 DB: 로컬 개발 `orchard_platform.db` only. 운영/Lightsail 미변경
+- A안: stock_seq=156 reserved 103→0 + `t_stock_log` AUDIT 1건. HOLD 9 / CANCEL_HOLD 3 원문 보존. `t_order_alloc` 백필 없음
+- DEC-015 preflight: active reserved만 차단. historical HOLD는 보고만
+- 로컬 schema: `allocated_qty` + `t_order_alloc`. 기존 주문 allocated=0
+- STOCK E2E: `ORD20260819-002` stock_seq=197 신고 15kg 특(GR010200) 1다이 harvest 2026. allocate 5 → ship 3 (`20260819-04` ST010300) → ship 2 (`20260819-05` ST010400+Y). DIRECT 회귀 `20260819-06` seq200. DEC-027 규칙 변경 없음
+- **과출고 invariant (로컬 확인):** `real_qty<0` 이고 `reserved=0`이면 다른 로트 배정을 막지 않는다. 음수 로트는 alloc/DIRECT FIFO 후보에서 제외. `reserved > real` 또는 음수+`reserved>0`은 계속 차단
+- **OPEN-DATA-NEG-STOCK:** 로컬 2025 음수 3로트(seq 151/169/170, real 합 -273)는 Stage 6과 분리. 운영 이관 전 원인 분석. 아래 절
+- 참고: 기존 `ORD20260817-002` 줄 harvest_year=2026 vs 해당 규격 재고 2025 → DIRECT 시 STOCK_UNAVAILABLE 가능. 이번 C는 2026 재고와 맞는 신규 주문으로 검증
+
+## Stage 6 로컬 마감 (2026-08-19)
+
+- **상태:** 로컬 완료. push는 feature branch만. **main merge / mirror / production 금지**
+- DIRECT E2E + STOCK E2E + allocation schema(로컬) + 레거시 reserved 103 정리
+- 경계 테스트: `test_stock_ship_e2e.py` (음수 로트 비후보 · 정상 로트 계속 · reserved>real 차단 · 음수+reserved 차단)
+
+## OPEN-DATA-NEG-STOCK (Stage 6 밖 · 운영 이관 전 메모)
+
+**Core 로직 blocker 아님.** 로컬 PC 테스트 과정에서 생긴 데이터 정합 이슈. 운영 적용 전 정리 대상.
+
+로컬 `orchard_platform.db` 전용. 운영 미적용. Stage 6 로직 검증과 분리.
+
+| stock_seq | harvest | 규격 | in | out | real | reserved |
+|-----------|---------|------|----|-----|------|----------|
+| 151 | 2025 | 신고 7.5kg 특 1다이 2025-10-01 | 181 | 226 | -45 | 0 |
+| 169 | 2025 | 신고 15kg 등외 1다이 2025-10-01 | 10 | 226 | -216 | 0 |
+| 170 | 2025 | 신고 15kg 등외 2다이 2025-10-01 | 8 | 20 | -12 | 0 |
+
+합 real **-273**. sibling 양수 로트 없음. 원인 분석은 운영 이관 전 별도 이슈.
 
 주문 날짜는 `today_ops`. 과거 날짜 일괄변환 테스트 없음.

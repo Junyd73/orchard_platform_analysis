@@ -1,12 +1,21 @@
 # 03. Data contract — 기존 테이블
 
-> 상태: 단계 0 **최종승인 완료**. ALTER/migration은 단계 3 이전 금지.  
-> DDL은 저장소에 거의 없음. INSERT/UPDATE, `docs/판매관리테이블 생성.txt`, `server/docs/sqlite_schema_baseline.md` 기준.  
-> 문서와 코드가 다르면 **코드 우선**.  
-> **이번 작업에서 ALTER/migration 하지 않음.**
+> **범위:** 주문/판매/재고 **기존** 테이블. 생산/변환 업무모델: [09_production_inventory_flow.md](./09_production_inventory_flow.md)  
+> Stage 3A migration: `core/order_alloc_migrate.py` (로컬·테스트). 운영 자동 실행 금지.  
+> **`t_production_*` 생성 안 함** (OPEN-PROD-01 **CLOSED**).
 
-운영 DB에 테이블 존재 (baseline):  
-`t_order_master/detail/delivery`, `t_sales_master/detail/delivery`, `t_stock_master/log`, `t_cash_ledger`, `t_ledger`, `m_customer`, `m_warehouse`, `m_item_unit_price`, `m_common_code`.
+운영 DB baseline:  
+`t_order_*`, `t_sales_*`, `t_stock_master/log`, `t_cash_ledger`, `t_ledger`, `m_customer`, `m_warehouse`, `m_common_code`.
+
+### 품목 코드 (PC `StockPage` SSOT)
+
+| item_cd | 의미 | 재고 역할 |
+|---------|------|-----------|
+| FR010300 | 원물 | 저장·생산 투입 |
+| FR010100 | 배 상품 | 포장(PACK) 결과·주문 배정 대상 |
+| FR010200 | 배즙 | 가공(PROCESS) 결과 |
+
+생산확정(PC): 원물 OUT + 상품 IN + `t_stock_log`. 판매 테이블은 **생산 시점에 만들지 않음** (DEC-005).
 
 ---
 
@@ -41,36 +50,41 @@
 |------|------|------|--------|------|
 | order_detail_id | `{order_no}-{NN}` | 줄 PK. 판매 상세 연결키 | 필수 | 유지 |
 | item/variety/grade/size_cd, weight, qty, unit_price, item_amt | 규격·**주문수량** | DEC-004 | 필수 | 유지 |
-| harvest_year | 있음 | 선주문 시 생산연 | 유지 | |
+| harvest_year | 있음 | **원료 과실 수확연도** (DEC-026). 생산연도 아님. allocation 탐색 키 | 유지 | |
 | wh_cd | 있음 | 기본 WH01 | 유지 | |
 | dlvry_tp | LO01 | 행별 배송 | 유지 | |
-| **allocated_qty** | **없음 (설계 확정)** | **누적 배정수량** (Hold 잔량 아님) | 목록의 「배정」 | DEC-008. migration은 단계 3 |
+| **allocated_qty** | **Stage 3A DDL** | **누적 배정수량** (Hold 잔량 아님) | 목록의 「배정」 | DEC-008. 운영 ALTER는 별도 승인 |
 
-**계산값 컬럼을 추가하지 않음.**
+**계산값 컬럼을 추가하지 않음.** `allocated_qty=0`은 주문 오류가 아니다 (DEC-020).
 
 ```
 unallocated_qty        = qty - allocated_qty
 shipped_qty            = SUM(t_sales_detail.qty WHERE order_detail_id = 이 줄
                              AND 해당 판매 sales_status = CONFIRMED)
-reserved_unshipped_qty = allocated_qty - shipped_qty
-0 <= shipped_qty <= allocated_qty <= qty
-release_qty            <= allocated_qty - shipped_qty
+reserved_unshipped_qty = allocated_qty - shipped_qty   -- STOCK Hold 잔량
+0 <= allocated_qty <= qty
+0 <= shipped_qty <= qty
+release_qty            <= allocated_qty - shipped_qty  -- STOCK 배정해제
 ```
+
+STOCK 출고만: `ship_qty <= allocated_qty - shipped_qty`  
+DIRECT 출고: allocation/HOLD 없이 `shipped_qty` 증가 가능. 생산수량 추적은 Stage 4 전 OPEN.  
+`ship_mode` / stock·direct 플래그 컬럼은 이번 단계 추가 금지.
 
 판매 상세에는 `harvest_year`가 **없다.**
 
-### 2.1 `allocated_qty` 설계 (DEC-008 APPROVED, DDL 미실시)
+### 2.1 `allocated_qty` 설계 (DEC-008 APPROVED, Stage 3A 로컬 DDL)
 
 | 항목 | 권장안 |
 |------|--------|
-| 의미 | 해당 주문상세에 지금까지 확정된 **누적 배정수량** |
+| 의미 | 저장재고 출고를 선택한 줄의 **누적 배정수량**. 모든 주문의 필수값이 아님 |
 | 타입 | `qty`와 동일 계열 → **`REAL NOT NULL DEFAULT 0`** |
 | 신규 주문 | 0 |
 | 출고 후 | **유지**. 0 리셋 금지 |
 | 배정해제 | `allocated_qty − release_qty`. 미출고분 초과 금지 |
-| 줄 vs 행 | 총량만 저장. 행 분해는 가칭 `t_order_alloc` (DEC-018 APPROVED, CREATE 금지) |
+| 줄 vs 행 | 총량만 저장. 행 분해는 `t_order_alloc` (DEC-018. 로컬 CREATE, 운영 미적용) |
 
-기존 주문 초기값: **무조건 0 금지** (DEC-015 OPEN). 이미 `reserved_qty` HOLD가 있으면 0이면 이중 배정·미배정 오인.  
+기존 주문 초기값: **백필 없음** (DEC-015). schema DEFAULT 0. active reserved가 있으면 DDL 중단.  
 migration 직전 운영 점검 필수 → §15.
 
 ---
@@ -110,9 +124,12 @@ migration 직전 운영 점검 필수 → §15.
 주문 INSERT: `order_detail_id`, `wh_cd`.  
 판매화면 `execute_full_save`: **`order_detail_id` 없음**. 경매: `crop_nm`. **harvest_year 없음.**
 
-`shipped_qty` = 이 컬럼이 채워진 판매상세 `qty` 합. 재저장이 키를 지우면 계산이 깨짐 → P0 `order_detail_id` 보존.
+**Stage 5C (DEC-027):** `stock_seq INTEGER NULL` — CONFIRMED 재고출고가 가리키는 `t_stock_master` row.  
+1행 = 1 `stock_seq`. FIFO N로트면 N행. DRAFT·레거시는 NULL. 물리 FK·NOT NULL 없음.
 
-부분출고: 같은 `order_detail_id`가 **여러 `sales_no`**에 나타날 수 있다 (DEC-017). 기존 판매를 후속 출고 때 수정하여 수량을 증가시키지 않는다.
+`shipped_qty`(주문 출고 누적) = **컬럼 아님.** `SUM(t_sales_detail.qty)` WHERE 같은 `order_detail_id` AND 마스터 `sales_status='CONFIRMED'`. DRAFT 제외. `t_order_detail.out_qty` 사용 금지.
+
+부분출고: 같은 `order_detail_id`가 **여러 `sales_no`** 및 **같은 판매의 여러 상세**에 나타날 수 있다 (DEC-017 · FIFO 분할). 기존 CONFIRMED 판매를 후속 출고로 수정하여 수량을 증가시키지 않는다.
 
 ---
 
@@ -130,22 +147,26 @@ migration 직전 운영 점검 필수 → §15.
 
 ---
 
-## 7. `t_stock_master`
+## 7. `t_stock_master` (재고관리 · PC StockPage)
 
-키(생산 UPSERT):  
+키(생산 UPSERT · 배정 FIFO):  
 `farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt`
 
-| 컬럼 | 의미 | 설계 |
-|------|------|------|
-| in_qty | 입고 누적 | 유지 |
-| out_qty | 출고/폐기/원물소모. **판매 출고 미사용** | 출고확정 시 + |
-| reserved_qty | 현재=주문 전량 Hold | **미출고 배정분** (`reserved_unshipped`의 행 합). 출고 시 − |
-| available | SELECT 추정 생성컬럼 | `in-out-reserved` |
-| harvest_year | 상품=생산연 | 주문 상세와 매칭 |
-| storage_dt | 바구니 | 자동배정 FIFO `storage_dt ASC` (DEC-018). 동일일은 기존 자연키/row 정렬 |
-| wh_cd | WH01 하드코딩 | 1차 유지 |
+surrogate PK `stock_seq` — **추적키만** (DEC-027). 업무키를 대체하지 않음. UPSERT 후 natural key로 `SELECT stock_seq`.
 
-가용: `SUM(in_qty-out_qty) - SUM(reserved_qty)`.
+| 컬럼 | 의미 | PC / 설계 |
+|------|------|-----------|
+| in_qty | 입고 누적 | 원물등록·**생산확정 상품 IN** |
+| out_qty | 출고·폐기·**생산 원물 OUT** | `save_production_log` 원물 차감 |
+| reserved_qty | Hold | Stage 5A **주문 배정**만. 생산 IN과 별개. **OUT이 아님** |
+| real_qty | 계산 (컬럼 아님) | `in_qty - out_qty` **현재고**. Mobile 재계산 금지 |
+| available_qty | 계산 (컬럼 아님) | `real_qty - reserved_qty` **가용** |
+
+**PC 현재 = 확정안:** 생산 100 → 상품 IN 100. 바로판매는 이후 OUT (OPEN-PROD-03 **CLOSED**, 코드 후속).
+
+**Stage 5A:** `reserved_qty`는 `t_order_alloc` 미출고분과 일치 (상품재고 FR010100/200). HOLD는 real_qty를 바꾸지 않음.
+
+가용: `SUM(in_qty-out_qty) - SUM(reserved_qty)` = `available_qty`. Core/API 계산값 표시.
 
 Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
@@ -159,19 +180,20 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
 실값: `IN`, `OUT`, `AUDIT`, `HOLD`, `CANCEL_HOLD`.
 
-주문 HOLD/CANCEL_HOLD INSERT 컬럼 (코드):  
+**Stage 5C DDL (DEC-027, 멱등):** `stock_seq INTEGER NULL`, `ref_type TEXT NULL`, `ref_id TEXT NULL`.  
+물리 FK·NOT NULL 없음. 기존 행 NULL 유지. SALE 출고 시 `ref_type='SALE'`, `ref_id=sale_detail_no`.
+
+주문 HOLD/CANCEL_HOLD INSERT 컬럼 (현재 코드, 5C Core 전):  
 `farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, weight, io_type, qty, (parent_raw_size HOLD만), remark, reg_id, reg_dt`
 
-| 필드 | 주문 로그 | 판정 |
-|------|-----------|------|
-| wh_cd | 없음 | row 식별 불가 |
-| storage_dt | 없음 | row 식별 불가 |
-| order_detail_id / ref_id | 없음 | remark `주문예약:{order_no}`만 |
-| 판매출고 OUT | 없음 | 생산/폐기 OUT만 |
+| 필드 | 주문 로그(현) | 5C 이후 |
+|------|---------------|---------|
+| stock_seq | 없음(컬럼 준비) | 해당 stock row |
+| ref_type / ref_id | 없음(컬럼 준비) | SALE + sale_detail_no |
+| wh_cd / storage_dt | 없음 | stock_seq로 row 추적 |
+| 판매출고 OUT | 미구현 | io_type=OUT + ref |
 
-**`t_stock_log`는 allocation 현재상태 SSOT가 아니다** (DEC-018). 현재상태 복원은 `t_order_alloc`, 감사 이력은 본 로그.
-
-현재 로그에 부족한 `wh_cd`/`storage_dt`/`order_detail_id`를 allocation SSOT 목적으로 억지로 추가하지 않는다. 앞으로 생성되는 HOLD / CANCEL_HOLD / OUT에는 가능한 범위에서 `order_no`, `order_detail_id`, `sales_no`, stock 자연키를 남기는 방향을 설계할 수 있다.
+**`t_stock_log`는 allocation 현재상태 SSOT가 아니다** (DEC-018). 현재상태 복원은 `t_order_alloc`. 5C부터 이력은 remark만이 아니라 `stock_seq`/`ref_*`.
 
 | 이벤트 | io_type |
 |--------|---------|
@@ -211,7 +233,8 @@ t_order_master.order_no
     ├─ t_order_detail.order_no
     │     qty, allocated_qty (누적)
     │     shipped_qty = SUM(CONFIRMED sales_detail.qty) by order_detail_id
-    │     order_detail_id ──→ t_sales_detail.order_detail_id  (출고마다 N건 가능)
+    │     order_detail_id ──→ t_sales_detail.order_detail_id  (출고마다 N건 · FIFO면 stock_seq마다 N건)
+    │     t_sales_detail.stock_seq ──→ t_stock_master.stock_seq
     ├─ t_order_delivery
     ├─ t_order_alloc (가칭) ── 줄 ↔ stock 자연키 현재상태
     └─ t_order_master.sales_no ──→ legacy/reference (최초 출고 또는 대표 참조)
@@ -239,33 +262,39 @@ t_order_master.stock_status  =  전량 출고 시만 Y
 
 | 제안 | 상태 |
 |------|------|
-| `t_order_detail.allocated_qty` | **설계 확정.** migration은 단계 3 |
+| `t_order_detail.allocated_qty` | **Stage 3A 로컬 DDL.** 운영 ALTER는 별도 승인 |
 | `unallocated_qty` / `shipped_qty` 컬럼 | **하지 않음** (계산) |
-| `t_order_alloc` (가칭) | **설계 확정** (DEC-018). **CREATE TABLE 금지.** 실제 테이블명·PK/UNIQUE는 구현 전 schema 대조 |
+| `t_sales_detail.stock_seq` | **Stage 5C 멱등 ALTER** (NULL). 운영 자동실행 금지 |
+| `t_stock_log.stock_seq` / `ref_type` / `ref_id` | **Stage 5C 멱등 ALTER** (NULL). SALE 시 ref_id=`sale_detail_no` |
 | `t_stock_log` 컬럼 추가 | **하지 않음** (allocation SSOT 목적). 향후 이력 식별정보만 설계 가능 |
 | `t_order_master.plan_ship_dt` | 하지 않음 (`planned_dt` 계산) |
 | `t_sales_detail.harvest_year` | 하지 않음 (주문 조인) |
 | 이행상태 컬럼 | 하지 않음 (계산) |
 | 주문↔판매 연결 새 컬럼 | **하지 않음.** SSOT는 기존 `t_sales_master.order_no` + `t_sales_detail.order_detail_id` |
 
-### 12.1 `t_order_alloc` 최소 데이터 계약 (CREATE 금지)
+### 12.1 `t_order_alloc` (Stage 3A)
 
 ```
-order_no
-order_detail_id
-farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd,
+alloc_id TEXT PK          -- {order_detail_id}-A{NNN}
+farm_cd, order_no, order_detail_id
+wh_cd, item_cd, variety_cd, grade_cd, size_cd,
 weight, harvest_year, storage_dt   -- t_stock_master 자연키
-allocated_qty
-shipped_qty
-생성/수정 감사정보
+allocated_qty REAL NOT NULL DEFAULT 0
+shipped_qty REAL NOT NULL DEFAULT 0
+reg_id, reg_dt, mod_id, mod_dt
+UNIQUE (farm_cd, order_detail_id, wh_cd, item_cd, variety_cd,
+        grade_cd, size_cd, weight, harvest_year, storage_dt)
 ```
 
-`allocated_qty - shipped_qty` = 그 행 Hold 잔량.  
-PK/UNIQUE는 구현 전 실제 schema와 대조하여 확정. 이번 작업에서 CREATE TABLE 금지.
+같은 주문상세 + 같은 stock 행은 한 행에 누적.  
+미출고분이 0이면 행 DELETE. `t_stock_log`는 ALTER하지 않음.
 
 ---
 
-## 13. `allocated_qty` migration 계획 (실행 금지 · 문서만)
+## 13. `allocated_qty` / `t_order_alloc` migration
+
+로컬·테스트: `core/order_alloc_migrate.py` (`ensure_order_alloc_schema`). 멱등.  
+운영: **자동 실행 금지.** **active reserved_qty>0**이면 중단. historical HOLD만으로는 중단하지 않음. 점검 SQL: `scripts/ops/check_order_alloc_preflight.sql`.
 
 1. `qty` 타입 운영 PRAGMA로 재확인 후 동일 계열.
 2. `ALTER TABLE t_order_detail ADD COLUMN allocated_qty REAL NOT NULL DEFAULT 0;`

@@ -6,7 +6,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Query
 
 from app.api.dependencies import get_order_api_service
-from app.schemas.order import OrderCreateRequest, OrderDetail, OrderListPage
+from app.schemas.order import (
+    AllocationCreateRequest,
+    AllocationReleaseRequest,
+    AllocationSummaryOut,
+    OrderCreateRequest,
+    OrderDetail,
+    OrderListPage,
+)
 from app.services._core_path import ensure_repo_root_on_path
 from app.services.order_api_service import OrderApiService
 
@@ -91,3 +98,34 @@ def cancel_order(
     service: OrderApiService = Depends(get_order_api_service),
 ) -> OrderDetail:
     return service.cancel_order(farm_cd, order_no, user_id=user_id)
+
+
+@router.get("/{order_no}/allocations", response_model=AllocationSummaryOut)
+def list_allocations(
+    farm_cd: str,
+    order_no: str,
+    service: OrderApiService = Depends(get_order_api_service),
+) -> AllocationSummaryOut:
+    return service.list_allocations(farm_cd, order_no)
+
+
+@router.post("/{order_no}/allocations", response_model=AllocationSummaryOut)
+def create_allocation(
+    farm_cd: str,
+    order_no: str,
+    body: AllocationCreateRequest,
+    user_id: str | None = Depends(_user_header),
+    service: OrderApiService = Depends(get_order_api_service),
+) -> AllocationSummaryOut:
+    return service.allocate(farm_cd, order_no, body, user_id=user_id)
+
+
+@router.post("/{order_no}/allocations/release", response_model=AllocationSummaryOut)
+def release_allocation(
+    farm_cd: str,
+    order_no: str,
+    body: AllocationReleaseRequest,
+    user_id: str | None = Depends(_user_header),
+    service: OrderApiService = Depends(get_order_api_service),
+) -> AllocationSummaryOut:
+    return service.release_allocation(farm_cd, order_no, body, user_id=user_id)

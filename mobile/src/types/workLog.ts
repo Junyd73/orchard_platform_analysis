@@ -78,6 +78,9 @@ export type WorkLogWorkItem = {
   status_nm?: string | null
   google_event_id?: string | null
   sync_status?: string | null
+  variety_cd?: string | null
+  variety_nm?: string | null
+  harvest_container_qty?: number | null
 }
 
 export type WorkLogDailyResponse = {
@@ -176,6 +179,8 @@ export type WorkLogWorkIntegratedItem = {
   status_cd?: string | null
   pesticide_lines?: WorkLogPesticideLineUpsert[]
   replace_pesticide_use_id?: number | null
+  variety_cd?: string | null
+  harvest_container_qty?: number | null
 }
 
 export type WorkLogIntegratedSavePayload = {
@@ -218,6 +223,8 @@ export type WorkLogWorkUpsertItem = {
   start_tm?: string | null
   end_tm?: string | null
   status_cd?: string | null
+  variety_cd?: string | null
+  harvest_container_qty?: number | null
 }
 
 export type WorkLogWorksUpsertPayload = {

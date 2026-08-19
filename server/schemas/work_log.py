@@ -88,6 +88,9 @@ class WorkLogWorkItem(BaseModel):
     status_nm: str | None = None
     google_event_id: str | None = None
     sync_status: str | None = None
+    variety_cd: str | None = None
+    variety_nm: str | None = None
+    harvest_container_qty: int | None = None
 
 
 class WorkLogDailyResponse(BaseModel):
@@ -186,6 +189,8 @@ class WorkLogWorkIntegratedItem(BaseModel):
     status_cd: str | None = None
     pesticide_lines: list[WorkLogPesticideLineUpsert] = Field(default_factory=list)
     replace_pesticide_use_id: int | None = None
+    variety_cd: str | None = None
+    harvest_container_qty: int | None = None
 
 
 class WorkLogIntegratedSaveRequest(BaseModel):
@@ -275,6 +280,8 @@ class WorkLogWorkUpsertItem(BaseModel):
     start_tm: str | None = None
     end_tm: str | None = None
     status_cd: str | None = None
+    variety_cd: str | None = None
+    harvest_container_qty: int | None = None
 
 
 class WorkLogWorksUpsertRequest(BaseModel):

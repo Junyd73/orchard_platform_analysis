@@ -1,7 +1,7 @@
 # 05. API contract — 초안
 
-> 상태: 단계 0 **최종승인 완료**. 단계 2 **완료 / 대표 승인** (2026-08-19. GET/POST/PUT orders, GET/POST customers).  
-> 단계 3 API(allocations)·sales·ship 미구현. DDL 금지.  
+> **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).  
+> Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.  
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.  
 > PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
@@ -47,11 +47,15 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 | method | path | 설명 |
 |--------|------|------|
-| GET | `/farms/{farm_cd}/fruit-stock` | 상품 매트릭스 |
+| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B. `include_zero` 기본 false(소진 숨김). 응답 `real_qty`/`reserved_qty`/`available_qty` Core 계산 |
+| GET | `/farms/{farm_cd}/fruit-stock/logs` | Stage 5B 이력 read-only (`t_stock_log`) |
+| GET | `/farms/{farm_cd}/production/harvest-records` | 수확기록 조회 (Stage P) |
+| GET | `/farms/{farm_cd}/production/raw-stock` | 원물재고 조회 (Stage P) |
+| POST | `/farms/{farm_cd}/production/confirm` | 생산확정 1 TX. `raw_consumptions`는 qty>0만. N건 OUT+IN 전체 rollback |
 
-농약 경로와 분리. 조회만. 주문 등록을 막지 않음.  
-응답: `real_qty=in-out`, `available=real-reserved`.  
-쓰기(입고/선별) 1차 비범위.
+경로 prefix는 클라이언트가 이미 `/api/v1`을 붙이므로 **`/farms/...`**.  
+응답: `real_qty=in-out`, `available_qty=real-reserved`. **클라이언트가 가용재고를 재계산하지 않음.**  
+쓰기(임의 입고/출고) 5B 비범위.
 
 ---
 
@@ -62,8 +66,8 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 | GET | `/farms/{farm_cd}/orders` | 구현 |
 | GET | `/farms/{farm_cd}/orders/{order_no}` | 구현 |
 | POST | `/farms/{farm_cd}/orders` | 구현. 재고 0이어도 200 |
-| PUT | `/farms/{farm_cd}/orders/{order_no}` | 비범위 (PC 수정은 core `replace_order`) |
-| POST | `/farms/{farm_cd}/orders/{order_no}/cancel` | 비범위 |
+| PUT | `/farms/{farm_cd}/orders/{order_no}` | Stage 2 구현. Stage 3A: allocated 규격 잠금, qty≥allocated |
+| POST | `/farms/{farm_cd}/orders/{order_no}/cancel` | Stage 2 구현. Stage 3A: 미출고 배정 동일 TX 해제 |
 
 POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, lines(규격+`qty`), deliveries.
 
@@ -78,16 +82,26 @@ cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t
 
 ---
 
-## 4. 재고배정 — allocated + reserved + log 동일 TX
+## 4. 재고배정 — 저장재고형 주문의 선택 경로 (DEC-020)
+
+allocation은 필수 단계가 아니다. `allocated_qty=0`인 주문은 정상이다.  
+저장재고 출고를 선택한 주문만 이 API를 쓴다. 품종 if로 강제하지 않는다.
 
 | method | path |
 |--------|------|
+| GET | `/farms/{farm_cd}/orders/{order_no}/allocations` |
 | POST | `/farms/{farm_cd}/orders/{order_no}/allocations` |
 | POST | `/farms/{farm_cd}/orders/{order_no}/allocations/release` |
 
-배정 요청: `{ "order_detail_id", "qty": 30 }` (증분). 내부적으로 FIFO(`storage_dt ASC`) stock row에 분해 (DEC-018).
+배정 요청:
 
-**동일 트랜잭션:**
+| 필드 | 의미 |
+|------|------|
+| `order_detail_id` | 필수 |
+| `qty` | 생략 시 자동(가능한 만큼). 명시+`auto=false`면 **전량 가능해야 성공**(부족 시 409) |
+| `auto` | `true`이면 `min(요청, 미배정, 가용)` 부분배정. T-ORD-02 (100/30→30) |
+
+**동일 트랜잭션 (`BEGIN IMMEDIATE`):**
 
 1. 줄 잠금/재조회: `allocated_qty + qty <= 주문 qty`
 2. 가용재고를 TX 안에서 재조회 (`in-out-reserved`) — 초과 시 rollback
@@ -99,7 +113,7 @@ cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t
 
 배정해제: `release_qty <= allocated_qty - shipped_qty`. 기본 순서 **LIFO**(최근 잡은 행부터). `t_order_alloc` 감소, `allocated_qty −`, `reserved_qty −`, CANCEL_HOLD. 동일 TX.
 
-단계 3 전 `allocated_qty` DDL 및 `t_order_alloc`이 없으면 이 API를 **구현하지 않음**. 이번 문서 작업에서 CREATE/ALTER 금지.
+단계 3A: `allocated_qty` + `t_order_alloc` migration (`core/order_alloc_migrate.py`). 운영 자동 실행 금지. **active reserved_qty>0 이면 중단**. historical HOLD 로그만으로는 중단하지 않음. 백필 없음 (DEC-015).
 
 동시성: SQLite 트랜잭션 안에서 재검증 (위험 9·10).
 
@@ -117,33 +131,47 @@ cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t
 
 ---
 
-## 6. 출고확정 — 재고 이동 + 판매생성 단일 TX (DEC-014)
+## 6. 출고확정 — 재고 이동 + 판매생성 단일 TX (DEC-014 · DEC-020)
 
 | method | path |
 |--------|------|
-| POST | `/farms/{farm_cd}/orders/{order_no}/ship` |
+| POST | `/farms/{farm_cd}/shipments/confirm` |
 
-요청: 줄별 `ship_qty` 또는 “미출고 배정 전량”.  
-`ship_qty <= allocated_qty - shipped_qty`.
+**Core:** `core/order_ship_service.py` `OrderShipService.confirm()` (DEC-027).  
+**FastAPI:** `POST /api/v1/farms/{farm_cd}/shipments/confirm` (`app/routers/shipments.py`). 주문 전용 `/orders/{order_no}/ship` **없음** (무주문 DIRECT).  
+요청에 출고방식 `STOCK` / `DIRECT`. **`stock_seq`는 클라이언트가 고르지 않음** — Core FIFO. 요청 extra 필드(`stock_seq` 포함)는 422.
 
-**한 트랜잭션 (실패 시 전부 rollback):**
+### 6.A STOCK / 재고출고
 
-1. 출고 가능한 미출고 `t_order_alloc` 조회
-2. FIFO(`storage_dt ASC`) 순서대로 `ship_qty` 배분
-3. 각 `t_order_alloc.shipped_qty` 증가
-4. 각 stock row `reserved_qty −`
-5. 각 stock row `out_qty +`
-6. stock log OUT
-7. **항상 새** `t_sales_master` (`order_no` 연결, `sales_source=ORDER`, `sales_status=CONFIRMED`, `sales_dt`=출고 업무일). 기존 CONFIRMED 판매·전표 수정 금지
-8. `t_sales_detail` (`order_detail_id` 필수, 이번 `ship_qty`만)
-9. `t_order_master.sales_no`는 비어 있을 때만 최초 판매번호 기록 (legacy/reference). 전체 조회는 `t_sales_master.order_no`
-10. `t_sales_delivery` — 그 출고분만큼만. 주문 배송계획 전체 복사 금지
-11. 선입금 전표 배분은 **DEC-019 OPEN** (단계 4 전). 권장: 이번 판매금액 한도 내 순차 적용. 첫 출고에 `pre_pay_amt` 전액 부착하지 않음(미확정).
-12. 전 줄 `shipped_qty == qty`이면 `stock_status='Y'`
+저장재고 배정분에서 출고. `t_order_alloc` 필수. 주문 없음+STOCK **거부**.
 
-금지 결과: 재고만 감소 / 판매만 생성 / 전량 완료인데 판매 없음 / 기존 판매 수량 증가.
+`ship_qty <= allocated_qty - shipped_qty` (alloc 잔여).  
+주문 잔여: `qty - SUM(CONFIRMED sales_detail)`. 과출고 거부 (`confirmed + request <= qty`). 완료는 `==`.
 
-부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017).
+FIFO가 stock Nrow면 **`t_sales_detail` N행** (`stock_seq`마다 1행). 연결 테이블 없음.
+
+**동일 트랜잭션 (`BEGIN IMMEDIATE`) — `confirm()` 소유:**
+
+1. 미출고 `t_order_alloc` FIFO
+2. 각 행 `shipped_qty +=` (`allocated_qty` 유지)
+3. `reserved_qty −` · `out_qty +`
+4. `t_stock_log` OUT (`stock_seq`, `ref_type=SALE`, `ref_id=sale_detail_no`)
+5. 새 `t_sales_master` + 분할된 `t_sales_detail`
+6. 잔량 있으면 `ST010300`, 전량이면 `ST010400` + `stock_status='Y'`
+
+### 6.B DIRECT / 즉시출고
+
+allocation/`shipped_qty` **미갱신**. 가용 FIFO로 stock row 선택. 결과 Nrow면 판매상세 N행. `stock_seq` 기록은 STOCK과 동일.  
+주문 있으면 주문 잔여만 검증. 주문 없으면 직접판매. STOCK의 `ship_qty <= alloc 잔여`를 DIRECT에 적용하지 않음.
+
+부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017). Core·HTTP confirm **구현**. Mobile UI **후속**.
+
+요청 요약: `ship_mode`, `sales_dt`, `order_no`(nullable), `custm_id`(nullable), `lines[]` (`order_detail_id` nullable, 규격, `qty>0`, `unit_price`).  
+응답 요약: `ok`, `sales_no`, `sales_status=CONFIRMED`, `ship_mode`, `order_no`, `details[]`, `order_status`, `remaining_order[]`, `remaining_order_qty`.
+
+**화면 SSOT (Stage 6):** 줄 잔여·다음 출고 = `remaining_order[]`. `remaining_order_qty`는 합 요약만. 완료 = `order_status`. 무주문이면 잔여 필드 비움.
+
+HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 · envelope `{detail, error_code}`.
 
 ---
 
@@ -197,15 +225,20 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 | 주문 접수 | order 3테이블. 재고·판매·전표 없음 |
 | 배정 | 줄 allocated + `t_order_alloc` + 지정 stock row reserved + HOLD + 그 row 가용 재검증 |
 | 배정해제 | release ≤ reserved_unshipped. LIFO alloc 감소 + reserved − + allocated − + CANCEL_HOLD |
-| 소매 출고 (1회) | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + `order_no`/`order_detail_id` + 출고분 배송 + 선입금(DEC-019) |
+| 소매 출고 STOCK | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + 출고분 배송 + 선입금(DEC-019) |
+| 소매 출고 DIRECT | allocation 없이 가용 FIFO + 판매상세 stock_seq 분할 (DEC-027). Core 후속 |
+| 주문 취소(출고 전) | 상태. 미출고 `t_order_alloc`이 있으면 reserved 복구. 없으면 상태만 |
 | 가락 확정 | status + out/log + 선택 전표 |
 | 수금만 | cash + ledger + totals |
-| 주문 취소(출고 전) | 상태 + 모든 미출고 `t_order_alloc` 행별 reserved 복구 |
 
 ---
 
 ## 11. FastAPI 현황 (재확인)
 
-`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers**.
+`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers, fruit-stock, production, shipments**.
 
-**Stage 2:** GET/POST orders, GET customers. **sales / fruit-stock / allocations / ship 없음.**
+**Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock. **sales HTTP 없음.** 운영 DDL 미적용.
+
+**Stage P (구현 완료 · 로컬):** GET harvest-records, GET raw-stock, POST production/confirm.
+
+**Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.

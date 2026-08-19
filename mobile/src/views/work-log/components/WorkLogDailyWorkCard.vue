@@ -19,7 +19,13 @@ import {
   formatDailyTimeRange,
   isDailyWorkTabEnabled,
   isFertilizerWork,
+  isHarvestWork,
   isPesticideWork,
+  LABEL_HARVEST_QTY,
+  LABEL_HARVEST_VARIETY,
+  LABEL_WORK_SITE,
+  LABEL_WORK_TYPE,
+  SUFFIX_HARVEST_BOX,
   type DailyShellExpenseRow,
   type DailyShellLaborRow,
   type DailyShellPesticideRow,
@@ -59,6 +65,9 @@ const isPestWork = computed(() =>
 )
 const isFertWork = computed(() =>
   isFertilizerWork(props.item.workMidCd || '', props.item.title),
+)
+const isHarvest = computed(() =>
+  isHarvestWork(props.item.workMidCd || '', props.item.title),
 )
 
 const visibleTabs = computed(() =>
@@ -147,15 +156,35 @@ function onPending(msg?: string) {
     <div :key="activeTab" class="card__body" role="tabpanel">
       <template v-if="activeTab === DAILY_TAB_WORK">
         <dl class="rows">
-          <div class="row row--pair">
-            <div class="row__col">
-              <dt>작업구분</dt>
-              <dd>{{ item.title }}</dd>
-            </div>
-            <div class="row__col">
-              <dt>작업장소</dt>
-              <dd>{{ item.location || '—' }}</dd>
-            </div>
+          <div class="row row--inline">
+            <span class="row__pair">
+              <span class="row__label">{{ LABEL_WORK_TYPE }}</span>
+              <span class="row__sep" aria-hidden="true">:</span>
+              <span class="row__val">{{ item.title }}</span>
+            </span>
+            <span class="row__pair">
+              <span class="row__label">{{ LABEL_WORK_SITE }}</span>
+              <span class="row__sep" aria-hidden="true">:</span>
+              <span class="row__val">{{ item.location || '—' }}</span>
+            </span>
+          </div>
+          <div v-if="isHarvest" class="row row--inline">
+            <span class="row__pair">
+              <span class="row__label">{{ LABEL_HARVEST_VARIETY }}</span>
+              <span class="row__sep" aria-hidden="true">:</span>
+              <span class="row__val">{{ item.varietyNm || '—' }}</span>
+            </span>
+            <span class="row__pair">
+              <span class="row__label">{{ LABEL_HARVEST_QTY }}</span>
+              <span class="row__sep" aria-hidden="true">:</span>
+              <span class="row__val">
+                {{
+                  item.harvestContainerQty == null
+                    ? '—'
+                    : `${item.harvestContainerQty} ${SUFFIX_HARVEST_BOX}`
+                }}
+              </span>
+            </span>
           </div>
           <div class="row">
             <dt>시작 / 종료</dt>
@@ -416,18 +445,41 @@ function onPending(msg?: string) {
   border-bottom: 1px solid var(--ods-color-gray-100);
 }
 
-.row--pair {
+.row--inline {
   display: flex;
-  gap: var(--ods-space-12);
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ods-space-8) var(--ods-space-16);
   grid-template-columns: unset;
 }
 
-.row__col {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+.row__pair {
+  display: inline-flex;
+  align-items: baseline;
   gap: var(--ods-space-4);
+  min-width: 0;
+  flex: 1 1 calc(50% - var(--ods-space-8));
+}
+
+.row__label {
+  flex-shrink: 0;
+  font: var(--ods-font-form-help);
+  color: var(--ods-color-text-secondary);
+}
+
+.row__sep {
+  flex-shrink: 0;
+  color: var(--ods-color-text-secondary);
+}
+
+.row__val {
+  min-width: 0;
+  font: var(--ods-font-form-help);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .row:last-child {

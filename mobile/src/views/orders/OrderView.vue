@@ -13,11 +13,12 @@ import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import OdsFab from '@/components/ods/OdsFab.vue'
-import OdsSegmented from '@/components/ods/OdsSegmented.vue'
 import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
 import OrderLookupPanel, {
   type StatusFilterOption,
 } from '@/views/orders/OrderLookupPanel.vue'
+import PackProdPanel from '@/views/production/PackProdPanel.vue'
+import StockView from '@/views/stock/StockView.vue'
 import {
   CODE_PARENT_STATUS,
   LABEL_FAB_ORDER,
@@ -31,14 +32,20 @@ import {
   MSG_ORDER_EMPTY_FILTER_DESC,
   MSG_ORDER_EMPTY_TITLE,
   MSG_ORDER_LOAD_FAIL,
+  MSG_PACK_PROD_EMPTY_DESC,
+  MSG_PACK_PROD_EMPTY_TITLE,
   MSG_SALES_EMPTY_DESC,
   MSG_SALES_EMPTY_TITLE,
-  MSG_STAGE_LATER,
+  MSG_STOCK_EMPTY_DESC,
+  MSG_STOCK_EMPTY_TITLE,
   ORDER_LIST_PAGE_SIZE,
   ORDER_SALES_SEGMENT_OPTIONS,
   ORDER_STATUS_FILTER_FALLBACK,
   STATUS_FILTER_ALL,
   TAB_ORDER,
+  TAB_PACK_PROD,
+  TAB_SALES,
+  TAB_STOCK,
   formatOrderAmt,
 } from '@/views/orders/ordersConstants'
 import {
@@ -48,11 +55,13 @@ import {
 } from '@/views/orders/orderLookup'
 import { todayIso } from '@/views/work-log/workLogConstants'
 import { useAppStore } from '@/composables/stores/app'
+import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import type { OrderListItem } from '@/types/order'
 
 const router = useRouter()
 const route = useRoute()
 const { farmCd } = storeToRefs(useAppStore())
+const salesPrefill = useSalesPrefillStore()
 
 const segment = ref<string>(TAB_ORDER)
 const toastMsg = ref('')
@@ -87,7 +96,12 @@ const segmentOptions = ORDER_SALES_SEGMENT_OPTIONS.map((opt) => ({
   label: opt.label,
 }))
 
+const isPackProdTab = computed(() => segment.value === TAB_PACK_PROD)
+const isStockTab = computed(() => segment.value === TAB_STOCK)
 const isOrderTab = computed(() => segment.value === TAB_ORDER)
+const isSalesTab = computed(() => segment.value === TAB_SALES)
+const isPlaceholderTab = computed(() => isSalesTab.value)
+const showFab = computed(() => isOrderTab.value || isSalesTab.value)
 const fabLabel = computed(() => (isOrderTab.value ? LABEL_FAB_ORDER : LABEL_FAB_SALES))
 const statusSelectOptions = computed(() => [
   { value: STATUS_FILTER_ALL, label: LABEL_STATUS_ALL },
@@ -103,11 +117,15 @@ const hasExtraFilter = computed(() => {
   )
 })
 const emptyTitle = computed(() => {
-  if (!isOrderTab.value) return MSG_SALES_EMPTY_TITLE
+  if (isPackProdTab.value) return MSG_PACK_PROD_EMPTY_TITLE
+  if (isStockTab.value) return MSG_STOCK_EMPTY_TITLE
+  if (isSalesTab.value) return MSG_SALES_EMPTY_TITLE
   return hasExtraFilter.value ? MSG_ORDER_EMPTY_FILTER : MSG_ORDER_EMPTY_TITLE
 })
 const emptyDesc = computed(() => {
-  if (!isOrderTab.value) return MSG_SALES_EMPTY_DESC
+  if (isPackProdTab.value) return MSG_PACK_PROD_EMPTY_DESC
+  if (isStockTab.value) return MSG_STOCK_EMPTY_DESC
+  if (isSalesTab.value) return MSG_SALES_EMPTY_DESC
   return hasExtraFilter.value ? MSG_ORDER_EMPTY_FILTER_DESC : MSG_ORDER_EMPTY_DESC
 })
 const showOrderEmpty = computed(
@@ -208,12 +226,25 @@ function goNextPage() {
   void loadOrders()
 }
 
+function onGoSalesFromProduction() {
+  void router.push({ name: 'ship-confirm' })
+}
+
+function onProductionToast(msg: string) {
+  showToast(msg)
+}
+
 function onFab() {
   if (isOrderTab.value) {
     void router.push({ name: 'order-new' })
     return
   }
-  showToast(MSG_STAGE_LATER)
+  if (salesPrefill.shipLines.length) {
+    void router.push({ name: 'ship-confirm' })
+    return
+  }
+  segment.value = TAB_STOCK
+  showToast('상품 재고에서 판매를 선택하세요.')
 }
 
 function openOrder(orderNo: string) {
@@ -224,10 +255,27 @@ function isOrdersListPath(path: string): boolean {
   return path === '/orders' || path.startsWith('/orders?')
 }
 
+function applyTabQuery(tab: unknown) {
+  const v = String(tab || '')
+  if (v === TAB_STOCK || v === TAB_SALES || v === TAB_ORDER || v === TAB_PACK_PROD) {
+    segment.value = v
+  }
+}
+
 watch(
   () => route.path,
   (path) => {
     if (isOrdersListPath(path)) void loadOrders()
+  },
+)
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    applyTabQuery(tab)
+    if (String(tab) === TAB_STOCK && isOrdersListPath(route.path)) {
+      /* StockView watch farmCd already loads */
+    }
   },
 )
 
@@ -239,6 +287,7 @@ watch(farmCd, () => {
 })
 
 onMounted(() => {
+  applyTabQuery(route.query.tab)
   if (isOrdersListPath(route.path)) {
     void loadStatusOptions()
     void loadOrders()
@@ -251,11 +300,20 @@ onMounted(() => {
     <main class="content ods-page-content">
       <OdsAppBar />
       <header class="head">
-        <OdsSegmented
-          v-model="segment"
-          :options="segmentOptions"
-          :aria-label="LABEL_SEGMENT_ARIA"
-        />
+        <nav class="tab-bar" role="tablist" :aria-label="LABEL_SEGMENT_ARIA">
+          <button
+            v-for="opt in segmentOptions"
+            :key="opt.value"
+            type="button"
+            role="tab"
+            class="tab-bar__btn"
+            :class="{ 'tab-bar__btn--on': segment === opt.value }"
+            :aria-selected="segment === opt.value"
+            @click="segment = opt.value"
+          >
+            {{ opt.label }}
+          </button>
+        </nav>
       </header>
       <OrderLookupPanel
         v-if="isOrderTab"
@@ -316,10 +374,16 @@ onMounted(() => {
           {{ LABEL_PAGE_NEXT }}
         </OdsButton>
       </div>
-      <OdsEmptyState v-else-if="!isOrderTab" :title="emptyTitle" :description="emptyDesc" />
+      <PackProdPanel
+        v-else-if="isPackProdTab"
+        @toast="onProductionToast"
+        @go-sales="onGoSalesFromProduction"
+      />
+      <StockView v-else-if="isStockTab" :key="`stock-${farmCd}`" />
+      <OdsEmptyState v-else-if="isPlaceholderTab" :title="emptyTitle" :description="emptyDesc" />
     </main>
     <!-- eslint-disable vue/attribute-hyphenation -->
-    <OdsFab :label="fabLabel" :ariaLabel="fabLabel" @click="onFab">
+    <OdsFab v-if="showFab" :label="fabLabel" :ariaLabel="fabLabel" @click="onFab">
       <img :src="iconPlus" alt="">
     </OdsFab>
     <!-- eslint-enable vue/attribute-hyphenation -->
@@ -340,9 +404,33 @@ onMounted(() => {
 .head {
   margin: 0;
 }
-.head :deep(.ods-segmented) {
-  width: 100%;
-  max-width: none;
+
+/* text tab + underline */
+.tab-bar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.tab-bar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--ods-space-4);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.tab-bar__btn--on {
+  color: var(--ods-color-primary);
+  border-bottom-color: var(--ods-color-primary);
+  font-weight: 700;
 }
 .list {
   list-style: none;

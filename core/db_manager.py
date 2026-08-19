@@ -274,6 +274,8 @@ class DBManager:
                 ("google_event_id", "TEXT"),
                 ("sync_status", "TEXT"),
                 ("last_synced_at", "TEXT"),
+                ("variety_cd", "TEXT"),
+                ("harvest_container_qty", "INTEGER"),
             ):
                 if cols and name not in col_names:
                     self.conn.execute(
@@ -285,6 +287,12 @@ class DBManager:
                 self.conn.commit()
         except Exception as e:
             print(f"[DB] migrate t_work_detail.rmk: {e}")
+
+    def ensure_sales_stock_trace_schema(self):
+        """Stage 5C 추적 컬럼. connect()에서 호출하지 않음(운영 자동 ALTER 금지)."""
+        from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema
+
+        return ensure_sales_stock_trace_schema(self.conn)
 
     def ensure_sales_workflow_schema(self):
         """판매 업무상태/유입경로 컬럼 보정."""
@@ -2640,12 +2648,19 @@ class DBManager:
                 sql = """
                     REPLACE INTO t_work_detail (
                         work_id, work_dt, farm_cd, work_main_cd, work_mid_cd,
-                        work_loc_id, start_tm, end_tm, status_cd,
+                        work_loc_id, start_tm, end_tm, status_cd, rmk,
+                        variety_cd, harvest_container_qty,
                         reg_id, reg_dt, mod_id, mod_dt
-                    ) VALUES (?, ?, ?, 'WK01', ?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?, datetime('now','localtime'))
+                    ) VALUES (?, ?, ?, 'WK01', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?, datetime('now','localtime'))
                 """
-                params = (work_id, work_dt, farm_cd, row['mid_cd'], row['loc_id'],
-                          row['start_tm'], row['end_tm'], row['status'], user_id, user_id)
+                params = (
+                    work_id, work_dt, farm_cd, row['mid_cd'], row['loc_id'],
+                    row['start_tm'], row['end_tm'], row['status'],
+                    row.get('rmk') or "",
+                    row.get('variety_cd'),
+                    row.get('harvest_container_qty'),
+                    user_id, user_id,
+                )
                 self.execute_query(sql, params)
             return True
         except Exception as e:

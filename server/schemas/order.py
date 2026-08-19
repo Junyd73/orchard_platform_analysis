@@ -86,6 +86,9 @@ class OrderLineOut(BaseModel):
     grade_nm: str = ""
     size_nm: str = ""
     dlvry_tp_nm: str = ""
+    allocated_qty: float = 0
+    unallocated_qty: float = 0
+    reserved_unshipped_qty: float = 0
     deliveries: list[OrderDeliveryOut]
 
 
@@ -140,3 +143,97 @@ class CustomerListItem(BaseModel):
     custm_id: str
     custm_nm: str
     mobile: str = ""
+
+
+class AllocationStockOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    alloc_id: str
+    wh_cd: str
+    item_cd: str
+    variety_cd: str
+    grade_cd: str
+    size_cd: str
+    weight: float
+    harvest_year: int
+    storage_dt: str
+    allocated_qty: float
+    shipped_qty: float = 0
+
+
+class AllocationDetailOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order_detail_id: str
+    order_qty: float
+    allocated_qty: float
+    unallocated_qty: float
+    reserved_unshipped_qty: float
+    allocations: list[AllocationStockOut]
+
+
+class AllocationSummaryOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order_no: str
+    farm_cd: str
+    details: list[AllocationDetailOut]
+
+
+class AllocationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order_detail_id: str = Field(..., min_length=1)
+    qty: float | None = Field(default=None, gt=0)
+    auto: bool = False
+
+
+class AllocationReleaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order_detail_id: str = Field(..., min_length=1)
+    qty: float = Field(..., gt=0)
+
+
+class FruitStockItemOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    farm_cd: str
+    wh_cd: str
+    item_cd: str
+    item_nm: str = ""
+    variety_cd: str
+    variety_nm: str = ""
+    grade_cd: str
+    grade_nm: str = ""
+    size_cd: str
+    size_nm: str = ""
+    weight: float
+    harvest_year: int
+    storage_dt: str
+    in_qty: float
+    out_qty: float
+    real_qty: float
+    reserved_qty: float
+    available_qty: float
+
+
+class StockLogOut(BaseModel):
+    """재고 이력 1건."""
+    log_id: int
+    farm_cd: str
+    item_cd: str
+    variety_cd: str
+    variety_nm: str = ""
+    harvest_year: int
+    grade_cd: str
+    grade_nm: str = ""
+    size_cd: str
+    size_nm: str = ""
+    weight: float
+    io_type: str
+    io_type_nm: str = ""    # 사람이 이해하는 명칭 (생산입고, 원물사용, 주문배정 등)
+    qty: float
+    remark: str = ""
+    reg_id: str = ""
+    reg_dt: str = ""

@@ -20,6 +20,14 @@
 | DEC-E | 신규 `order_dt`/`sales_dt` = `YYYY-MM-DD` | DEC-012 |
 | DEC-017 | 출고 1회 = 판매 1건. 주문 1 : 판매 N | DEC-017 |
 | DEC-018 | 재고행 allocation 전용 테이블. FIFO 배정/출고, LIFO 해제 | DEC-018 |
+| DEC-020 | 출고방식 STOCK/DIRECT (한 축) | DEC-020 |
+| DEC-021 | UX: 농부에게 일을 더 만들지 않음 | DEC-021 |
+| DEC-022 | 수확: 영농일지·상자·≠자동입고 | DEC-022 |
+| DEC-023 | 생산 A안·잔량자동재고 | DEC-023 |
+| DEC-024 | 배즙 단위 박스 | DEC-024 |
+| DEC-025 | 생산 DB 기존구조 우선 | DEC-025 |
+| DEC-026 | harvest_year = 원료 과실 수확연도 · 생산 승계 | DEC-026 |
+| DEC-027 | 판매출고 재고 추적 · STOCK/DIRECT consume | DEC-027 |
 
 ---
 
@@ -46,7 +54,7 @@
 | 상태 | **APPROVED** |
 | 결정 | POST 주문은 가용재고 부족으로 거부하지 않는다. 등록 시 `allocated_qty=0`. |
 | 이유 | 명절 등 포장 전·중·후에도 주문이 들어온다. |
-| 영향 | 단계 2. 재고 검증은 배정 API에서만. |
+| 영향 | 단계 2. 재고 검증은 배정 API에서만. `allocated_qty=0`은 정상 (DEC-020). |
 | 승인 | 2026-08-17 대표 |
 
 ---
@@ -72,9 +80,9 @@
 | | |
 |--|--|
 | 상태 | **APPROVED** |
-| 결정 | `variety_cd` × `weight` × `grade_cd` × `size_cd` × `qty` × `unit_price` × `harvest_year`. 신규 규격 테이블 없음. |
+| 결정 | `variety_cd` × `weight` × `grade_cd` × `size_cd` × `qty` × `unit_price` × `harvest_year`. 신규 규격 테이블 없음. `harvest_year` 의미는 DEC-026. |
 | 이유 | 기존 PC·재고 키와 동일해야 Hold/출고가 맞는다. |
-| 영향 | 주문 줄·재고 매트릭스·판매 상세 |
+| 영향 | 주문 줄·재고 매트릭스·판매 상세. 관련: DEC-018 · **DEC-026** |
 | 승인 | 2026-08-17 대표 |
 
 ---
@@ -203,7 +211,7 @@
 | 상태 | **APPROVED** (논리 분리). 주문 `status_cd` 실코드는 DEC-011 CLOSED. |
 | 결정 | 주문상태 = 접수/완료/취소(문서 의미). 이행상태 = 미배정/부분배정/배정완료/출고완료(계산). 이행용 **새 컬럼·새 ST01 코드 추가 금지**. 계산식은 [02](./02_domain_flow.md). |
 | 이유 | 배정 진행을 주문 취소와 한 코드로 섞으면 선주문을 표현할 수 없다. |
-| 영향 | UI 배지 두 개. `status_cd`는 주문상태만. `stock_status`·`allocated_qty`·판매연결은 이행 계산. |
+| 영향 | UI 배지 두 개. `status_cd`는 주문상태만. `stock_status`·`allocated_qty`·판매연결은 이행 계산. **DEC-027:** ST010300은 부분배정이 아니라 **첫 CONFIRMED 출고 후 잔량 있는 주문의 배송준비**. 배정 이행(미배정/부분배정/배정완료)은 ST01에 넣지 않음. |
 | 승인 | 2026-08-17 대표 (DEC-B) |
 
 ---
@@ -228,10 +236,11 @@
 
 | | |
 |--|--|
-| 상태 | **OPEN** |
-| 결정 | 무조건 0 금지. 운영 HOLD/`reserved_qty` 점검 후 migration에서 `allocated_qty` 및 `t_order_alloc` 백필 여부 결정. 현재 로그로는 행 복원이 어려울 수 있음. |
-| 이유 | 이미 전량 Hold된 주문에 0을 넣으면 미배정으로 보이며 이중 Hold 가능. |
-| 영향 | 단계 3 직전 운영 점검 체크리스트. |
+| 상태 | **OPEN** (**CLOSED 후보**) |
+| 결정 | **백필 금지 유지.** 초기 migration은 HOLD/`reserved_qty` 보호가 목적이다. `ensure_order_alloc_schema` preflight는 **현재 active `reserved_qty>0`만 차단**. historical HOLD/CANCEL_HOLD 로그만 있고 현재 reserved=0이면 schema(DDL)는 허용한다. 로그는 Audit 대상이지 DDL 영구 차단 사유가 아니다. 레거시 HOLD를 `t_order_alloc`로 자동 복원하지 않는다. 기존 주문 `allocated_qty` DEFAULT 0. |
+| 이유 | 이미 전량 Hold된 주문에 0을 넣으면 미배정으로 보이며 이중 Hold 가능. 유령 reserved는 잠금만 해제하고 백필하지 않는다 (Stage 6-2 A안). |
+| 영향 | 단계 3 직전 점검. 로컬 A안: stock_seq=156 reserved 103 해제 + AUDIT, HOLD 이력 보존. 운영 DDL은 별도 승인. |
+| 3A 메모 | 운영 DB 재확인 SQL: `scripts/ops/check_order_alloc_preflight.sql`. **운영 재확인 전 CLOSED 하지 않음.** DEC-027(출고 규칙)과 충돌 없음 — 현재상태 SSOT는 계속 `t_order_alloc`. |
 
 ---
 
@@ -274,15 +283,15 @@
 
 | | |
 |--|--|
-| 상태 | **APPROVED** (설계). **CREATE TABLE 금지.** 실제 테이블명은 구현 시 네이밍 대조. |
+| 상태 | **APPROVED.** Stage 3A 로컬 테이블명 `t_order_alloc`. 운영 CREATE 금지. |
 | 결정 | 줄↔stock 자연키 배정은 `t_order_alloc`. 자동배정 **FIFO**(`storage_dt ASC`). 배정해제 **LIFO**(최근 잡은 행부터). 출고 소비 **FIFO**. 로그에 allocation SSOT용 컬럼을 억지로 넣지 않음. 향후 HOLD/CANCEL_HOLD/OUT에는 가능한 범위에서 `order_no`/`order_detail_id`/`sales_no`/stock 자연키를 이력으로 남길 수 있음. 현재상태 복원은 `t_order_alloc`, 감사 이력은 `t_stock_log`. |
-| 근거 | 현재 로그에 `wh_cd`/`storage_dt`/`order_detail_id` 없음 → 행 복원 불가. |
-| 영향 | 단계 3 DDL. DEC-008 줄 총량과 병행. |
+| 근거 | 로그에 `wh_cd`/`storage_dt`가 없어 행 복원 불가했음. DEC-027은 이력에 `stock_seq`를 추가하되 **allocation 현재상태 SSOT는 `t_order_alloc` 유지**. |
+| 영향 | 단계 3 DDL. DEC-008 줄 총량과 병행. HOLD ≠ OUT. `available_qty = real_qty - reserved_qty` ([09 §14](./09_production_inventory_flow.md)). Stage 5C 로그 추적은 `stock_seq`+`ref_type`+`ref_id` (DEC-027). 현재상태 SSOT는 계속 `t_order_alloc`. |
 | 승인 | 2026-08-17 대표 |
 
 **하위 운영규칙:** 배정해제 기본 순서는 FIFO의 역순인 LIFO. 먼저 잡은 오래된 재고를 유지해 FIFO 출고 원칙을 깨지 않기 위함. 동일 `storage_dt` 정렬은 기존 stock 자연키/row 규칙을 쓰며, 임의 규칙은 이번 단계에서 만들지 않음. 1차 모바일은 자동 FIFO. 향후 수동 재고행 선택은 열어 둠.
 
-최소 추적: `order_no`, `order_detail_id`, stock 자연키(`farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt`), `allocated_qty`, `shipped_qty`, 생성/수정 감사정보. PK/UNIQUE는 구현 전 schema 대조.
+최소 추적: `alloc_id` PK, UNIQUE(상세+stock 자연키), `allocated_qty`, `shipped_qty`, 감사컬럼. 같은 키는 한 행 누적.
 
 ---
 
@@ -301,9 +310,154 @@
 
 ---
 
+## DEC-020
+
+**출고방식: 저장재고(STOCK) vs 즉시(DIRECT) — 판매유형·전체 업무모델과 구분.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (출고방식 축). 저장 필드·DIRECT TX·전체 5축 모델은 **09·OPEN** |
+| 결정 | STOCK: `t_order_alloc`/HOLD 필수, `ship_qty <= allocated - shipped`. DIRECT: allocation 없이 출고·판매 가능. `allocated_qty=0` 정상. **품종으로 분기 금지.** |
+| 한계 | STOCK/DIRECT만으로 **전체 판매를 분류하지 않음.** 주문·생산·재고·판매유형은 별도 축 → [09 §1.1](./09_production_inventory_flow.md) |
+| 영향 | Stage 3A = STOCK용 배정. Stage 5C = 출고 TX 분기 (DEC-027). 주문 없음+STOCK **거부**. |
+| 금지 | DIRECT를 판매유형명으로 사용 · 주문이 있다고 STOCK 강제 |
+| OPEN | 출고방식 저장 컬럼·ship payload 필드명 |
+| 승인 | 2026-08-19. 2026-08-19 업무모델 재정렬로 범위 명확화 |
+| 승인 | 2026-08-19. 2026-08-19 업무모델 재정렬로 범위 명확화 |
+
+---
+
+## DEC-021
+
+**UX: 농부에게 일을 더 만들지 않는다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 중복입력 금지. 생산수량 판매 재입력 금지(A안). 자동(날짜·채번). 선택 단계 강제 화면 금지. Batch 사용자 관리 금지. |
+| 영향 | 모바일·PC·생산→판매 연동 설계. [09 §0](./09_production_inventory_flow.md). Stage 6 판매화면 4정책: [04 §9](./04_mobile_screen.md) |
+| 승인 | 2026-08-19 대표 논의 반영 |
+
+---
+
+## DEC-022
+
+**수확기록 — 영농일지, 콘테이너 상자, 재고 자동생성 금지.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED.** OPEN-PROD-02 **CLOSED** |
+| 결정 | `t_work_detail` 수확작업. 입력: 일자·품종·**콘테이너 상자 수**. 년도=일자 자동. kg **금지**. 수확 저장 ≠ `t_stock_master` IN. 통계(연/품종/일/전년대비) 목적. |
+| DDL 설계 | `variety_cd TEXT` · `harvest_container_qty INTEGER` (convention 준수). **`core/work_harvest_schema.py` 멱등 ALTER** — 로컬/테스트만. 운영 자동실행 금지 |
+| PC | `work_log_page` 수확 입력 · `register_raw_material`과 **미연동** |
+| 구현 | PC/모바일 영농일지 필드 — **Stage H 완료** (2026-08-19). 통계 화면은 후속 |
+| 승인 | 2026-08-19 대표 |
+
+---
+
+## DEC-023
+
+**생산확정 A안 — 바로 판매, 미판매 잔량 자동재고.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED.** OPEN-PROD-03 **CLOSED** |
+| 결정 | 선택: [재고로 저장] / [바로 판매]. **재고로 저장 = 확정 TX 이후 UI reset** (추가 IN 아님). 바로 판매: 생산수량→판매 화면 자동·재입력 금지. 판매 80/생산 100 → **20 자동 상품재고**. 생산 화면에서 80/20 분할 입력 금지. |
+| 기술 | **전량 IN**(현 PC) → 판매/출고 확정 시 **OUT** (Stage 5C). partial IN **폐기**. 생산 TX와 판매 TX **분리**. 판매 중단해도 생산재고 유지. rollback 금지. IN/OUT은 내부 처리. 원물 N건·harvest_year 승계는 **DEC-026**. |
+| PC | `save_production_log` 전량 IN = 확정안과 **동일**. 바로판매 prefill·OUT **미구현** (후속) |
+| 승인 | 2026-08-19 대표 |
+
+---
+
+## DEC-024
+
+**배즙 완제품 재고 단위 = 박스.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 사용자 재고/주문/판매 단위 = **박스**. PC `「포」` 표기는 **생산/재고 확장 단계**에서 UI만 수정. qty 변환 migration **금지** (개수=박스). |
+| PC | FR010200 조회○ · PROCESS **미구현** · 표기 「포」 |
+| 승인 | 2026-08-19 대표 |
+
+---
+
+## DEC-025
+
+**생산/변환 DB — 기존 구조 최대 활용, 신규 테이블 선행 금지.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | `t_stock_master` · `t_stock_log` · `t_work_*` · 판매/주문 우선. `t_production_master`/`t_production_detail` **생성 안 함**. Batch 사용자 UI·번호 입력 **금지**. 명백한 부족이 구현에서 확인되기 전 신규 생산테이블 **제안 금지**. |
+| DDL | 수확만: `variety_cd` + `harvest_container_qty` (DEC-022). 생산/판매는 기존 구조. |
+| 승인 | 2026-08-19 대표 |
+
+---
+
+## DEC-026
+
+**재고 harvest_year 의미 및 생산 승계 규칙.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (Accepted) |
+| 관련 Stage | 4 (P) · 5A (3A) · 5B · 5C |
+| 결정 | `harvest_year`는 **생산(포장)연도가 아니라 원료 과실의 수확연도**. RAW_STOCK: 상품/배즙 = 투입 원물 `harvest_year` 승계. HARVEST: 수확기록 `work_dt` 연도. PROCESS: 원물 승계. 한 생산에서 **다른 harvest_year 혼합 금지**, **다른 품종 원물 혼합 금지** (Core `MIXED_YEAR` / `MIXED_VARIETY`). |
+| 이유 | 생산일과 원료 연도는 다를 수 있음. 저장배는 다음 해 포장 가능. 주문 allocation이 `harvest_year`로 재고 탐색 (DEC-018). 상품 traceability 유지. |
+| 운영 제약 | 배 재고는 1년 이상 장기보관을 일반 전제로 하지 않음. 다년도 rollover UI **도입하지 않음**. `harvest_year` 필드는 유지. |
+| 관련 | DEC-004 (규격에 harvest_year 포함) · DEC-018 (FIFO 키에 harvest_year) · DEC-023 (전량 IN, TX 분리 — 충돌 없음) · DEC-025 (신규 테이블 없음) |
+| 승인 | 2026-08-19 대표 (Stage 5B 구현 확정) |
+
+---
+
+## DEC-027
+
+**판매출고 재고 추적 및 STOCK/DIRECT consume 규칙.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (Accepted) |
+| 관련 Stage | 5C (규칙 불변). Core+HTTP 구현 · Mobile UI 후속 |
+| 결정 | 아래 11항. |
+
+1. `t_stock_master.stock_seq`는 **추적키**. 업무 natural key(9필드)를 대체하지 않음. 생산·조회·Allocation은 9필드 유지. UPSERT 후 `stock_seq`는 natural key로 SELECT (lastrowid 금지).
+2. CONFIRMED 상품 OUT: **1 `t_sales_detail` = 1 `stock_seq`**. FIFO가 N row면 판매상세 N행. 연결 테이블 없음.
+3. STOCK·DIRECT **동일 분할**. 차이는 allocation consume 여부뿐.
+4. DRAFT·레거시 `stock_seq` **NULL 허용**. DB NOT NULL/물리 FK 없음. CONFIRMED OUT은 Core가 논리 강제.
+5. `t_stock_log`: `stock_seq` + `ref_type` + `ref_id` (NULL 허용). SALE 시 `ref_id` = `sale_detail_no`. remark만으로 이벤트 구분하지 않음.
+6. STOCK consume = `t_order_alloc.shipped_qty +=`. `allocated_qty`는 출고로 줄이지 않음. 같은 TX에 `reserved_qty −`, `out_qty +`.
+7. 주문 출고 SSOT = `SUM(CONFIRMED t_sales_detail.qty)` by `order_detail_id`. `t_order_detail.out_qty` 사용 금지. DEC-017 1:N 유지.
+8. ST01에 **배정상태 금지** (DEC-013). ST010300 = 첫 CONFIRMED 출고 후 **잔량 있는 배송준비**. ST010200 강제 경유 없음.
+9. 전량: 모든 줄 `confirmed_shipped == order_qty` → `ST010400` + `stock_status='Y'`. 완료는 `==`(ε). `>=` 금지.
+10. 과출고: `confirmed + request <= order_qty` 아니면 거부.
+11. 허용: 주문+STOCK / 주문+DIRECT / 주문없음+DIRECT. **거부: 주문없음+STOCK.**
+
+DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자동실행 금지. `ensure_order_alloc_schema`와 분리.
+
+| 관련 | DEC-013 · **017** · **018** (HOLD≠OUT, alloc SSOT) · **020** · **026** |
+| 승인 | 2026-08-19 대표 |
+
+---
+
+## OPEN-PROD (CLOSED — 2026-08-19 대표 최종승인)
+
+설계 확정. Stage H/P/5B **로컬 구현 완료**. 운영 ALTER·5C OUT은 후속.
+
+| ID | 상태 | 확정 내용 | 후속 구현 |
+|----|------|-----------|-----------|
+| OPEN-PROD-01 | **CLOSED** | 추적 = `work_id` + `t_stock_log`. `t_production_*` 없음 | 구현 중 부족 확인 전 테이블 제안 금지 |
+| OPEN-PROD-02 | **CLOSED** | 영농일지. DDL `variety_cd TEXT` + `harvest_container_qty INTEGER` | **Stage H 구현 완료** — 운영 ALTER는 별도 승인 |
+| OPEN-PROD-03 | **CLOSED** | 전량 IN → 판매/출고 OUT. TX 분리. partial IN 폐기 | StockPage 바로판매 prefill · 공통 OUT TX |
+
+상세: [09 §5·§9](./09_production_inventory_flow.md).
+
+---
+
 ## 상태 요약
 
 | ID | 상태 |
 |----|------|
-| DEC-001 ~ 014, **017, 018** | APPROVED 또는 CLOSED (011 = CLOSED) |
-| DEC-015, 016, **019** | OPEN (015→단계3 전, 019→단계4 전, 016→단계6 전) |
+| DEC-001 ~ 014, **017, 018, 020 ~ 027** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
+| DEC-015, 016, **019** | OPEN |
+| **OPEN-PROD-01~03** | **CLOSED** (P·H·5B·5C Core 로컬, API/UI 후속) |

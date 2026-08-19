@@ -1,135 +1,117 @@
 # 01. Overview — 주문/판매 통합
 
-> 상태: 단계 0 **최종승인 완료** (2026-08-17 대표) → 단계 1 **완료** → **단계 2 완료 / 대표 승인** (2026-08-19)  
-> 단계 0은 다시 열지 않는다. 단계 3 미착수. DEC-019는 OPEN이며 단계 4 전 확정.
+> 상태: 단계 0 **최종승인** → 단계 1·2 **완료** → **3A/H/P/5B 구현 완료** (main 미머지)  
+> **2026-08-19:** Stage 5C 1차 DEC-027 · 추적 DDL. Core 출고 **없음**. 상세: [09](./09_production_inventory_flow.md) · [06](./06_development_progress.md)  
+> Stage 5C Core · Stage 3B UI · 운영 migration **없음** (이번 작업).
+
+## 0. UX 최우선 원칙 (DEC-021)
+
+**농부에게 일을 더 만들지 않는다.**
+
+중복입력 금지 · 자동(날짜/채번) · 생산수량 판매 재입력 금지 · 선택 단계 강제 화면 금지.  
+상세: [09 §0](./09_production_inventory_flow.md).
 
 ## 1. 프로젝트 목적
 
-PC에만 있는 과일 **주문 · 재고배정 · 출고 · 판매 · 배송 · 수금 · 가락 경매 DRAFT** 를  
-모바일에서도 같은 규칙으로 다루되, **미완성 PC 로직을 그대로 복제하지 않는다.** (DEC-001 APPROVED)
+PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 공유 규칙으로 연결하되,  
+**미완성 PC 로직을 복제하지 않고**, 기존 `StockPage`·`OrderPage`를 **확장**한다. (DEC-001)
 
-공통 업무규칙을 문서화하고, PC는 그 규칙에 맞추기 위한 **최소 수정**만 설계한다.
+- **재고/생산:** `ui/pages/stock_page.py` (원물·상품·생산확정·수율)
+- **주문/판매:** `core/order_service.py`, Stage 5A allocation, Stage 5C 출고·판매
 
-## 2. 확정된 통합 원칙
+## 2. 최상위 업무 모델
+
+**판매**가 공통 종착. 괄호 단계는 모두 **선택**.
+
+```
+수확 → (생산/변환) → (재고) → 판매
+                              ↑
+                           (주문)
+```
+
+`주문→배정→출고→판매`는 **저장배 소매 등 일부 경로**만. 전체 공통 흐름 아님.  
+판매유형 7종·PC 근거: [09 §2·§3](./09_production_inventory_flow.md).
+
+## 3. 확정된 통합 원칙
 
 | 원칙 | DEC | 상태 |
 |------|-----|------|
-| 주문 저장과 판매 생성 분리 | DEC-005 | APPROVED |
-| 선주문 허용 (재고 0이어도 등록) | DEC-002 | APPROVED |
-| 부분배정 (`qty` ≠ 누적 `allocated_qty`) | DEC-003, DEC-008 | APPROVED |
-| 소매 출고확정이 주문→판매 경계 (단일 TX). 출고 1회 = 판매 1건 | DEC-014, 017 | APPROVED |
-| PC / core / FastAPI / mobile 동일 업무로직 | DEC-007 | APPROVED |
-| 신규 `order_dt`/`sales_dt` = `YYYY-MM-DD` | DEC-012 | APPROVED |
-| DB 변경 최소화. 1차 DDL = `allocated_qty` + 가칭 `t_order_alloc` | DEC-008, 018 | 둘 다 설계 APPROVED. 이번엔 CREATE/ALTER 금지 |
-| 주문상태 ≠ 이행상태 | DEC-013 | APPROVED. 주문 `status_cd`는 DEC-011 CLOSED |
-| 주문 선입금은 금액만. 전표는 판매 기준 | DEC-009 | APPROVED |
-| 규격 = 품종×중량×등급×크기 | DEC-004 | APPROVED |
+| UX: 일을 더 만들지 않음 | 021 | APPROVED |
+| 주문 저장 ≠ 판매 생성 | 005 | APPROVED |
+| 선주문 (재고 0 OK) | 002 | APPROVED |
+| 부분배정, 배정은 **선택** | 003, 008 | APPROVED |
+| 출고방식 STOCK/DIRECT (한 축) | 020 | APPROVED. 저장·DIRECT TX OPEN |
+| 출고 1회 = 판매 1건 | 014, 017 | APPROVED |
+| PC/core/API/mobile 동일 규칙 | 007 | APPROVED |
+| 날짜 ISO | 012 | APPROVED |
+| Stage 3A DDL | 008, 018 | 로컬. 운영 별도 |
+| 주문상태 ≠ 이행상태 | 013 | APPROVED |
+| 선입금 금액만 | 009 | APPROVED |
+| 규격 4요소 | 004 | APPROVED |
+| harvest_year = 원료 수확연도 | 026 | APPROVED |
 
-기타: ODS / FastAPI `/api/v1` / Vue3 / PyQt6 / SQLite 유지. 농약 재고 API와 과일 재고 혼용 금지.
+**금지:** 품종으로 STOCK/DIRECT·판매유형 자동 분기.
 
-## 3. 개발 범위 (목표)
+## 4. Stage 3A (구현 완료 · merge 대기)
 
-- 소매 선주문 · 부분 재고배정 · 배송/방문 · **출고확정 TX에서 판매 생성** → 수금
-- 가락: 포장재고 → 실시간 경매 → `AUCTION_RT` DRAFT → **확정+출고 단일 TX** → 정산
-- 수출/일반도매: 포장재고 → 판매 직접 등록 → 출고/확정 → 수금
-- 모바일 하단 5번째 탭 **주문/판매** (DEC-006)
-- PC P0: 동시생성 제거, Hold 키, 출고, 날짜, 채번 공통화
+**이미 있는 상품재고**를 주문에 예약 — 저장배·배즙재고 등.
 
-## 4. 비범위
+- `allocated_qty`, `t_order_alloc`, FIFO/LIFO, HOLD — **유지**
+- `allocated_qty=0` **정상**. 생산→바로판매에 alloc **강제 없음**
+- 운영 DDL **미적용**. main merge **미승인**
+- [02 §3·§4](./02_domain_flow.md) 배정·STOCK 출고
 
-- PC 주문/판매 UI 전면 재설계
-- 저장관리(`StockPage`) 구조 전면 교체
-- 과거 주문/판매 **일괄** 날짜·상태 migration
-- 선수금 회계 신규 설계
-- `t_dlvry_detail` 등 미사용 명칭 정리
-- 농약 입고/출고, 관찰·영농일지·시세수집 로직 변경
-- OS timezone / backup cron
-- 단계 0 최종승인 전 구현
+## 5. 개발 범위·비범위
 
-## 5. 품종별 업무흐름 (운영 확정)
+**범위:** 모바일 **판매관리** (하단) · 상단 4탭 Shell · 공통 Order/Allocation 서비스 · PC P0(판매 분리·출고 TX 등)  
+**비범위:** StockPage 전면 교체 · `t_production_*` DDL · Stage 3B UI · Stage 5C 판매 OUT
 
-코드에 품종별 if 분기는 **없다.** `item_cd` + 원물(`FR010300`) 존재 여부로 운영한다.
+## 5.1 모바일 판매관리 Shell (2026-08-19)
 
-| 품종 | 흐름 | 주문 | 저장 |
-|------|------|------|------|
-| 원황 | 수확 → (저장 없음) → 포장 → **수출 판매** | 드묾 | 원물 입고 생략 가능 |
-| 조생 (수황·황금·화산 등) | 수확 → (저장 없음) → 포장 → 도매 또는 소매 | 소매 있음 | 원물 입고 생략 가능 |
-| 신고 | 수확 → **저장** → 포장 → 주로 가락 도매 | 소매 일부 | `FR010300` 입고 후 선별 |
+- 하단 5탭 5번째: **판매관리** (`/orders`, 아이콘 `nav-orders` 유지)
+- 상단 4탭: **포장/생산 · 재고 · 주문 · 판매** — 업무영역 분류(강제 workflow 아님)
+- 초기 선택 탭: **주문** (기존 사용성 유지)
+- 포장/생산·재고: Stage P/5B **실기능**. 주문·판매 기존 Shell 유지
 
-포장 완료 상품은 모두 `t_stock_master.item_cd = FR010100` (배).  
-원황/조생과 신고 **상품 행만으로는 구분 불가** — 원물 입고 이력으로만 구분.
-
-## 6. 도메인 관계
-
-```
-고객(m_customer)
-    ↓
-주문(t_order_*)     ←── 선주문: 재고 없어도 접수, allocated_qty=0
-    ↓ 재고배정 (부분 허용, FIFO, t_order_alloc)
-상품재고(t_stock_master FR010100)  ← 선별생산 ← 원물(FR010300, 신고)
-    ↓ 출고확정 TX (reserved → out + 새 판매 1건, 주문 1:N)
-판매(t_sales_*)     ←── 경매 DRAFT(AUCTION_RT) 도 확정 TX에서 합류
-    │   SSOT: t_sales_master.order_no + t_sales_detail.order_detail_id
-    ↓ CONFIRMED
-수금(t_cash_ledger) + 전표(t_ledger)   ←── 주문 시점 전표 없음
-배송(t_order_delivery / t_sales_delivery)  ←── 출고분만큼만 판매배송
-```
-
-**현재 PC:** 주문 저장 시 판매 행을 **즉시 INSERT** (`save_entire_order`).  
-**확정 설계:** 주문 접수와 판매 생성을 분리한다. (DEC-005 APPROVED)
-
-## 7. 기존 시스템 재사용
+## 6. 기존 시스템 재사용
 
 | 자산 | 재사용 |
 |------|--------|
-| 규격 | `variety_cd` × `weight` × `grade_cd` × `size_cd` × `qty` × `unit_price` × `harvest_year` |
-| 채번 | 주문 `ORDYYYYMMDD-NNN` · 판매 `YYYYMMDD-NN` (`generate_sales_no`로 공통화) |
-| 배송유형 | `LO010100` 방문 · `LO010200` 택배 · `LO010300` 화물/경매 |
-| 시즌 | `SS01` → `season_type_cd` |
-| 판매상태 | `sales_status` `DRAFT`/`CONFIRMED`, `sales_source` `ORDER`/`AUCTION_RT` |
-| 회계 | `AccountManager.sync_ledger_by_basket('SALE', …)` — CONFIRMED 판매만 |
-| 경매 | `MarketPricePage.save_realtime_auction_draft` + **신설 confirm** |
-| 업무일 | `today_ops` / `now_ops_str` (KST) |
+| 재고/생산 | `stock_page.py` — FR010300/100/200, 생산확정, 수율, 실사 |
+| 주문 | `order_service.py`, `order_allocation_service.py` |
+| 판매/경매 | `sales_page.py`, `market_price_page.py` |
+| 회계 | `account_manager.py` — CONFIRMED만 |
+| 업무일 | `today_ops` / `now_ops_str` |
 
-## 8. 신규 구조 최소화
+## 7. 단계 계획
 
-수량 용어:
+역사적 번호(3A/H/P/S)는 유지하고, 운영 표기는 아래와 같이 읽는다. 게이트: [06](./06_development_progress.md).
 
-- `allocated_qty` = **누적 배정수량** (출고 후 유지)
-- `shipped_qty` / `reserved_unshipped_qty` / `unallocated_qty` = 계산값, 컬럼 없음
+| 단계 | 목표 | 상태 |
+|------|------|------|
+| 0 | 주문·판매·재고 전체 설계 / PC 기준 분석 / 업무규칙 | **완료** |
+| 1 | 모바일 주문/판매 진입구조·메뉴·라우팅 | **완료** |
+| 2 | 주문관리 — 조회·등록·수정·취소·고객·배송지 | **완료** |
+| 3 (=H) | 수확기록 확장 — 영농일지 품종·콘테이너 수량 | **완료** (main 미머지) |
+| 4 (=P) | 생산/변환 — PACK·PROCESS·원물 OUT·생산품 IN | **완료** (main 미머지) |
+| 5A (=3A) | 재고배정 Core — HOLD / RELEASE / allocation | **완료** (main 미머지) |
+| 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료** (main 미머지) |
+| 5C (=S) | 공통 출고·판매 Core — 판매확정·상품 OUT | **예정** |
+| 6 | 모바일 출고·배정·판매 UX (구 3B 포함) | **예정** |
+| 7 | 가락시장 경매→판매확정·정산 | **예정** |
+| 8 | 통합 회귀·PC/PWA 정합·운영 Migration·배포 | **예정** |
 
-- 새 상태코드 임의 추가 없음.
-- 1차 DDL 후보: **`t_order_detail.allocated_qty`** (DEC-008) + 가칭 **`t_order_alloc`** (DEC-018, 현재상태 SSOT). 실제 ALTER/CREATE는 단계 3. 이번 문서 작업에서 DDL 금지.
-- `t_stock_log`는 HOLD/CANCEL_HOLD/OUT **이력**. allocation 현재상태 SSOT로 쓰지 않음.
+## 8. OPEN
 
-## 9. 단계별 개발계획
+| ID | 내용 |
+|----|------|
+| DEC-015 | HOLD 백필 **금지**. active reserved만 DDL 차단. CLOSED 후보, 운영 재확인 전 CLOSED 금지 |
+| DEC-019 | 선입금 부분출고 배분 |
+| DEC-020 저장 | 출고방식 저장·DIRECT TX |
+| DEC-016 | 가락 `t_sales_delivery` |
 
-상세·게이트: [06_development_progress.md](./06_development_progress.md)
+## 9. 코드 근거
 
-| 단계 | 목표 | 진입 조건 |
-|------|------|-----------|
-| 0 | 설계 · **최종승인** | 본 문서 대표 승인 |
-| 1 | 하단탭·라우트 셸 | 단계 0 최종승인 |
-| 2 | 주문 조회/등록 (판매 미생성) | 단계 1 승인. 신규 `status_cd` 기본값 `ST010100` (DEC-011 CLOSED) |
-| 3 | 재고배정 | 단계 2 승인 + `allocated_qty`/`t_order_alloc` migration + 운영 HOLD 점검 (DEC-015) |
-| 4 | 출고 → 판매 (단일 TX, 1출고=1판매) | 단계 3 승인 + DEC-019 |
-| 5 | 판매 목록/직접판매 | 단계 4 승인 |
-| 6 | 경매 확정 · 수금 · 회계 | 단계 5 승인 |
-| 7 | 회귀 · 운영 검증 | 단계 6 승인 |
-
-현재: **단계 0 최종승인 완료. 단계 1 완료. 단계 2 완료 / 대표 승인 (2026-08-19). 단계 3 미착수.**
-
-운영 DB: 기존 주문/판매/재고 **테스트데이터 초기화 완료** (2026-08-17 대표).  
-2026 실제 신규 수확부터 재고 데이터를 새로 구축한다. 백업: `/var/www/orchard/backups/orchard_20260817.db`.
-
-## 10. 남은 승인·점검
-
-단계 0은 닫혔다. 아래 OPEN은 **단계 1을 막지 않는다.** 각 단계 진입 전에 해결한다.
-
-| ID | 내용 | 해결 시점 |
-|----|------|-----------|
-| DEC-015 | 기존 HOLD → allocated / `t_order_alloc` 백필 | 단계 3 migration 전 |
-| DEC-019 | 선입금의 부분출고별 배분 | 단계 4 전 |
-| DEC-016 | 가락 확정 시 `t_sales_delivery` | 단계 6 전 |
-
-출고 후 판매취소 정책은 기존대로 단계 6 OPEN.
+- `ui/pages/stock_page.py` — 원물 IN, 생산확정, 수율, 실사, 폐기
+- `core/order_service.py`, `core/order_allocation_service.py`
+- `docs/mobile_order_sales/09_production_inventory_flow.md` — 생산/재고 SSOT

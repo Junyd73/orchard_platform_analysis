@@ -1,24 +1,34 @@
-/** 주문/판매 (단계 2: 주문 목록/등록. 판매는 단계 5). */
+/** 판매관리 (단계 2: 주문. 포장/생산·재고·판매 Shell). */
 
+export const TAB_PACK_PROD = 'pack_prod'
+export const TAB_STOCK = 'stock'
 export const TAB_ORDER = 'order'
 export const TAB_SALES = 'sales'
 
+/** 상단 4탭 — 업무영역 분류(강제 workflow 아님). 초기 선택은 TAB_ORDER. */
 export const ORDER_SALES_SEGMENT_OPTIONS = [
+  { value: TAB_PACK_PROD, label: '포장/생산' },
+  { value: TAB_STOCK, label: '재고' },
   { value: TAB_ORDER, label: '주문' },
   { value: TAB_SALES, label: '판매' },
 ] as const
 
-export const LABEL_PAGE_TITLE = '주문/판매'
-export const LABEL_SEGMENT_ARIA = '주문 또는 판매'
+export const LABEL_PAGE_TITLE = '판매관리'
+export const LABEL_SEGMENT_ARIA = '포장·생산, 재고, 주문, 판매'
 export const LABEL_FAB_ORDER = '신규 주문'
 export const LABEL_FAB_SALES = '직접 판매'
+export const LABEL_SHIP = '출고'
 export const MSG_STAGE_LATER = '다음 단계에서 구현합니다.'
 export const MSG_ORDER_EMPTY_TITLE = '등록된 주문이 없습니다'
 export const MSG_ORDER_EMPTY_DESC = '우측 하단 버튼으로 신규 주문을 등록하세요.'
 export const MSG_ORDER_EMPTY_FILTER = '조건에 맞는 주문이 없습니다.'
 export const MSG_ORDER_EMPTY_FILTER_DESC = '조회기간·상태·검색을 바꿔 다시 조회해 보세요.'
 export const MSG_SALES_EMPTY_TITLE = '등록된 판매가 없습니다'
-export const MSG_SALES_EMPTY_DESC = '판매 목록·직접판매는 단계 5에서 구현합니다.'
+export const MSG_SALES_EMPTY_DESC = '확정된 판매는 출고 후 여기에 모입니다. 직접판매는 재고에서 시작하세요.'
+export const MSG_PACK_PROD_EMPTY_TITLE = '포장/생산'
+export const MSG_PACK_PROD_EMPTY_DESC = '포장 및 생산관리를 준비 중입니다.'
+export const MSG_STOCK_EMPTY_TITLE = '재고'
+export const MSG_STOCK_EMPTY_DESC = '원물·상품·배즙 재고를 준비 중입니다.'
 export const MSG_ORDER_LOAD_FAIL = '주문 목록을 불러오지 못했습니다.'
 export const LABEL_NEW_ORDER = '신규 주문'
 export const LABEL_EDIT_ORDER = '주문 수정'

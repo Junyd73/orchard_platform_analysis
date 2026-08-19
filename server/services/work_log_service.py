@@ -42,6 +42,9 @@ from app.schemas.work_log import (
 from app.services._core_path import ensure_repo_root_on_path
 from app.services.observation_ai_db_bridge import ServerDbBridge
 
+ensure_repo_root_on_path()
+from core.work_harvest_schema import ensure_work_harvest_schema  # noqa: E402
+
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 WORK_MAIN_CD = "WK01"
@@ -80,8 +83,29 @@ LABOR_WORKER_TYPES = ("EMP", "TEMP")
 LABOR_WORKER_TYPES_SQL = ", ".join(f"'{t}'" for t in LABOR_WORKER_TYPES)
 
 
-def _s(v) -> str:
+def _s(v: object | None) -> str:
     return str(v or "").strip()
+
+
+def _opt_int(row: Any, key: str) -> int | None:
+    keys = row.keys() if hasattr(row, "keys") else []
+    if key not in keys:
+        return None
+    v = row[key]
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_cd(row: Any, key: str) -> str | None:
+    keys = row.keys() if hasattr(row, "keys") else []
+    if key not in keys:
+        return None
+    s = _s(row[key])
+    return s or None
 
 
 def _allocate_work_id(
@@ -775,6 +799,8 @@ class WorkLogService:
         if not _DATE_RE.match(dt):
             raise BusinessRuleError("작업일은 YYYY-MM-DD 형식이어야 합니다.")
 
+        ensure_work_harvest_schema(self._db_path)
+
         with get_sqlite_connection(self._db_path) as conn:
             m = conn.execute(
                 """
@@ -792,7 +818,8 @@ class WorkLogService:
                     d.*,
                     COALESCE(mid.code_nm, '') AS work_mid_nm,
                     COALESCE(st.code_nm, '') AS status_nm,
-                    COALESCE(site.site_nm, '') AS work_loc_nm
+                    COALESCE(site.site_nm, '') AS work_loc_nm,
+                    COALESCE(var.code_nm, '') AS variety_nm
                 FROM t_work_detail d
                 LEFT JOIN m_common_code mid
                   ON mid.farm_cd = d.farm_cd AND mid.code_cd = d.work_mid_cd
@@ -800,6 +827,8 @@ class WorkLogService:
                   ON st.farm_cd = d.farm_cd AND st.code_cd = d.status_cd
                 LEFT JOIN m_farm_site site
                   ON site.farm_cd = d.farm_cd AND site.site_id = d.work_loc_id
+                LEFT JOIN m_common_code var
+                  ON var.farm_cd = d.farm_cd AND var.code_cd = d.variety_cd
                 WHERE d.farm_cd = ? AND d.work_dt = ?
                 ORDER BY d.work_id ASC
                 """,
@@ -870,6 +899,9 @@ class WorkLogService:
                     if "sync_status" in r.keys()
                     else None
                 ),
+                variety_cd=_opt_cd(r, "variety_cd"),
+                variety_nm=(_s(r["variety_nm"]) or None) if "variety_nm" in r.keys() else None,
+                harvest_container_qty=_opt_int(r, "harvest_container_qty"),
             )
             for r in rows
         ]
@@ -1114,6 +1146,8 @@ class WorkLogService:
                         pesticide_lines=pest_lines,
                         replace_pesticide_use_id=w.replace_pesticide_use_id,
                         is_pesticide=is_pest_flag,
+                        variety_cd=w.variety_cd,
+                        harvest_container_qty=w.harvest_container_qty,
                     )
                 )
 
@@ -1504,6 +1538,8 @@ class WorkLogService:
                         end_tm=end,
                         status_cd=status,
                         pesticide_lines=[],
+                        variety_cd=item.variety_cd,
+                        harvest_container_qty=item.harvest_container_qty,
                     )
                 )
 

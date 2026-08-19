@@ -19,6 +19,7 @@ import {
   LABEL_LINE,
   LABEL_ORDER_DETAIL,
   LABEL_QTY,
+  LABEL_SHIP,
   LABEL_UNIT_PRICE,
   MSG_ORDER_CANCEL_CONFIRM,
   MSG_ORDER_CANCEL_FAIL,
@@ -34,11 +35,13 @@ import {
   orderEditLockMessage,
 } from '@/views/orders/ordersConstants'
 import { useAppStore } from '@/composables/stores/app'
+import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import type { OrderDetail, OrderLine } from '@/types/order'
 
 const route = useRoute()
 const router = useRouter()
 const { farmCd } = storeToRefs(useAppStore())
+const salesPrefill = useSalesPrefillStore()
 const loading = ref(true)
 const cancelling = ref(false)
 const confirmOpen = ref(false)
@@ -58,9 +61,25 @@ const statusTone = computed<'ok' | 'caution' | 'danger' | 'neutral'>(() => {
   if (cd === ORDER_STATUS_DELIVERED) return 'neutral'
   return 'ok'
 })
+const canShip = computed(() => {
+  const cd = detail.value?.status_cd || ''
+  return cd !== ORDER_STATUS_CANCEL && cd !== ORDER_STATUS_DELIVERED
+})
 const totalAmt = computed(() =>
   formatOrderAmt(detail.value?.tot_order_amt || detail.value?.total_amt || 0),
 )
+
+function remainingText(line: OrderLine): string {
+  const row = salesPrefill.remainingFor(line.order_detail_id)
+  if (!row) return ''
+  return `출고 ${formatOrderAmt(row.confirmed_shipped_qty)} / 잔여 ${formatOrderAmt(row.remaining_order_qty)}`
+}
+
+function goShip(line: OrderLine) {
+  if (!canShip.value || !detail.value) return
+  salesPrefill.setFromOrder(detail.value, line)
+  void router.push({ name: 'ship-confirm' })
+}
 
 function lineTitle(idx: number): string {
   return `${LABEL_LINE} ${idx + 1}`
@@ -157,7 +176,18 @@ watch(orderNo, () => {
         >
           <p class="spec">{{ formatOrderLineSpec(line) }}</p>
           <p class="meta">{{ lineQtyAmtText(line) }}</p>
+          <p v-if="remainingText(line)" class="meta">{{ remainingText(line) }}</p>
           <p class="meta">배송 {{ formatOrderLineShip(line) }}</p>
+          <OdsButton
+            v-if="canShip"
+            type="button"
+            variant="secondary"
+            :block="false"
+            class="ship-btn"
+            @click="goShip(line)"
+          >
+            {{ LABEL_SHIP }}
+          </OdsButton>
         </OdsCard>
       </template>
     </main>
@@ -278,6 +308,9 @@ watch(orderNo, () => {
   margin: 0;
   font: var(--ods-font-card-body);
   color: var(--ods-color-text);
+}
+.ship-btn {
+  margin-top: var(--ods-space-12);
 }
 .meta {
   margin: var(--ods-space-8) 0 0;

@@ -1,27 +1,52 @@
-# 02. Domain flow — 업무 흐름
+# 02. Domain flow — 주문·배정·출고·판매
 
-> 상태: 단계 0 **최종승인 완료**. 단계 1 착수.  
-> 범례: **현재** = 오늘 PC 코드 · **확정** = 대표 APPROVED · **OPEN** = 미확정.
+> **범위:** 주문/판매 도메인. 생산/재고 전체·판매유형 7종: [09_production_inventory_flow.md](./09_production_inventory_flow.md)  
+> 범례: **현재** = PC 코드 · **확정** = APPROVED · **OPEN** = 미확정
 
-수량 용어(문서 전체 동일, DEC-003/008 정의 정리):
+## 0. 전체 맥락
+
+최상위: `수확 → (생산) → (재고) → 판매 ← (주문)`.  
+본 문서는 **주문·배정·출고·판매** 구간. 생산확정·원물/상품 재고는 **StockPage** (09 §3).
+
+**Stage 3A:** 상품재고가 **이미 있을 때** 주문에 예약. 필수 단계 아님. **구현 완료** (로컬) · main 미머지.
+
+---
+
+## 1. 수량 용어
 
 | 이름 | 정의 | 저장 |
 |------|------|------|
 | `qty` | 주문상세 주문수량 | `t_order_detail.qty` |
-| `allocated_qty` | 해당 줄에 지금까지 확정된 **누적 배정수량**. 출고 후 0으로 내리지 않음 | `t_order_detail.allocated_qty` (설계, DDL 미실시) |
+| `allocated_qty` | 해당 줄에 지금까지 확정된 **누적 배정수량**. 출고 후 0으로 내리지 않음 | `t_order_detail.allocated_qty` (Stage 3A 로컬 DDL, 운영 미적용) |
 | `shipped_qty` | 해당 `order_detail_id`로 생성된 모든 **CONFIRMED** 판매상세 수량 합계 | 계산. 컬럼 없음 |
 | `reserved_unshipped_qty` | 아직 재고 Hold 중인 배정분 | 계산. `allocated_qty - shipped_qty` |
 | `unallocated_qty` | 아직 배정하지 않은 주문분 | 계산. `qty - allocated_qty` |
 
-정합성: `0 <= shipped_qty <= allocated_qty <= qty`.  
-배정해제: `release_qty <= allocated_qty - shipped_qty`.  
-출고: `ship_qty <= reserved_unshipped_qty`. 출고 시 `allocated_qty`는 감소하지 않음. stock `reserved_qty -= ship_qty`, `out_qty += ship_qty`, `shipped_qty += ship_qty`(계산 결과).
+정합성: `0 <= allocated_qty <= qty`, `0 <= shipped_qty <= qty`.  
+STOCK 배정해제: `release_qty <= allocated_qty - shipped_qty`.  
+STOCK 출고: `ship_qty <= reserved_unshipped_qty`. 출고 시 `allocated_qty`는 감소하지 않음.  
+DIRECT 출고: allocation/HOLD 없이 가능 (DEC-020). `allocated_qty=0`은 정상.
 
 ---
 
-## 1. 세 경로 (확정 운영)
+## 2. 판매 경로 요약 (09와 정합)
 
-### 1.1 소매 주문
+| 경로 | 주문 | 배정(3A) | 비고 |
+|------|------|----------|------|
+| 저장배 소매 | O | O | 09 §2.5 |
+| 배즙(재고) | O | O | 09 §2.6 |
+| 추석/조생 소매 | O | X | DIRECT 출고, 09 §2.4 |
+| 원황/신고 수출 | X | X | 생산→판매, 09 §2.1·2.2 |
+| 가락 | X | X | DRAFT→확정, 09 §2.3 |
+| 배즙(주문생산) | O | X | PROCESS 후 판매, 09 §2.7 |
+
+아래 §3~는 **주문이 있고 저장재고 출고(STOCK)를 쓰는** 경로 중심.
+
+---
+
+## 3. 세 경로 (주문/판매 관점)
+
+### 3.1 소매 주문 (STOCK 가능)
 
 ```
 주문접수 (재고 0 허용, allocated_qty=0, 판매 없음)
@@ -33,7 +58,7 @@
  → 수금/미수 (판매 CONFIRMED 기준 전표)
 ```
 
-### 1.2 가락시장
+### 3.2 가락시장
 
 ```
 포장재고 (FR010100)
@@ -47,7 +72,7 @@
 근거: `market_price_page.py` `save_realtime_auction_draft` (마스터·상세만).  
 확정 함수는 **현재 없음** → PC/core 보완 (DEC-010).
 
-### 1.3 수출 / 일반도매
+### 3.3 수출 / 일반도매
 
 ```
 포장재고
@@ -60,7 +85,7 @@
 
 ---
 
-## 2. 선주문 (DEC-002 APPROVED)
+## 4. 선주문 (DEC-002)
 
 재고 0:
 
@@ -81,7 +106,7 @@
 
 ---
 
-## 3. 부분배정 (DEC-003, DEC-008 APPROVED)
+## 5. 부분배정 (DEC-003, DEC-008) — 저장재고형만
 
 예: 주문 100 · 가용 30
 
@@ -101,15 +126,22 @@
 
 ---
 
-## 4. 출고 조건
+## 6. 출고 조건 (DEC-020 — 출고방식 축)
+
+**STOCK / 재고출고**
 
 ```
 ship_qty <= allocated_qty - shipped_qty     -- reserved_unshipped_qty
-shipped_qty = SUM(t_sales_detail.qty WHERE order_detail_id = 줄
-                  AND 해당 판매 sales_status = CONFIRMED)
 ```
 
-미배정만 있는 줄은 출고 **거부** (409).  
+미배정분만으로 STOCK 출고는 거부 (409).
+
+**DIRECT / 즉시출고**
+
+allocation 불필요. 위 STOCK 식을 적용하지 않음.  
+수확/포장 실출고 수량으로 판매 생성. 재고/생산 수량 추적은 Stage 4 전 OPEN.
+
+`shipped_qty` = CONFIRMED 판매상세 합 (컬럼 없음).  
 **현재 PC는 부분출고 API/버튼이 없다.** 주문 저장 시 전량 판매 생성.
 
 ---
@@ -229,7 +261,7 @@ UI 예: `주문상태: 예약접수` / `재고상태: 부분배정`
 
 | 이행상태 | 계산 (확정 설계) |
 |----------|------------------|
-| 미배정 | `SUM(allocated_qty)=0` 이고 `SUM(shipped_qty)=0` |
+| 미배정 | `SUM(allocated_qty)=0` 이고 `SUM(shipped_qty)=0`. **오류 아님.** DIRECT 즉시출고 가능 |
 | 부분배정 | `0 < SUM(allocated_qty) < SUM(qty)` (출고 일부가 있어도 미배정이 남으면 여기) |
 | 배정완료 | 전 줄 `allocated_qty = qty` 이고 `SUM(shipped_qty) < SUM(qty)` |
 | 출고완료 | `SUM(shipped_qty) = SUM(qty)` 이며 이때 `stock_status='Y'` |
@@ -349,11 +381,11 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 | 가칭 `t_order_alloc` | 현재 주문상세 ↔ 실제 재고행 배정 관계 |
 | `t_stock_log` | HOLD / CANCEL_HOLD / OUT **이력** |
 
-실제 테이블명은 기존 DB 네이밍 규칙 확인 후 구현단계에서 최종 확정 가능. 이번 문서 작업에서는 CREATE TABLE 금지.
+실제 테이블명: `t_order_alloc` (Stage 3A 로컬). 운영 CREATE는 단계 3 전체 승인 후.
 
 현재 로그에 부족한 `wh_cd` / `storage_dt` / `order_detail_id`를 allocation SSOT 목적으로 억지로 추가하지 않는다. 앞으로 생성되는 HOLD / CANCEL_HOLD / OUT 로그에는 가능한 범위에서 `order_no`, `order_detail_id`, `sales_no`, stock 자연키 식별정보를 남기는 방향을 설계할 수 있다. **현재 상태 복원은 `t_order_alloc`, 감사 이력은 `t_stock_log`.**
 
-기존 HOLD → `t_order_alloc` 백필은 DEC-015 OPEN (단계 3 migration 전).
+기존 HOLD → `t_order_alloc` 백필은 DEC-015 **금지 유지**. historical HOLD만으로는 DDL 차단하지 않음.
 
 ### 13.2 현재 `t_stock_log` (코드 INSERT — 이력 SSOT로 쓰기 부족)
 
@@ -367,7 +399,7 @@ remark = `주문예약:{order_no}`
 주문 CANCEL_HOLD (2818행): 동일 규격 키 + remark `주문수정전 복구:{order_no}`  
 reserved UPDATE는 `storage_dt`/`wh_cd` **없음** (규격+연도만, 복수 row 오염 가능).
 
-저장/생산 로그: `wh_cd`/`storage_dt`/`order_detail_id` **없음**.
+저장/생산 로그: `wh_cd`/`storage_dt`/`order_detail_id`/`stock_id` **없음**. Stage 5C 사전검토: [09 §20.1](./09_production_inventory_flow.md).
 
 | 필요 정보 | HOLD 로그 |
 |-----------|-----------|

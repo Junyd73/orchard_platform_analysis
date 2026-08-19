@@ -132,6 +132,11 @@ const router = createRouter({
       component: PesticideItemDetailView,
     },
     { path: '/orders', name: 'orders', component: OrderView },
+    {
+      path: '/orders/ship',
+      name: 'ship-confirm',
+      component: () => import('@/views/sales/ShipConfirmView.vue'),
+    },
     { path: '/orders/new', name: 'order-new', component: OrderNewView },
     {
       path: '/orders/:orderNo/edit',

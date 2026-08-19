@@ -56,7 +56,7 @@ const items: NavItem[] = [
   },
   {
     to: '/orders',
-    label: '주문/판매',
+    label: '판매관리',
     name: 'orders',
     ready: true,
     icon: navOrders,

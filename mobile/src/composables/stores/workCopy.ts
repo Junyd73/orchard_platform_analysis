@@ -9,6 +9,9 @@ export interface WorkCopyDraft {
   startTime: string
   endTime: string
   rmk: string
+  varietyCd?: string
+  varietyNm?: string
+  harvestContainerQty?: string
 }
 
 /** 작업복사 모달 → 대상 일간 페이지로 전달할 임시 데이터 */

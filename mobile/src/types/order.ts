@@ -61,6 +61,9 @@ export type OrderLine = {
   grade_nm?: string
   size_nm?: string
   dlvry_tp_nm?: string
+  allocated_qty?: number
+  unallocated_qty?: number
+  reserved_unshipped_qty?: number
   deliveries: OrderDelivery[]
 }
 

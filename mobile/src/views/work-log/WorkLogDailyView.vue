@@ -52,6 +52,7 @@ import {
   DAILY_TAB_WORK,
   hasWorkLogWeather,
   isFutureDate,
+  isHarvestWork,
   mapWorkItemToTimeline,
   sortWorksByStartTime,
   BTN_UNSAVED_LEAVE_DISCARD,
@@ -71,11 +72,14 @@ import {
   MSG_GOOGLE_IMPORT_EMPTY,
   MSG_GOOGLE_IMPORT_NEED_CONNECT,
   MSG_GOOGLE_IMPORT_SAVED,
+  MSG_HARVEST_QTY_REQUIRED,
+  MSG_HARVEST_VARIETY_REQUIRED,
   MSG_LOAD_DAILY_FAILED,
   MSG_SAVE_FAILED,
   MSG_SAVE_OK,
   MSG_UNSAVED_LEAVE_CONFIRM,
   MSG_WORK_CONTENT_REQUIRED,
+  PEAR_VARIETY_PARENT_CD,
   STATUS_PREPARING_CD,
   todayIso,
   WORK_STATUS_PARENT_CD,
@@ -160,9 +164,46 @@ const pesticideReplaceUseId = ref<number | null>(null)
 const removedResIds = ref<number[]>([])
 const removedExpIds = ref<number[]>([])
 
+function harvestUpsertFields(
+  midCd: string,
+  varietyCd?: string | null,
+  qty?: number | string | null,
+): { variety_cd: string | null; harvest_container_qty: number | null } {
+  if (!isHarvestWork(midCd)) {
+    return { variety_cd: null, harvest_container_qty: null }
+  }
+  const n = Number.parseInt(String(qty ?? ''), 10)
+  return {
+    variety_cd: String(varietyCd || '').trim() || null,
+    harvest_container_qty: Number.isInteger(n) ? n : null,
+  }
+}
+
+function harvestValidationMessage(
+  midCd: string,
+  varietyCd?: string | null,
+  qty?: number | string | null,
+): string {
+  if (!isHarvestWork(midCd)) return ''
+  if (!String(varietyCd || '').trim()) return MSG_HARVEST_VARIETY_REQUIRED
+  const n = Number.parseInt(String(qty ?? ''), 10)
+  if (!Number.isInteger(n) || n < 1) return MSG_HARVEST_QTY_REQUIRED
+  return ''
+}
+
+function formHarvestFromWork(w: WorkLogWorkItem) {
+  return {
+    varietyCd: String(w.variety_cd || ''),
+    varietyNm: String(w.variety_nm || ''),
+    harvestContainerQty:
+      w.harvest_container_qty == null ? '' : String(w.harvest_container_qty),
+  }
+}
+
 const workOptions = ref<DailyPickOption[]>([])
 const siteOptions = ref<DailyPickOption[]>([])
 const statusOptions = ref<DailyPickOption[]>([])
+const varietyOptions = ref<DailyPickOption[]>([])
 
 /** 미저장 이탈 가드 */
 const cleanSnapshot = ref('')
@@ -414,6 +455,7 @@ function onEditSelected() {
     rmk: String(w.rmk || ''),
     syncGoogle: false,
     googleEventId: String(w.google_event_id || '') || null,
+    ...formHarvestFromWork(w),
   }
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
@@ -485,6 +527,9 @@ function _applyCopyToForm() {
     rmk: d.rmk,
     syncGoogle: false,
     googleEventId: null,
+    varietyCd: d.varietyCd || '',
+    varietyNm: d.varietyNm || '',
+    harvestContainerQty: d.harvestContainerQty || '',
   }
   laborRows.value = []
   expenseRows.value = []
@@ -559,10 +604,11 @@ async function loadPickOptions() {
   const farm = farmCd.value
   if (!farm) return
   try {
-    const [works, sites, statuses] = await Promise.all([
+    const [works, sites, statuses, varieties] = await Promise.all([
       fetchCommonCodes(farm, WORK_TYPE_PARENT_CD),
       fetchFarmSites(farm),
       fetchCommonCodes(farm, WORK_STATUS_PARENT_CD),
+      fetchCommonCodes(farm, PEAR_VARIETY_PARENT_CD),
     ])
     workOptions.value = (works || [])
       .filter((c) => String(c.code_cd || '').length === 8)
@@ -578,10 +624,17 @@ async function loadPickOptions() {
       value: c.code_cd,
       label: String(c.code_nm || c.code_cd),
     }))
+    varietyOptions.value = (varieties || [])
+      .filter((c) => String(c.code_cd || '').length === 8)
+      .map((c) => ({
+        value: c.code_cd,
+        label: String(c.code_nm || c.code_cd),
+      }))
   } catch {
     workOptions.value = []
     siteOptions.value = []
     statusOptions.value = []
+    varietyOptions.value = []
   }
 }
 
@@ -642,6 +695,11 @@ function toUpsertItem(w: WorkLogWorkItem): WorkLogWorkUpsertItem {
     start_tm: w.start_tm || null,
     end_tm: w.end_tm || null,
     status_cd: w.status_cd || null,
+    ...harvestUpsertFields(
+      String(w.work_mid_cd || ''),
+      w.variety_cd,
+      w.harvest_container_qty,
+    ),
   }
 }
 
@@ -651,6 +709,15 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
   if (showForm.value) {
     if (!formModel.value.workMidCd) {
       showToast(MSG_WORK_CONTENT_REQUIRED)
+      return null
+    }
+    const harvestErr = harvestValidationMessage(
+      formModel.value.workMidCd,
+      formModel.value.varietyCd,
+      formModel.value.harvestContainerQty,
+    )
+    if (harvestErr) {
+      showToast(harvestErr)
       return null
     }
     const statusCd = isFuture.value
@@ -664,6 +731,11 @@ function buildWorksPayload(): WorkLogWorkUpsertItem[] | null {
       start_tm: formModel.value.startTime || null,
       end_tm: formModel.value.endTime || null,
       status_cd: statusCd,
+      ...harvestUpsertFields(
+        formModel.value.workMidCd,
+        formModel.value.varietyCd,
+        formModel.value.harvestContainerQty,
+      ),
     }
     if (draft.work_id) {
       const idx = list.findIndex((w) => w.work_id === draft.work_id)
@@ -846,6 +918,7 @@ function openWorkForEdit(workId: string) {
     rmk: String(w.rmk || ''),
     syncGoogle: false,
     googleEventId: String(w.google_event_id || '') || null,
+    ...formHarvestFromWork(w),
   }
   isEditing.value = true
   activeTab.value = DAILY_TAB_WORK
@@ -1157,6 +1230,15 @@ function buildCopyDraftItem(): WorkLogWorkUpsertItem | null {
     showToast(MSG_WORK_CONTENT_REQUIRED)
     return null
   }
+  const harvestErr = harvestValidationMessage(
+    formModel.value.workMidCd,
+    formModel.value.varietyCd,
+    formModel.value.harvestContainerQty,
+  )
+  if (harvestErr) {
+    showToast(harvestErr)
+    return null
+  }
   return {
     work_id: null,
     work_mid_cd: formModel.value.workMidCd,
@@ -1165,6 +1247,11 @@ function buildCopyDraftItem(): WorkLogWorkUpsertItem | null {
     start_tm: formModel.value.startTime || null,
     end_tm: formModel.value.endTime || null,
     status_cd: formModel.value.statusCd || null,
+    ...harvestUpsertFields(
+      formModel.value.workMidCd,
+      formModel.value.varietyCd,
+      formModel.value.harvestContainerQty,
+    ),
   }
 }
 
@@ -1386,6 +1473,7 @@ onMounted(async () => {
         :work-options="workOptions"
         :site-options="siteOptions"
         :status-options="statusOptions"
+        :variety-options="varietyOptions"
         :work-dt="workDt"
         :farm-cd="farmCd"
         :stock-applied-yn="pesticideAppliedYn"

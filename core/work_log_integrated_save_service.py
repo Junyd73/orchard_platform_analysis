@@ -18,9 +18,12 @@ from core.pesticide_manager import (
     PesticideManager,
     is_nutrient_category,
 )
+from core.work_harvest_schema import ensure_work_harvest_schema
 from core.work_log_constants import (
     DAY_OF_WEEK_SHORT,
     LABOR_ACCT_CD,
+    MSG_HARVEST_QTY_REQUIRED,
+    MSG_HARVEST_VARIETY_REQUIRED,
     PAY_STATUS_N,
     PAY_STATUS_Y,
     PESTICIDE_USE_RMK_WORK_LOG,
@@ -33,6 +36,7 @@ from core.work_log_constants import (
     STOCK_ITEM_KIND_PESTICIDE,
     WORK_MAIN_CD,
     WORK_MID_CD_FERTILIZER,
+    WORK_MID_CD_HARVEST,
     WORK_MID_CD_PESTICIDE,
 )
 
@@ -99,6 +103,8 @@ class WorkDetailDto:
     pesticide_lines: List[PesticideLineDto] = field(default_factory=list)
     # 확정 농약 수정 저장 시: 기존 use_id 취소 후 신규 생성 (화면 진입만으로는 취소하지 않음)
     replace_pesticide_use_id: Optional[int] = None
+    variety_cd: Optional[str] = None
+    harvest_container_qty: Optional[int] = None
 
 
 @dataclass
@@ -157,6 +163,33 @@ class CancelResult:
     ok: bool = True
     message: str = ""
     errors: List[str] = field(default_factory=list)
+
+
+def is_harvest_work(work_mid_cd: str = "", work_mid_nm: str = "") -> bool:
+    """수확작업 판별 — 중분류 코드 WK010300."""
+    return (work_mid_cd or "").strip().upper() == WORK_MID_CD_HARVEST
+
+
+def normalize_harvest_fields(
+    work_mid_cd: str,
+    variety_cd: Any,
+    harvest_container_qty: Any,
+    *,
+    work_mid_nm: str = "",
+) -> Tuple[Optional[str], Optional[int]]:
+    """수확이면 품종·상자 수 필수, 아니면 둘 다 NULL."""
+    if not is_harvest_work(work_mid_cd, work_mid_nm):
+        return None, None
+    vcd = str(variety_cd or "").strip()
+    if not vcd:
+        raise WorkLogSaveError(MSG_HARVEST_VARIETY_REQUIRED, code="HARVEST_VARIETY")
+    try:
+        qty = int(harvest_container_qty)
+    except (TypeError, ValueError):
+        raise WorkLogSaveError(MSG_HARVEST_QTY_REQUIRED, code="HARVEST_QTY") from None
+    if qty < 1:
+        raise WorkLogSaveError(MSG_HARVEST_QTY_REQUIRED, code="HARVEST_QTY")
+    return vcd, qty
 
 
 def is_pesticide_work(work_mid_cd: str = "", work_mid_nm: str = "") -> bool:
@@ -237,6 +270,8 @@ class WorkLogIntegratedSaveService:
                 status_cd=w.status_cd,
                 is_pesticide=False,
                 pesticide_lines=[],
+                variety_cd=w.variety_cd,
+                harvest_container_qty=w.harvest_container_qty,
             )
             for w in (payload.works or [])
         ]
@@ -283,6 +318,17 @@ class WorkLogIntegratedSaveService:
                         code="FUTURE_STATUS",
                     )
                 w.status_cd = "WO010100"
+
+        ensure_work_harvest_schema(self.db)
+        for w in payload.works or []:
+            vcd, qty = normalize_harvest_fields(
+                w.work_mid_cd,
+                w.variety_cd,
+                w.harvest_container_qty,
+                work_mid_nm=w.work_mid_nm or "",
+            )
+            w.variety_cd = vcd
+            w.harvest_container_qty = qty
 
         master = payload.master
         if not (master.day_of_week or "").strip():
@@ -674,8 +720,10 @@ class WorkLogIntegratedSaveService:
         sql = """
             INSERT INTO t_work_detail (
                 work_id, work_dt, farm_cd, work_main_cd, work_mid_cd,
-                work_loc_id, rmk, start_tm, end_tm, status_cd, reg_id, reg_dt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
+                work_loc_id, rmk, start_tm, end_tm, status_cd,
+                variety_cd, harvest_container_qty,
+                reg_id, reg_dt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
             ON CONFLICT(work_id) DO UPDATE SET
                 work_mid_cd = excluded.work_mid_cd,
                 work_loc_id = excluded.work_loc_id,
@@ -683,6 +731,8 @@ class WorkLogIntegratedSaveService:
                 start_tm = excluded.start_tm,
                 end_tm = excluded.end_tm,
                 status_cd = excluded.status_cd,
+                variety_cd = excluded.variety_cd,
+                harvest_container_qty = excluded.harvest_container_qty,
                 mod_id = ?,
                 mod_dt = datetime('now','localtime')
         """
@@ -697,6 +747,8 @@ class WorkLogIntegratedSaveService:
             w.start_tm or "",
             w.end_tm or "",
             w.status_cd or "",
+            w.variety_cd,
+            w.harvest_container_qty,
             user_id,
             user_id,
         )

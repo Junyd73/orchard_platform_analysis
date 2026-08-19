@@ -16,8 +16,11 @@ import {
   DAILY_WORK_TABS,
   isDailyWorkTabEnabled,
   isFertilizerWork,
+  isHarvestWork,
   isPesticideWork,
   LABEL_COPY_WORK_DT,
+  LABEL_HARVEST_QTY,
+  LABEL_HARVEST_VARIETY,
   LABEL_WORK_MEMO,
   LABEL_WORK_SITE,
   LABEL_WORK_TYPE,
@@ -26,6 +29,7 @@ import {
   MSG_WORK_MEMO_GUIDE,
   PLACEHOLDER_SELECT,
   PLACEHOLDER_WORK_RMK,
+  SUFFIX_HARVEST_BOX,
   type DailyShellExpenseRow,
   type DailyShellLaborRow,
   type DailyShellPesticideRow,
@@ -47,6 +51,7 @@ const props = defineProps<{
   workOptions: readonly DailyPickOption[]
   siteOptions: readonly DailyPickOption[]
   statusOptions: readonly DailyPickOption[]
+  varietyOptions?: readonly DailyPickOption[]
   workDt?: string
   farmCd: string
   stockAppliedYn?: string
@@ -81,6 +86,10 @@ const isFertWork = computed(() =>
   isFertilizerWork(modelValue.value.workMidCd, modelValue.value.workContent),
 )
 
+const isHarvest = computed(() =>
+  isHarvestWork(modelValue.value.workMidCd, modelValue.value.workContent),
+)
+
 const visibleTabs = computed(() =>
   props.detailLocked
     ? DAILY_WORK_TABS.filter((t) => t.key === DAILY_TAB_WORK)
@@ -103,16 +112,22 @@ watch(
     if (!isTabEnabled(activeTab.value)) {
       activeTab.value = DAILY_TAB_WORK
     }
+    if (!isHarvestWork(modelValue.value.workMidCd, modelValue.value.workContent)) {
+      if (modelValue.value.varietyCd || modelValue.value.harvestContainerQty) {
+        patch({ varietyCd: '', varietyNm: '', harvestContainerQty: '' })
+      }
+    }
   },
 )
 
-type PickKind = 'work' | 'site' | 'status' | null
+type PickKind = 'work' | 'site' | 'status' | 'variety' | null
 const pickKind = ref<PickKind>(null)
 
 const pickTitle = {
   work: LABEL_WORK_TYPE,
   site: LABEL_WORK_SITE,
   status: '상태',
+  variety: LABEL_HARVEST_VARIETY,
 } as const
 
 const pickOptions = {
@@ -124,6 +139,9 @@ const pickOptions = {
   },
   get status() {
     return props.statusOptions
+  },
+  get variety() {
+    return props.varietyOptions || []
   },
 }
 
@@ -151,6 +169,8 @@ function onPick(value: string, label: string) {
     patch({ workLocId: value, siteNm: label })
   } else if (pickKind.value === 'status') {
     patch({ statusCd: value, statusNm: label })
+  } else if (pickKind.value === 'variety') {
+    patch({ varietyCd: value, varietyNm: label })
   }
   closePick()
 }
@@ -234,6 +254,44 @@ function onSelectPending(msg?: string) {
               </span>
               <span class="field__chev field__chev--down" aria-hidden="true">▾</span>
             </button>
+          </label>
+        </div>
+
+        <div v-if="isHarvest" class="field-row">
+          <label class="field field--half">
+            <span class="field__label">
+              {{ LABEL_HARVEST_VARIETY }}
+              <span class="field__req" aria-hidden="true">*</span>
+            </span>
+            <button type="button" class="field__select" @click="openPick('variety')">
+              <span :class="{ 'field__ph': !modelValue.varietyNm }">
+                {{ modelValue.varietyNm || PLACEHOLDER_SELECT }}
+              </span>
+              <span class="field__chev" aria-hidden="true">›</span>
+            </button>
+          </label>
+          <label class="field field--half">
+            <span class="field__label">
+              {{ LABEL_HARVEST_QTY }}
+              <span class="field__req" aria-hidden="true">*</span>
+            </span>
+            <div class="field__qty">
+              <input
+                class="field__input"
+                type="number"
+                inputmode="numeric"
+                min="1"
+                step="1"
+                :value="modelValue.harvestContainerQty"
+                :aria-label="LABEL_HARVEST_QTY"
+                @input="
+                  patch({
+                    harvestContainerQty: ($event.target as HTMLInputElement).value,
+                  })
+                "
+              />
+              <span class="field__qty-unit">{{ SUFFIX_HARVEST_BOX }}</span>
+            </div>
           </label>
         </div>
 
@@ -565,6 +623,22 @@ function onSelectPending(msg?: string) {
   display: flex;
   align-items: center;
   gap: var(--ods-space-8);
+}
+
+.field__qty {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+}
+
+.field__qty .field__input {
+  flex: 1;
+}
+
+.field__qty-unit {
+  flex-shrink: 0;
+  font: var(--ods-font-form-value);
+  color: var(--ods-color-text-secondary);
 }
 
 .field__time {
