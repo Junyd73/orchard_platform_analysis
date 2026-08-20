@@ -57,6 +57,9 @@ const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
 const LABEL_VIEW_DEST = '배송지 편집 ›'
 const LABEL_LINES = '판매 품목'
+const LABEL_COL_ITEM = '품목'
+const LABEL_COL_QTY = '수량'
+const LABEL_COL_PRICE = '단가'
 const LABEL_DEST_SHEET = '배송지 배분'
 const LABEL_ADD_DEST = '+ 배송지 추가'
 const LABEL_DEST_DONE = '완료'
@@ -66,8 +69,7 @@ const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
 const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요.'
-const HINT_PARCEL_NEED = '배송지 배분이 필요한 품목이 있습니다.'
-const HINT_PARCEL_DONE = '모든 품목의 배송지가 지정되었습니다.'
+const HINT_PARCEL_DONE = '배송지 지정 완료'
 
 const router = useRouter()
 const { farmCd } = storeToRefs(useAppStore())
@@ -116,7 +118,7 @@ const unitHint = computed(() =>
   lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
 )
 
-/** 택배 상단 보조 안내 — 미지정 합계만 요약 */
+/** 택배 상단 보조 안내 — 미지정/초과 합계만 짧게 */
 const parcelHeaderHint = computed(() => {
   if (!isParcel.value || !lines.value.length) return ''
   let unassigned = 0
@@ -134,9 +136,9 @@ const parcelHeaderHint = computed(() => {
     }
   }
   if (!incomplete) return HINT_PARCEL_DONE
-  if (unassigned > 0) return `${HINT_PARCEL_NEED} · 미지정 ${unassigned}${unitHint.value}`
-  if (over > 0) return `${HINT_PARCEL_NEED} · 초과 ${over}${unitHint.value}`
-  return HINT_PARCEL_NEED
+  if (unassigned > 0) return `미지정 ${unassigned}${unitHint.value}`
+  if (over > 0) return `초과 ${over}${unitHint.value}`
+  return '미지정'
 })
 
 function normalizeShipFee(raw: unknown): number {
@@ -163,12 +165,6 @@ function lineKey(ln: (typeof lines.value)[number], idx: number) {
   return `${stockSaleSpecKey(ln)}#${idx}`
 }
 
-function lineSubtotal(idx: number) {
-  const ln = lines.value[idx]
-  if (!ln) return 0
-  return Number(ln.qty) * Number(ln.unit_price)
-}
-
 function lineUnit(ln: (typeof lines.value)[number]) {
   return ln.item_cd === 'FR010300' ? '통' : '박스'
 }
@@ -190,29 +186,6 @@ function deliveryTone(idx: number): 'ok' | 'warn' | 'danger' {
   return 'warn'
 }
 
-function maxQty(idx: number) {
-  const ln = lines.value[idx]
-  if (!ln) return 1
-  if (ln.available_qty != null) return Math.max(1, Math.floor(Number(ln.available_qty)))
-  return Math.max(1, Math.floor(Number(ln.qty) || 1))
-}
-
-function bumpQty(idx: number, delta: number) {
-  const ln = lines.value[idx]
-  if (!ln) return
-  const next = Math.max(1, Math.floor(Number(ln.qty) + delta))
-  prefill.updateShipLine(idx, { qty: Math.min(next, maxQty(idx)) })
-}
-
-function setQty(idx: number, raw: string) {
-  const n = Number(raw)
-  if (!Number.isFinite(n) || n < 1) {
-    prefill.updateShipLine(idx, { qty: 1 })
-    return
-  }
-  prefill.updateShipLine(idx, { qty: Math.min(Math.floor(n), maxQty(idx)) })
-}
-
 function setPrice(idx: number, raw: string) {
   const n = Number(String(raw).replace(/,/g, ''))
   prefill.updateShipLine(idx, { unit_price: Number.isFinite(n) && n >= 0 ? n : 0 })
@@ -227,8 +200,18 @@ function removeLine(idx: number) {
   prefill.removeShipLine(idx)
 }
 
-function addMoreItems() {
+/** 재고 탭으로 이동 — salesPrefill(동일 stockSaleSpecKey 행) 유지 */
+function goStockTab() {
   void router.push({ name: 'orders', query: { tab: 'stock' } })
+}
+
+function addMoreItems() {
+  goStockTab()
+}
+
+/** 수량/규격은 재고 화면의 담기·수정(updateStockLineQty)으로 갱신 */
+function editLineInStock() {
+  goStockTab()
 }
 
 function cancelSalePrep() {
@@ -498,61 +481,23 @@ onMounted(async () => {
             {{ LABEL_EMPTY_LINES }}
           </p>
 
-          <ul v-else class="lines__list">
-            <li
-              v-for="(ln, idx) in lines"
-              :key="lineKey(ln, idx)"
-              class="line"
-              data-testid="sales-preview-line"
-            >
-              <div class="line__r1">
-                <span class="line__title">{{ formatOrderLineSpec(ln) }}</span>
-                <button
-                  type="button"
-                  class="line__remove"
-                  data-testid="sales-preview-remove"
-                  :aria-label="`${formatOrderLineSpec(ln)} 삭제`"
-                  @click="removeLine(idx)"
-                >
-                  ×
-                </button>
-              </div>
-              <div class="line__r2">
-                <div class="qty" data-testid="sales-preview-qty">
-                  <button
-                    type="button"
-                    class="qty__btn"
-                    :disabled="Number(ln.qty) <= 1"
-                    aria-label="수량 감소"
-                    @click="bumpQty(idx, -1)"
-                  >
-                    −
-                  </button>
-                  <OdsInput
-                    :model-value="String(ln.qty)"
-                    type="number"
-                    min="1"
-                    :max="maxQty(idx)"
-                    step="1"
-                    inputmode="numeric"
-                    variant="form"
-                    bare
-                    class="qty__input"
-                    aria-label="판매 수량"
-                    @update:model-value="setQty(idx, $event)"
-                  />
-                  <button
-                    type="button"
-                    class="qty__btn"
-                    :disabled="Number(ln.qty) >= maxQty(idx)"
-                    aria-label="수량 증가"
-                    @click="bumpQty(idx, 1)"
-                  >
-                    +
-                  </button>
-                </div>
-                <label class="price">
-                  <span class="price__lbl">단가</span>
+          <template v-else>
+            <div class="lines__cols" aria-hidden="true">
+              <span>{{ LABEL_COL_ITEM }}</span>
+              <span class="lines__cols-qty">{{ LABEL_COL_QTY }}</span>
+              <span class="lines__cols-price">{{ LABEL_COL_PRICE }}</span>
+              <span class="lines__cols-actions" />
+            </div>
+            <ul class="lines__list">
+              <li
+                v-for="(ln, idx) in lines"
+                :key="lineKey(ln, idx)"
+                class="line"
+                data-testid="sales-preview-line"
+              >
+                <div class="line__row">
+                  <span class="line__title">{{ formatOrderLineSpec(ln) }}</span>
+                  <span class="line__qty" data-testid="sales-preview-qty">{{ ln.qty }}</span>
                   <OdsInput
                     :model-value="String(ln.unit_price)"
                     type="number"
@@ -561,34 +506,91 @@ onMounted(async () => {
                     inputmode="numeric"
                     variant="form"
                     bare
-                    class="price__input"
+                    class="line__price"
                     data-testid="sales-preview-price"
                     aria-label="단가"
                     @update:model-value="setPrice(idx, $event)"
                   />
-                </label>
-                <span class="line__sub" data-testid="sales-preview-subtotal">
-                  {{ formatOrderAmt(lineSubtotal(idx)) }}원
-                </span>
-              </div>
-              <div
-                v-if="isParcel"
-                class="line__r3"
-                :class="`line__r3--${deliveryTone(idx)}`"
-                data-testid="sales-preview-delivery-status"
-              >
-                <span class="line__dest-status">{{ lineDeliveryStatus(idx) }}</span>
-                <button
-                  type="button"
-                  class="line__dest-btn"
-                  data-testid="sales-preview-dest-open"
-                  @click="openDestSheet(idx)"
+                  <div class="line__actions">
+                    <button
+                      type="button"
+                      class="line__icon-btn"
+                      data-testid="sales-preview-edit"
+                      :aria-label="`${formatOrderLineSpec(ln)} 수량 수정`"
+                      title="수정"
+                      @click="editLineInStock"
+                    >
+                      <svg class="line__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path
+                          d="M12.2 3.6l4.2 4.2"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                        />
+                        <path
+                          d="M4 16l.7-3.6L13.2 4l2.8 2.8L7.6 15.3 4 16z"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="line__icon-btn line__icon-btn--danger"
+                      data-testid="sales-preview-remove"
+                      :aria-label="`${formatOrderLineSpec(ln)} 삭제`"
+                      title="삭제"
+                      @click="removeLine(idx)"
+                    >
+                      <svg class="line__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path
+                          d="M5.2 6.2h9.6"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                        />
+                        <path
+                          d="M8 4.2h4l.8 2H7.2L8 4.2z"
+                          stroke="currentColor"
+                          stroke-width="1.4"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M6.4 6.2l.7 9.2a1.4 1.4 0 001.4 1.3h3a1.4 1.4 0 001.4-1.3l.7-9.2"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M8.6 9.2v5M11.4 9.2v5"
+                          stroke="currentColor"
+                          stroke-width="1.4"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div
+                  v-if="isParcel"
+                  class="line__dest"
+                  :class="`line__dest--${deliveryTone(idx)}`"
+                  data-testid="sales-preview-delivery-status"
                 >
-                  {{ LABEL_VIEW_DEST }}
-                </button>
-              </div>
-            </li>
-          </ul>
+                  <span class="line__dest-status">{{ lineDeliveryStatus(idx) }}</span>
+                  <button
+                    type="button"
+                    class="line__dest-btn"
+                    data-testid="sales-preview-dest-open"
+                    @click="openDestSheet(idx)"
+                  >
+                    {{ LABEL_VIEW_DEST }}
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </template>
 
           <!-- C. 보조 액션 -->
           <div class="lines__actions">
@@ -802,8 +804,7 @@ onMounted(async () => {
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   --sales-preview-inline: var(--ods-page-padding-x, var(--ods-space-16));
-  --preview-qty-visual: 26px;
-  --preview-qty-touch: 36px;
+  --preview-icon-touch: 36px;
   min-height: 100%;
   width: 100%;
   background: var(--ods-color-bg-muted, #f5f5f5);
@@ -870,7 +871,6 @@ onMounted(async () => {
   justify-content: space-between;
   gap: var(--ods-space-8);
   padding: var(--ods-space-12) var(--ods-space-16) var(--ods-space-8);
-  border-bottom: 1px solid var(--ods-color-border);
 }
 .lines__title {
   margin: 0;
@@ -890,6 +890,36 @@ onMounted(async () => {
   color: var(--ods-color-text-secondary);
   text-align: center;
 }
+/* 품목 | 수량 | 단가 | 액션 */
+.lines__cols,
+.line__row {
+  --line-col-qty: 2.5rem;
+  --line-col-price: 5.5rem;
+  --line-col-actions: 4.5rem;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    var(--line-col-qty)
+    var(--line-col-price)
+    var(--line-col-actions);
+  column-gap: var(--ods-space-6);
+  align-items: center;
+  min-width: 0;
+}
+.lines__cols {
+  padding: var(--ods-space-4) var(--ods-space-16);
+  border-bottom: 1px solid var(--ods-color-border);
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+}
+.lines__cols-qty,
+.line__qty {
+  text-align: center;
+}
+.lines__cols-price {
+  text-align: right;
+}
 .lines__list {
   list-style: none;
   margin: 0;
@@ -897,19 +927,12 @@ onMounted(async () => {
   background: var(--ods-color-white);
 }
 .line {
-  padding: var(--ods-space-10) var(--ods-space-16);
+  padding: var(--ods-space-8) var(--ods-space-16);
   border-bottom: 1px solid var(--ods-color-border);
   min-width: 0;
 }
 .line:last-child {
   border-bottom: none;
-}
-.line__r1 {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--preview-qty-touch);
-  gap: var(--ods-space-8);
-  align-items: center;
-  margin-bottom: var(--ods-space-6);
 }
 .line__title {
   font: var(--ods-font-body-1);
@@ -920,131 +943,78 @@ onMounted(async () => {
   white-space: nowrap;
   min-width: 0;
 }
-.line__remove {
-  width: var(--preview-qty-touch);
-  height: var(--preview-qty-touch);
+.line__qty {
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  font-variant-numeric: tabular-nums;
+}
+.line__price {
+  width: 100%;
+  min-width: 0;
+}
+.line :deep(input.line__price.ods-input),
+.line :deep(.line__price.ods-input) {
+  width: 100%;
+  max-width: 100%;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 var(--ods-space-4);
+  text-align: right;
+  font: var(--ods-font-body-2);
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--ods-radius-button);
+}
+.line :deep(input.line__price.ods-input::-webkit-outer-spin-button),
+.line :deep(input.line__price.ods-input::-webkit-inner-spin-button) {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.line__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  min-width: 0;
+}
+.line__icon-btn {
+  width: var(--preview-icon-touch);
+  height: var(--preview-icon-touch);
+  min-width: var(--preview-icon-touch);
   padding: 0;
   border: none;
   border-radius: var(--ods-radius-button);
   background: transparent;
   color: var(--ods-color-text-secondary);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-.line__remove:active {
-  background: var(--ods-color-bg-muted);
-}
-.line__r2 {
-  display: flex;
-  align-items: center;
-  gap: var(--ods-space-8);
-  min-width: 0;
-  flex-wrap: nowrap;
-}
-.qty {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-.qty__btn {
-  position: relative;
-  isolation: isolate;
-  width: var(--preview-qty-touch);
-  height: var(--preview-qty-touch);
-  min-width: var(--preview-qty-touch);
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--ods-color-text);
-  font-size: var(--ods-font-size-footnote, 12px);
-  line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.qty__btn::after {
-  content: '';
-  box-sizing: border-box;
-  width: var(--preview-qty-visual);
-  height: var(--preview-qty-visual);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-white);
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  z-index: -1;
+.line__icon-btn:active {
+  background: var(--ods-color-bg-muted);
 }
-.qty__btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.line__icon-btn--danger:hover,
+.line__icon-btn--danger:active {
+  color: var(--ods-color-danger);
 }
-.qty :deep(input.ods-input),
-.qty :deep(.qty__input.ods-input) {
-  width: 34px;
-  min-width: 34px;
-  max-width: 34px;
-  height: var(--preview-qty-visual);
-  min-height: var(--preview-qty-visual);
-  padding: 0 1px;
-  text-align: center;
-  font-size: var(--ods-font-size-footnote, 12px);
-  line-height: 1.35;
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-white);
-}
-.qty :deep(input.ods-input::-webkit-outer-spin-button),
-.qty :deep(input.ods-input::-webkit-inner-spin-button) {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.price {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ods-space-4);
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.price__lbl {
+.line__icon {
+  width: 18px;
+  height: 18px;
+  display: block;
   flex-shrink: 0;
-  font-size: var(--ods-font-size-footnote, 12px);
-  color: var(--ods-color-text-secondary);
 }
-.price :deep(input.ods-input),
-.price :deep(.price__input.ods-input) {
-  width: 100%;
-  min-width: 56px;
-  max-width: 88px;
-  height: var(--preview-qty-visual);
-  min-height: var(--preview-qty-visual);
-  padding: 0 var(--ods-space-4);
-  text-align: right;
-  font-size: var(--ods-font-size-footnote, 12px);
-  border-radius: var(--ods-radius-button);
-}
-.line__sub {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-size: var(--ods-font-size-footnote, 12px);
-  font-weight: 700;
-  color: var(--ods-color-text);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.line__r3 {
+.line__dest {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  margin-top: var(--ods-space-6);
+  min-height: 28px;
+  margin-top: var(--ods-space-4);
   min-width: 0;
 }
 .line__dest-status {
-  font-size: var(--ods-font-size-footnote, 12px);
+  font: var(--ods-font-caption);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
   min-width: 0;
@@ -1052,13 +1022,13 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.line__r3--ok .line__dest-status {
+.line__dest--ok .line__dest-status {
   color: var(--ods-color-primary);
 }
-.line__r3--warn .line__dest-status {
+.line__dest--warn .line__dest-status {
   color: var(--ods-color-caution);
 }
-.line__r3--danger .line__dest-status {
+.line__dest--danger .line__dest-status {
   color: var(--ods-color-danger);
 }
 .line__dest-btn {
@@ -1066,7 +1036,7 @@ onMounted(async () => {
   border: none;
   background: transparent;
   color: var(--ods-color-primary);
-  font-size: var(--ods-font-size-footnote, 12px);
+  font: var(--ods-font-caption);
   font-weight: 700;
   cursor: pointer;
   padding: var(--ods-space-4) 0;
@@ -1195,13 +1165,12 @@ onMounted(async () => {
 }
 
 @media (max-width: 360px) {
-  .line__r2 {
-    gap: var(--ods-space-4);
-  }
-  .price :deep(input.ods-input),
-  .price :deep(.price__input.ods-input) {
-    max-width: 76px;
-    min-width: 48px;
+  .lines__cols,
+  .line__row {
+    --line-col-qty: 2.25rem;
+    --line-col-price: 4.75rem;
+    --line-col-actions: 4.5rem;
+    column-gap: var(--ods-space-4);
   }
 }
 
