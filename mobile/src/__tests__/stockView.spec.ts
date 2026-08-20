@@ -3,8 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import StockView from '@/views/stock/StockView.vue'
-import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import StockView from '@/features/stock/StockView.vue'
+import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
 
 const listFruitStock = vi.fn()
 const listStockLogs = vi.fn()
@@ -152,7 +152,7 @@ describe('StockView', () => {
     expect(sheet).toContain('조정 사유')
     expect(sheet).toContain('조정 수량')
     expect(sheet).toContain('조정 방향')
-    expect(sheet).toContain('조정 후 현재')
+    expect(sheet).toContain('조정 후')
 
     expect(sheet).toContain('폐기')
     expect(sheet).toContain('파손')
@@ -232,8 +232,9 @@ describe('StockView', () => {
     const applyBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
       (b) => (b.textContent || '').includes('조정 적용'),
     ) as HTMLButtonElement | undefined
-    applyBtn?.click()
-    await flushPromises()
+    expect(applyBtn).toBeTruthy()
+    // 미리보기 경고 상태에서는 “조정 적용”이 비활성화되어 API 호출을 막습니다.
+    expect(applyBtn?.disabled).toBe(true)
 
     const sheet = document.body.textContent || ''
     expect(sheet).toContain('가용재고보다 많이 줄일 수 없습니다')
@@ -242,7 +243,7 @@ describe('StockView', () => {
     wrapper.unmount()
   })
 
-  it('T9 이력 조회는 “조정 이력 보기” 버튼에서만 동작', async () => {
+  it('T9 이력 아코디언: 최초만 조회 + 접힘/재펼침은 캐시 사용', async () => {
     listStockLogs.mockRejectedValueOnce(new Error('boom'))
     const r = router()
     await r.push('/orders')
@@ -254,14 +255,24 @@ describe('StockView', () => {
     await flushPromises()
     expect(listStockLogs).not.toHaveBeenCalled()
 
-    const histBtn = document.querySelector('.stock-log-history-btn') as HTMLButtonElement | null
+    const histBtn = document.querySelector('.stock-log-history-accordion-btn') as HTMLButtonElement | null
     expect(histBtn).toBeTruthy()
-    histBtn!.click()
+    histBtn!.click() // 펼침(최초 조회)
     await flushPromises()
 
-    expect(listStockLogs).toHaveBeenCalled()
+    expect(listStockLogs).toHaveBeenCalledTimes(1)
     const sheet = document.body.textContent || ''
     expect(sheet).toContain('이력을 불러오지 못했습니다')
+
+    // 접힘: 추가 API 호출 없음
+    histBtn!.click()
+    await flushPromises()
+    expect(listStockLogs).toHaveBeenCalledTimes(1)
+
+    // 재펼침: 불필요 재호출 금지(캐시 유지)
+    histBtn!.click()
+    await flushPromises()
+    expect(listStockLogs).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 })

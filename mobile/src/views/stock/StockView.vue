@@ -11,15 +11,15 @@ import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
-import { useAppStore } from '@/composables/stores/app'
-import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import { useAppStore } from '@/shared/stores/app'
+import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
 import {
   ADJUST_REASON_OPTIONS,
   PARENT_ADJUST_REASON,
   REASON_DISPOSE,
   reasonAllowsIn,
   reasonAllowsOut,
-} from '@/views/stock/stockAdjustConstants'
+} from '@/features/stock/stockAdjustConstants'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
 const ITEM_PRODUCT = 'FR010100'
@@ -56,6 +56,7 @@ const logs         = ref<StockLog[]>([])
 const logsLoading  = ref(false)
 const logsError    = ref('')
 const historyOpen  = ref(false) // 조정 시트 open 시 이력 자동 조회를 하지 않습니다.
+const historyLoaded = ref(false) // 최초 펼침 1회만 listStockLogs 호출
 const selectedKeys = ref<string[]>([])
 const adjustQty = ref('1')
 const adjustReason = ref(REASON_DISPOSE)
@@ -81,6 +82,8 @@ const previewWarnOut = computed(() => {
   return adjustQtyNum.value > logTarget.value.available_qty + 1e-9
 })
 
+const previewWarnMessage = computed(() => (previewWarnOut.value ? '가용재고보다 많이 줄일 수 없습니다.' : ''))
+
 const previewAfterQty = computed(() => {
   if (!logTarget.value) return 0
   const curr = Number(logTarget.value.real_qty || 0)
@@ -92,8 +95,8 @@ const previewText = computed(() => {
   if (!logTarget.value) return ''
   const unit = stockUnit(logTarget.value.item_cd)
   const qty = adjustQtyNum.value
-  const warn = previewWarnOut.value ? ' (가용재고 초과)' : ''
-  return `${adjustReasonLabel.value}로 ${qty}${unit} ${adjustDirNm.value} · 조정 후 현재 ${previewAfterQty.value}${unit}${warn}`
+  const warn = previewWarnOut.value ? '\n(가용재고 초과)' : ''
+  return `${adjustReasonLabel.value} · ${qty}${unit} ${adjustDirNm.value}\n현재 ${logTarget.value.real_qty}${unit} → 조정 후 ${previewAfterQty.value}${unit}${warn}`
 })
 
 const canApplyAdjust = computed(() => {
@@ -101,6 +104,7 @@ const canApplyAdjust = computed(() => {
   if (!(adjustQtyNum.value > 0)) return false
   if (adjustDirection.value === 'IN' && !canAdjustIn.value) return false
   if (adjustDirection.value === 'OUT' && !canAdjustOut.value) return false
+  if (previewWarnOut.value) return false
   return true
 })
 
@@ -183,6 +187,7 @@ async function openAdjustSheet(item: StockItem) {
   logsError.value = ''
   logsLoading.value = false
   historyOpen.value = false
+  historyLoaded.value = false
 
   adjustError.value = ''
   adjustSuccess.value = ''
@@ -196,7 +201,10 @@ async function openHistoryLogs() {
   if (!logTarget.value) return
   if (logsLoading.value) return
 
+  // 이미 펼쳐서 조회한 적이 있으면 재호출하지 않습니다.
   historyOpen.value = true
+  if (historyLoaded.value) return
+
   logsLoading.value = true
   logsError.value = ''
   logs.value = []
@@ -215,7 +223,12 @@ async function openHistoryLogs() {
     logsError.value = '이력을 불러오지 못했습니다.'
   } finally {
     logsLoading.value = false
+    historyLoaded.value = true
   }
+}
+
+function closeHistoryAccordion() {
+  historyOpen.value = false
 }
 
 function rowKey(row: StockItem): string {
@@ -301,6 +314,13 @@ async function runAdjust() {
       const dirNm = ioType === 'IN' ? '증가' : '감소'
       const unit = stockUnit(fresh.item_cd)
       adjustSuccess.value = `재고 조정이 완료되었습니다.\n${cardTitle(fresh)} / ${reasonLabel} / ${dirNm} ${qty}${unit} / 현재 ${fresh.real_qty}${unit}`
+      // 이력 아코디언이 열린 상태면 stale 가능성이 있으므로 접고 캐시를 비웁니다.
+      if (historyOpen.value) {
+        historyOpen.value = false
+        historyLoaded.value = false
+        logs.value = []
+        logsError.value = ''
+      }
     } else {
       closeLog()
     }
@@ -314,6 +334,7 @@ async function runAdjust() {
 function closeLog() {
   logTarget.value = null
   historyOpen.value = false
+  historyLoaded.value = false
   logs.value = []
   logsError.value = ''
   logsLoading.value = false
@@ -511,6 +532,7 @@ function formatRegDt(dt: string) {
                 type="button"
                 variant="secondary"
                 :disabled="adjustBusy || !canAdjustIn"
+                :class="{ 'stock-log-dir-btn--active': adjustDirection === 'IN' }"
                 @click="adjustDirection = 'IN'"
               >
                 증가
@@ -519,6 +541,7 @@ function formatRegDt(dt: string) {
                 type="button"
                 variant="secondary"
                 :disabled="adjustBusy || !canAdjustOut"
+                :class="{ 'stock-log-dir-btn--active': adjustDirection === 'OUT' }"
                 @click="adjustDirection = 'OUT'"
               >
                 감소
@@ -527,7 +550,11 @@ function formatRegDt(dt: string) {
 
             <!-- 실행 미리보기 -->
             <p v-if="previewText" class="stock-log-adjust__preview">{{ previewText }}</p>
+            <p v-if="previewWarnMessage" class="stock-log-sheet__msg stock-log-sheet__msg--err">
+              {{ previewWarnMessage }}
+            </p>
 
+            <p v-if="adjustSuccess" class="stock-log-sheet__msg stock-log-sheet__msg--ok">{{ adjustSuccess }}</p>
             <p v-if="adjustError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ adjustError }}</p>
 
             <div class="stock-log-adjust__apply">
@@ -539,12 +566,15 @@ function formatRegDt(dt: string) {
               </OdsButton>
             </div>
 
-            <p v-if="adjustSuccess" class="stock-log-sheet__msg stock-log-sheet__msg--ok">{{ adjustSuccess }}</p>
-
             <!-- 이력은 “필요할 때만” 버튼으로 분리해서 조회 -->
             <div class="stock-log-history">
-              <OdsButton type="button" variant="secondary" class="stock-log-history-btn" @click="openHistoryLogs">
-                조정 이력 보기
+              <OdsButton
+                type="button"
+                variant="secondary"
+                class="stock-log-history-accordion-btn"
+                @click="historyOpen ? closeHistoryAccordion() : openHistoryLogs()"
+              >
+                {{ historyOpen ? '조정 이력 접기 ▲' : '조정 이력 보기 ▼' }}
               </OdsButton>
 
               <div v-if="historyOpen" class="stock-log-history__body">
@@ -766,7 +796,9 @@ function formatRegDt(dt: string) {
   align-items: flex-end;
 }
 .stock-log-sheet {
-  width: 100%;
+  width: calc(100% - 24px);
+  max-width: 480px;
+  margin: 0 auto;
   max-height: 70vh;
   background: var(--ods-color-white, #fff);
   border-radius: var(--ods-radius-card) var(--ods-radius-card) 0 0;
@@ -863,6 +895,10 @@ function formatRegDt(dt: string) {
 .stock-log-adjust__btns {
   display: flex;
   gap: var(--ods-space-8);
+}
+
+.stock-log-dir-btn--active {
+  border: 1px solid var(--ods-color-primary);
 }
 
 .stock-log-adjust__lbl {
