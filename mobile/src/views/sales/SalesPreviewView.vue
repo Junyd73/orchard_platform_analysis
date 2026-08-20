@@ -798,9 +798,10 @@ onMounted(async () => {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 16.5rem;
+  --sales-preview-footer-h: 12rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
+  --sales-preview-inline: var(--ods-page-padding-x, var(--ods-space-16));
   --preview-qty-visual: 26px;
   --preview-qty-touch: 36px;
   min-height: 100%;
@@ -911,8 +912,7 @@ onMounted(async () => {
   margin-bottom: var(--ods-space-6);
 }
 .line__title {
-  font-size: var(--ods-font-size-footnote, 12px);
-  line-height: 1.35;
+  font: var(--ods-font-body-1);
   font-weight: 700;
   color: var(--ods-color-text);
   overflow: hidden;
@@ -1081,7 +1081,8 @@ onMounted(async () => {
   border-top: 1px solid var(--ods-color-border);
 }
 
-/* 재고 판매예정 floating 계열 + 전체폭 primary CTA */
+/* 재고 판매예정 floating 계열 + 전체폭 primary CTA
+ * fixed는 viewport 기준이므로 .ods-page-content와 동일 inline token으로 카드 좌우선 맞춤 */
 .footer {
   position: fixed;
   left: 0;
@@ -1090,31 +1091,31 @@ onMounted(async () => {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-8);
+  gap: var(--ods-space-6);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-10) var(--ods-page-padding-x, var(--ods-space-16));
+  padding: var(--ods-space-8) var(--sales-preview-inline);
   background: var(--ods-color-bg-muted, #f5f5f5);
   border-top: 1px solid var(--ods-color-border);
 }
 .footer__panel {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-4);
+  gap: 0;
   min-width: 0;
-  padding: var(--ods-space-12) var(--ods-space-16);
+  padding: var(--ods-space-8) var(--ods-space-12);
   background: var(--ods-color-primary-subtle, #e8f5ee);
   border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
-  box-shadow: 0 2px 10px rgba(46, 125, 50, 0.12);
+  box-shadow: none;
 }
 .footer__count {
   margin: 0 0 var(--ods-space-4);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-caption);
   font-weight: 600;
-  color: var(--ods-color-text);
+  color: var(--ods-color-text-secondary);
 }
 .footer__row {
   margin: 0;
@@ -1122,7 +1123,8 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-caption);
+  line-height: 1.35;
   color: var(--ods-color-text-secondary);
 }
 .footer__lbl {
@@ -1139,7 +1141,7 @@ onMounted(async () => {
 }
 .footer__divider {
   height: 1px;
-  margin: var(--ods-space-6) 0;
+  margin: var(--ods-space-4) 0;
   background: color-mix(in srgb, var(--ods-color-secondary, #66bb6a) 45%, white);
 }
 .footer__total {
@@ -1173,8 +1175,9 @@ onMounted(async () => {
 }
 .footer__go {
   width: 100%;
-  min-height: 48px;
+  min-height: var(--ods-button-height, 48px);
   flex-shrink: 0;
+  margin: 0;
 }
 
 .err {
