@@ -813,21 +813,49 @@ class StockPage(QWidget):
         if not ok or not memo.strip():
             return
 
-        svc = StockAdjustService(self.db.conn)
         memo = memo.strip()
+        svc = StockAdjustService(self.db.conn)
         eps = 1e-9
-        adjusted_any = False
+
+        # 1) 입력값(audit_qty)은 '물리재고' 기준 최종수량으로 취급한다.
+        #    reserved_qty는 'OUT 가능 여부' 검증에만 사용되므로,
+        #    diff 계산에는 사용하지 않는다.
+        # 2) WorkCartCard spin의 max(available_qty) 때문에 증가 실사가 막히므로,
+        #    실사 버튼 클릭 시 카드별로 별도 Dialog로 최종 실사수량을 받는다.
+        adjustments: list[tuple[float, dict]] = []
 
         for c in self.selected_cards:
             r = c.data
-            audit_qty = float(c.work_qty)
             in_qty = float(r.get("in_qty", 0))
             out_qty = float(r.get("out_qty", 0))
             reserved_qty = float(r.get("reserved_qty", 0))
-            current_available = in_qty - out_qty - reserved_qty
-            diff = audit_qty - current_available
 
-            # 차이 0이면 조정 로그를 만들지 않고 종료
+            physical_qty = in_qty - out_qty
+            available_qty = physical_qty - reserved_qty
+
+            default_val = max(0, int(round(physical_qty)))
+            label = (
+                f"현재 물리재고: {int(physical_qty)}\n"
+                f"예약재고(참고): {int(reserved_qty)}\n"
+                f"가용(참고): {int(available_qty)}\n"
+                f"실사수량(최종 물리재고) 입력:"
+            )
+            audit_qty, qty_ok = QInputDialog.getInt(
+                self,
+                "재고 실사수량",
+                label,
+                value=default_val,
+                min=0,
+                max=99999,
+            )
+            if not qty_ok:
+                return
+
+            diff = float(audit_qty) - physical_qty
+            adjustments.append((diff, r))
+
+        adjusted_any = False
+        for diff, r in adjustments:
             if abs(diff) <= eps:
                 continue
 

@@ -247,6 +247,14 @@ class StockAdjustServiceTests(unittest.TestCase):
         self.assertIn("REF_TYPE_ADJUST", src)
         self.assertIn("REASON_COUNT_DIFF", src)
 
+    def test_t16_pc_audit_physical_qty_and_increase_allowed(self) -> None:
+        src = (_REPO / "ui" / "pages" / "stock_page.py").read_text(encoding="utf-8")
+        # diff 계산 기준은 reserved_qty 제외 물리재고(in-out)
+        self.assertIn("physical_qty = in_qty - out_qty", src)
+        # 증가 실사를 위해 available_qty 상한에 걸리지 않도록 별도 Dialog max 확장
+        self.assertIn("QInputDialog.getInt", src)
+        self.assertIn("max=99999", src)
+
     def test_reason_allows_io_map(self) -> None:
         self.assertTrue(reason_allows_io(REASON_DISPOSE, IO_TYPE_OUT))
         self.assertFalse(reason_allows_io(REASON_DISPOSE, IO_TYPE_IN))
