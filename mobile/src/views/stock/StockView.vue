@@ -600,6 +600,7 @@ const salesFabStyle = {
               <OdsInput
                 bare
                 class="stock-view__qty-input"
+                data-testid="stock-row-qty-input"
                 type="number"
                 inputmode="numeric"
                 min="1"
@@ -674,7 +675,13 @@ const salesFabStyle = {
         <span class="stock-view__batch-count">
           판매예정 {{ stockDraftLineCount }}품목 · {{ stockDraftBoxSum }}박스
         </span>
-        <OdsButton type="button" :block="false" @click="openSalesPreview">
+        <OdsButton
+          type="button"
+          :block="false"
+          class="stock-view__preview-btn"
+          data-testid="stock-preview-btn"
+          @click="openSalesPreview"
+        >
           판매 미리보기
         </OdsButton>
       </div>
@@ -823,7 +830,7 @@ const salesFabStyle = {
   --stock-bottom-nav-h: calc(
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
   );
-  --stock-batch-bar-h: 56px;
+  --stock-batch-bar-h: 50px;
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-12);
@@ -1006,17 +1013,30 @@ const salesFabStyle = {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.stock-view__qty-input {
-  width: 36px;
-  flex-shrink: 0;
-}
-.stock-view__qty-input :deep(input.ods-input) {
-  text-align: center;
-  padding-left: 2px;
-  padding-right: 2px;
-  min-height: 28px;
+/* bare OdsInput = root 자체가 input.ods-input — 자식 input 셀렉터는 매칭 안 됨 */
+:deep(input.stock-view__qty-input.ods-input) {
+  width: 38px;
+  min-width: 38px;
+  max-width: 40px;
   height: 28px;
+  min-height: 28px;
+  max-height: 30px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  margin: 0;
+  text-align: center;
   font-size: 13px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--ods-color-text);
+  flex-shrink: 0;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+:deep(input.stock-view__qty-input.ods-input::-webkit-outer-spin-button),
+:deep(input.stock-view__qty-input.ods-input::-webkit-inner-spin-button) {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .stock-view__cart-action {
   min-height: 28px !important;
@@ -1082,10 +1102,10 @@ const salesFabStyle = {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: var(--stock-batch-bar-h, 56px);
+  min-height: var(--stock-batch-bar-h, 50px);
   box-sizing: border-box;
-  padding: var(--ods-space-8) max(var(--ods-space-12), env(safe-area-inset-left, 0px))
-    var(--ods-space-8) max(var(--ods-space-12), env(safe-area-inset-right, 0px));
+  padding: var(--ods-space-6) max(var(--ods-space-12), env(safe-area-inset-left, 0px))
+    var(--ods-space-6) max(var(--ods-space-12), env(safe-area-inset-right, 0px));
   background: var(--ods-color-white, #fff);
   border-top: 1px solid var(--ods-color-border);
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
@@ -1098,6 +1118,17 @@ const salesFabStyle = {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* OdsButton 전역(headline/큰 min-height)을 Floating Bar에서만 compact override */
+:deep(button.stock-view__preview-btn.ods-btn) {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ── 이력 bottom sheet ────────────────────────────────────────────── */

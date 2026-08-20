@@ -172,6 +172,88 @@ describe('StockView', () => {
     host.remove()
   })
 
+  it('UI-T1 bare OdsInput root value 초기값 1 표시', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: document.body })
+    await flushPromises()
+    const input = wrapper.find('[data-testid="stock-row-qty-input"]')
+    expect(input.exists()).toBe(true)
+    expect(input.element.tagName).toBe('INPUT')
+    expect(input.classes()).toContain('ods-input')
+    expect(input.classes()).toContain('stock-view__qty-input')
+    expect((input.element as HTMLInputElement).value).toBe('1')
+    // bare root — 자식 input 셀렉터는 없음
+    expect(input.find('input').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('UI-T2/T3 +/- 클릭 시 input value 즉시 반영', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: document.body })
+    await flushPromises()
+    await bumpPlus(wrapper, 0, 2)
+    expect((wrapper.find('[data-testid="stock-row-qty-input"]').element as HTMLInputElement).value).toBe('3')
+    const minus = wrapper.findAll('[data-testid="stock-row-stepper"] button').find((b) => b.text().includes('−') || b.text().includes('-'))
+    await minus!.trigger('click')
+    await flushPromises()
+    expect((wrapper.find('[data-testid="stock-row-qty-input"]').element as HTMLInputElement).value).toBe('2')
+    wrapper.unmount()
+  })
+
+  it('UI-T4/T5/T6 담기·재진입·수정 시 input=Store qty', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: document.body })
+    await flushPromises()
+    await bumpPlus(wrapper, 0, 5) // 1→6
+    await clickAdd(wrapper)
+    expect(useSalesPrefillStore().shipLines[0].qty).toBe(6)
+    expect((wrapper.find('[data-testid="stock-row-qty-input"]').element as HTMLInputElement).value).toBe('6')
+    await bumpPlus(wrapper, 0, 1) // 6→7
+    await clickUpdate(wrapper)
+    expect(useSalesPrefillStore().shipLines[0].qty).toBe(7)
+    expect((wrapper.find('[data-testid="stock-row-qty-input"]').element as HTMLInputElement).value).toBe('7')
+    wrapper.unmount()
+  })
+
+  it('UI-T7 가용 1이면 숫자 1 + +/- disabled', async () => {
+    listFruitStock.mockResolvedValue([stockRow({ available_qty: 1, real_qty: 1 })])
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    expect((wrapper.find('[data-testid="stock-row-qty-input"]').element as HTMLInputElement).value).toBe('1')
+    const buttons = wrapper.find('[data-testid="stock-row-stepper"]').findAll('button')
+    expect(buttons[0].attributes('disabled')).toBeDefined()
+    expect(buttons[1].attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('UI-T8/T9 미리보기 버튼 compact class + FAB 문구/조건', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: document.body })
+    await flushPromises()
+    expect(document.querySelector('[data-testid="stock-preview-btn"]')).toBeNull()
+    await clickAdd(wrapper)
+    const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement
+    const btn = document.querySelector('[data-testid="stock-preview-btn"]') as HTMLButtonElement
+    expect(fab?.textContent).toContain('판매예정 1품목')
+    expect(fab?.textContent).toContain('1박스')
+    expect(btn).toBeTruthy()
+    expect(btn.classList.contains('stock-view__preview-btn')).toBe(true)
+    expect(btn.classList.contains('ods-btn')).toBe(true)
+    expect(btn.textContent?.trim()).toBe('판매 미리보기')
+    wrapper.unmount()
+  })
+
+  it('UI-T10 360/390/430 nowrap + overflow 없음', async () => {
+    for (const w of [360, 390, 430]) {
+      const host = document.createElement('div')
+      host.style.width = `${w}px`
+      document.body.appendChild(host)
+      const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: host })
+      await flushPromises()
+      const row = wrapper.find('[data-testid="stock-sale-row"]').element as HTMLElement
+      expect(getComputedStyle(row).flexWrap).toBe('nowrap')
+      expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth + 1)
+      wrapper.unmount()
+      host.remove()
+    }
+  })
+
   it('T1 수량 3 → 담기 → Store 1 line / qty 3', async () => {
     const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: document.body })
     await flushPromises()
