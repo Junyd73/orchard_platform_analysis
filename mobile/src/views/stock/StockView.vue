@@ -410,6 +410,19 @@ function formatRegDt(dt: string) {
 const showSalesActionBar = computed(
   () => selectedKeys.value.length > 0 || salesPrefill.shipLines.length > 0,
 )
+
+/** transform 조상 회피(Teleport) + 인라인 fixed로 viewport 고정을 보장 */
+const salesFabStyle = {
+  position: 'fixed',
+  left: '0',
+  right: '0',
+  width: '100%',
+  maxWidth: '480px',
+  margin: '0 auto',
+  bottom:
+    'calc(var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px))',
+  zIndex: 40,
+} as const
 </script>
 
 <template>
@@ -503,20 +516,28 @@ const showSalesActionBar = computed(
         >판매예정</span>
       </div>
     </div>
-    <div
-      v-if="showSalesActionBar"
-      class="stock-view__batch"
-    >
-      <span class="stock-view__batch-count">
-        선택 {{ selectedKeys.length }}건
-        <template v-if="salesPrefill.shipLines.length">
-          · 판매예정 {{ salesPrefill.shipLines.length }}건
-        </template>
-      </span>
-      <OdsButton type="button" :block="false" @click="openSalesPreview">
-        판매 미리보기
-      </OdsButton>
-    </div>
+
+    <!-- transform 조상(탭 캐러셀) 밖 — 뷰포트 fixed Floating Bar -->
+    <Teleport to="body">
+      <div
+        v-if="showSalesActionBar"
+        class="stock-view__batch"
+        data-testid="stock-sales-fab"
+        role="region"
+        aria-label="판매 미리보기"
+        :style="salesFabStyle"
+      >
+        <span class="stock-view__batch-count">
+          선택 {{ selectedKeys.length }}건
+          <template v-if="salesPrefill.shipLines.length">
+            · 판매예정 {{ salesPrefill.shipLines.length }}건
+          </template>
+        </span>
+        <OdsButton type="button" :block="false" @click="openSalesPreview">
+          판매 미리보기
+        </OdsButton>
+      </div>
+    </Teleport>
 
     <!-- 재고 이력 bottom sheet -->
     <Teleport to="body">
@@ -802,18 +823,23 @@ const showSalesActionBar = computed(
   white-space: nowrap;
 }
 .stock-view__batch {
+  /* App 탭 캐러셀 transform 밖(body Teleport)에서 viewport 기준 fixed */
   position: fixed;
   left: 0;
   right: 0;
-  bottom: var(--stock-bottom-nav-h);
-  z-index: 40;
+  /* OdsBottomNav: min-height 56 + padding 8+8 + safe-area */
+  bottom: calc(
+    var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
+  );
+  z-index: 40; /* OdsBottomNav(50) 아래 — 시각적으로는 nav 위에 배치 */
+  width: 100%;
   max-width: 480px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: var(--stock-batch-bar-h);
+  min-height: var(--stock-batch-bar-h, 56px);
   box-sizing: border-box;
   padding: var(--ods-space-8) max(var(--ods-space-12), env(safe-area-inset-left, 0px))
     var(--ods-space-8) max(var(--ods-space-12), env(safe-area-inset-right, 0px));

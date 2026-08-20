@@ -49,6 +49,17 @@ async function openSheet() {
   return wrapper
 }
 
+function salesFab(): HTMLElement | null {
+  return document.querySelector('[data-testid="stock-sales-fab"]')
+}
+
+async function clickSalesFab() {
+  const btn = document.querySelector('[data-testid="stock-sales-fab"] button') as HTMLButtonElement | null
+  expect(btn).toBeTruthy()
+  await new DOMWrapper(btn!).trigger('click')
+  await flushPromises()
+}
+
 function dirButtons() {
   const btns = Array.from(document.querySelectorAll('.stock-log-adjust__btns button'))
   const inc = btns.find((b) => (b.textContent || '').includes('증가')) as HTMLButtonElement | undefined
@@ -72,6 +83,8 @@ async function setQty(value: string) {
 
 describe('StockView', () => {
   beforeEach(() => {
+    document.querySelectorAll('[data-testid="stock-sales-fab"]').forEach((n) => n.remove())
+    document.querySelectorAll('.stock-log-overlay').forEach((n) => n.remove())
     setActivePinia(createPinia())
     listFruitStock.mockReset()
     listStockLogs.mockReset()
@@ -131,12 +144,11 @@ describe('StockView', () => {
     const r = router()
     await r.push('/orders')
     await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r] } })
+    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
     await flushPromises()
     await wrapper.find('.stock-view__pick input').trigger('click')
     await flushPromises()
-    await wrapper.get('.stock-view__batch button').trigger('click')
-    await flushPromises()
+    await clickSalesFab()
     expect(r.currentRoute.value.name).toBe('sales-preview')
     const store = useSalesPrefillStore()
     expect(store.shipLines).toHaveLength(1)
@@ -188,16 +200,39 @@ describe('StockView', () => {
     expect(itemCds).toEqual(['FR010200', 'FR010201', 'FR010202'])
   })
 
-  it('T5~T7 판매예정 문구 + 선택0에서도 미리보기 활성', async () => {
-    const r = router()
-    await r.push('/orders')
-    await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r] } })
+  it('T1 선택 0건 → Floating Bar 숨김', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
     await flushPromises()
-    expect(wrapper.find('.stock-view__batch').exists()).toBe(false)
+    expect(document.querySelector('[data-testid="stock-sales-fab"]')).toBeNull()
+    expect(wrapper.find('.stock-view').classes()).not.toContain('stock-view--with-batch')
+    wrapper.unmount()
+  })
 
-    const store = useSalesPrefillStore()
-    store.mergeFromStockRows([
+  it('T2 선택 1건 → Floating Bar 표시', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await wrapper.find('.stock-view__pick input').trigger('click')
+    await flushPromises()
+    const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
+    expect(fab).toBeTruthy()
+    expect(fab?.textContent).toContain('선택 1건')
+    expect(wrapper.find('.stock-view').classes()).toContain('stock-view--with-batch')
+    wrapper.unmount()
+  })
+
+  it('T3 판매예정 1건 → Floating Bar 표시', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    useSalesPrefillStore().mergeFromStockRows([
       {
         farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
         variety_cd: 'FR010101', variety_nm: '신고',
@@ -208,27 +243,82 @@ describe('StockView', () => {
       },
     ])
     await flushPromises()
-    expect(wrapper.find('.stock-view__batch').exists()).toBe(true)
-    expect(wrapper.text()).toContain('선택 0건')
-    expect(wrapper.text()).toContain('판매예정 1건')
-    expect(wrapper.text()).not.toMatch(/\bdraft\b/i)
-    expect(wrapper.find('.stock-view').classes()).toContain('stock-view--with-batch')
-    expect(wrapper.find('.stock-view__batch').classes()).toContain('stock-view__batch')
+    const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
+    expect(fab).toBeTruthy()
+    expect(fab?.textContent).toContain('선택 0건')
+    expect(fab?.textContent).toContain('판매예정 1건')
+    expect(fab?.textContent).not.toMatch(/\bdraft\b/i)
+    wrapper.unmount()
+  })
 
-    await wrapper.get('.stock-view__batch button').trigger('click')
+  it('T4 선택 + 판매예정 → 건수 정상 표시', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
     await flushPromises()
+    useSalesPrefillStore().mergeFromStockRows([
+      {
+        farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
+        variety_cd: 'FR010101', variety_nm: '신고',
+        grade_cd: 'GR010100', grade_nm: '특',
+        size_cd: 'FR020101', size_nm: '25과',
+        weight: 15, harvest_year: 2026, storage_dt: '2026-08-20',
+        in_qty: 5, out_qty: 0, real_qty: 5, reserved_qty: 0, available_qty: 5,
+      },
+    ])
+    await wrapper.find('.stock-view__pick input').trigger('click')
+    await flushPromises()
+    const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
+    expect(fab?.textContent).toContain('선택 1건')
+    expect(fab?.textContent).toContain('판매예정 1건')
+    wrapper.unmount()
+  })
+
+  it('T5 Floating Bar는 body Teleport + position:fixed', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await wrapper.find('.stock-view__pick input').trigger('click')
+    await flushPromises()
+    const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
+    expect(fab).toBeTruthy()
+    expect(fab?.parentElement).toBe(document.body)
+    expect(wrapper.find('.stock-view__list').element.contains(fab!)).toBe(false)
+    expect(getComputedStyle(fab!).position).toBe('fixed')
+    expect(fab!.style.position).toBe('fixed')
+    wrapper.unmount()
+  })
+
+  it('T6 Floating Bar 클릭 → SalesPreviewView 이동', async () => {
+    const r = router()
+    await r.push('/orders')
+    await r.isReady()
+    const wrapper = mount(StockView, {
+      global: { plugins: [r] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await wrapper.find('.stock-view__pick input').trigger('click')
+    await flushPromises()
+    await clickSalesFab()
     expect(r.currentRoute.value.name).toBe('sales-preview')
     wrapper.unmount()
   })
 
-  it('T1 선택 1건 → fixed action bar 표시', async () => {
-    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+  it('T7 목록 하단 padding으로 마지막 상품 가림 방지', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
     await flushPromises()
+    expect(wrapper.find('.stock-view').classes()).not.toContain('stock-view--with-batch')
     await wrapper.find('.stock-view__pick input').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('선택 1건')
-    expect(wrapper.find('.stock-view__batch').exists()).toBe(true)
     expect(wrapper.find('.stock-view').classes()).toContain('stock-view--with-batch')
+    wrapper.unmount()
   })
 
   it('선택 다건은 판매 미리보기 draft에 병합한다', async () => {
@@ -253,15 +343,14 @@ describe('StockView', () => {
     const r = router()
     await r.push('/orders')
     await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r] } })
+    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
     await flushPromises()
     const boxes = wrapper.findAll('.stock-view__pick input')
     expect(boxes).toHaveLength(2)
     await boxes[0].trigger('click')
     await boxes[1].trigger('click')
     await flushPromises()
-    await wrapper.get('.stock-view__batch button').trigger('click')
-    await flushPromises()
+    await clickSalesFab()
     const store = useSalesPrefillStore()
     expect(store.shipLines).toHaveLength(2)
     expect(store.shipLines.map((l) => l.grade_cd).sort()).toEqual(['GR010100', 'GR010200'])
