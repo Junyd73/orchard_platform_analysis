@@ -825,6 +825,7 @@ function formatRegDt(dt: string) {
 }
 .stock-log-sheet__title {
   font: var(--ods-font-heading-5, var(--ods-font-title-3, var(--ods-font-body-1)));
+  font-size: calc(var(--ods-font-size-body-1, 16px) + 1px);
   font-weight: 700;
   color: var(--ods-color-text);
   text-align: left;
