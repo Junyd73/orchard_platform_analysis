@@ -24,6 +24,7 @@ from core.order_ship_delivery import ShipDeliveryAllocIn  # noqa: E402
 from core.order_ship_service import (  # noqa: E402
     OrderShipService,
     ShipConfirmIn,
+    ShipError,
     ShipLineIn,
     ShipValidationError,
 )
@@ -540,6 +541,131 @@ class ShipDelivery2CTest(unittest.TestCase):
         )
         self.assertTrue(out["ok"])
         self.assertEqual(len(out["sales_details"]), 1)
+
+    def _assert_no_sale_side_effects(self, seq: int) -> None:
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_sales_master").fetchone()[0], 0
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_sales_detail").fetchone()[0], 0
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_stock_log").fetchone()[0], 0
+        )
+        row = self.conn.execute(
+            "SELECT out_qty FROM t_stock_master WHERE stock_seq=?", (seq,)
+        ).fetchone()
+        self.assertEqual(float(row["out_qty"]), 0)
+
+    def test_p1_missing_delivery_table_fail_closed(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        self.conn.execute("DROP TABLE t_sales_delivery")
+        self.conn.commit()
+        with self.assertRaises(ShipError) as ctx:
+            _confirm_direct(
+                self.conn,
+                qty=1,
+                allocs=[_alloc(1, name="홍")],
+            )
+        self.assertEqual(getattr(ctx.exception, "code", ""), "SCHEMA_PRECONDITION")
+        self._assert_no_sale_side_effects(seq)
+
+    def test_p2_missing_dlvry_group_no_fail_closed(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        self.conn.execute("DROP TABLE t_sales_delivery")
+        self.conn.execute(
+            """
+            CREATE TABLE t_sales_delivery (
+                dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                rcv_name TEXT, rcv_tel TEXT, rcv_addr TEXT,
+                dlvry_qty REAL, dlvry_msg TEXT, ship_fee REAL,
+                PRIMARY KEY (dlvry_no, farm_cd)
+            )
+            """
+        )
+        self.conn.commit()
+        with self.assertRaises(ShipError) as ctx:
+            _confirm_direct(
+                self.conn,
+                qty=1,
+                allocs=[_alloc(1, name="홍")],
+            )
+        self.assertEqual(getattr(ctx.exception, "code", ""), "SCHEMA_PRECONDITION")
+        self._assert_no_sale_side_effects(seq)
+
+    def test_p3_missing_ship_fee_col_fail_closed(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        self.conn.execute("DROP TABLE t_sales_delivery")
+        self.conn.execute(
+            """
+            CREATE TABLE t_sales_delivery (
+                dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                rcv_name TEXT, rcv_tel TEXT, rcv_addr TEXT,
+                dlvry_qty REAL, dlvry_msg TEXT, dlvry_group_no TEXT,
+                PRIMARY KEY (dlvry_no, farm_cd)
+            )
+            """
+        )
+        self.conn.commit()
+        with self.assertRaises(ShipError) as ctx:
+            _confirm_direct(
+                self.conn,
+                qty=1,
+                allocs=[_alloc(1, name="홍")],
+            )
+        self.assertEqual(getattr(ctx.exception, "code", ""), "SCHEMA_PRECONDITION")
+        self._assert_no_sale_side_effects(seq)
+
+    def test_p4_legacy_without_multi_columns_still_ok(self) -> None:
+        """legacy(null allocations): delivery table optional columns 없어도 기존처럼 성공."""
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        self.conn.execute("DROP TABLE t_sales_delivery")
+        self.conn.execute(
+            """
+            CREATE TABLE t_sales_delivery (
+                dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                rcv_name TEXT, rcv_tel TEXT, rcv_addr TEXT,
+                dlvry_qty REAL, dlvry_msg TEXT, reg_id TEXT,
+                PRIMARY KEY (dlvry_no, farm_cd)
+            )
+            """
+        )
+        self.conn.commit()
+        out = OrderShipService(self.conn).confirm(
+            ShipConfirmIn(
+                farm_cd=FARM,
+                ship_mode=SHIP_MODE_DIRECT,
+                sales_dt="2026-08-20",
+                custm_id=CUST,
+                user_id="T",
+                dlvry_tp="LO010200",
+                ship_fee=1000,
+                rcv_name="홍길동",
+                rcv_tel="010",
+                rcv_addr="서울",
+                lines=[
+                    ShipLineIn(
+                        qty=1,
+                        item_cd=ITEM,
+                        variety_cd=VARIETY,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        weight=WEIGHT,
+                        harvest_year=YEAR,
+                        wh_cd=WH,
+                        unit_price=1000,
+                        delivery_allocations=None,
+                    )
+                ],
+            )
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_sales_master").fetchone()[0], 1
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_sales_delivery").fetchone()[0], 1
+        )
 
 
 if __name__ == "__main__":

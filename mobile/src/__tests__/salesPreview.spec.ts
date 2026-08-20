@@ -488,6 +488,48 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
+  it('U1~U2 Sheet 단위는 현재 destEditIdx 품목 기준', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ item_cd: 'FR010100', item_nm: '배', available_qty: 10 }), 2)
+    store.addStockLine(
+      stock({
+        item_cd: 'FR010300',
+        item_nm: '배즙',
+        variety_cd: 'FR010301',
+        variety_nm: '배즙',
+        grade_cd: 'GR010100',
+        size_cd: 'SZ010000',
+        weight: 0,
+        available_qty: 5,
+      }),
+      1,
+    )
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    const r = router()
+    await r.push('/orders/sales-preview')
+    await r.isReady()
+    const wrapper = mount(SalesPreviewView, {
+      attachTo: document.body,
+      ...mountOpts(r),
+    })
+    await flushPromises()
+
+    const opens = wrapper.findAll('[data-testid="sales-preview-dest-open"]')
+    await opens[0].trigger('click')
+    await flushPromises()
+    let sheet = document.querySelector('[data-testid="sales-preview-dest-sheet"]')
+    expect(sheet?.textContent || '').toContain('판매수량 2박스')
+    ;(sheet!.querySelector('[aria-label="닫기"]') as HTMLButtonElement).click()
+    await flushPromises()
+
+    await opens[1].trigger('click')
+    await flushPromises()
+    sheet = document.querySelector('[data-testid="sales-preview-dest-sheet"]')
+    expect(sheet?.textContent || '').toContain('판매수량 1통')
+    expect(sheet?.textContent || '').not.toMatch(/판매수량 1박스/)
+    wrapper.unmount()
+  })
+
   it('P7 동일 판매규격 storage_dt 달라도 1 line(회귀)', () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock({ storage_dt: '2026-08-01', available_qty: 10 }), 4)

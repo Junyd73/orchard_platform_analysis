@@ -365,6 +365,13 @@ const destSaleQty = computed(() => {
   return Number(lines.value[destEditIdx.value]?.qty || 0)
 })
 
+/** Sheet 상단 단위 — 현재 편집 품목 기준 (footer unitHint와 분리) */
+const destSaleUnit = computed(() => {
+  if (destEditIdx.value == null) return '박스'
+  const ln = lines.value[destEditIdx.value]
+  return ln ? lineUnit(ln) : '박스'
+})
+
 onMounted(async () => {
   try {
     customers.value = await fetchCustomers(farmCd.value)
@@ -602,7 +609,7 @@ onMounted(async () => {
             <div>
               <h3 class="dest-sheet__title">{{ LABEL_DEST_SHEET }}</h3>
               <p class="dest-sheet__spec">{{ destLineSpec }}</p>
-              <p class="dest-sheet__qty">{{ LABEL_SALE_QTY }} {{ destSaleQty }}{{ unitHint }}</p>
+              <p class="dest-sheet__qty">{{ LABEL_SALE_QTY }} {{ destSaleQty }}{{ destSaleUnit }}</p>
             </div>
             <button type="button" class="dest-sheet__x" aria-label="닫기" @click="closeDestSheet">✕</button>
           </header>

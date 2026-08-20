@@ -23,6 +23,12 @@ class SalesDeliverySchemaTest(unittest.TestCase):
         os.close(fd)
         self.path = Path(name)
         self.conn = sqlite3.connect(str(self.path))
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _create_base_delivery(self) -> None:
         self.conn.executescript(
             """
             CREATE TABLE t_sales_delivery (
@@ -38,18 +44,43 @@ class SalesDeliverySchemaTest(unittest.TestCase):
         )
         self.conn.commit()
 
-    def tearDown(self) -> None:
-        self.conn.close()
-        self.path.unlink(missing_ok=True)
+    def test_s1_table_missing_ok_false(self) -> None:
+        stats = ensure_sales_delivery_schema(self.conn)
+        self.assertFalse(stats["ok"])
+        self.assertEqual(stats["reason"], "table_missing")
+        self.assertEqual(stats["columns"], [])
 
-    def test_idempotent_add_columns_keeps_rows(self) -> None:
+    def test_s2_add_both_columns(self) -> None:
+        self._create_base_delivery()
         first = ensure_sales_delivery_schema(self.conn)
         self.assertTrue(first["ok"])
         self.assertIn("t_sales_delivery.dlvry_group_no", first["columns"])
         self.assertIn("t_sales_delivery.ship_fee", first["columns"])
+
+    def test_s3_add_one_missing_column(self) -> None:
+        self.conn.executescript(
+            """
+            CREATE TABLE t_sales_delivery (
+                dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                rcv_name TEXT, dlvry_qty REAL, reg_id TEXT, dlvry_group_no TEXT,
+                PRIMARY KEY (dlvry_no, farm_cd)
+            );
+            """
+        )
+        self.conn.commit()
+        stats = ensure_sales_delivery_schema(self.conn)
+        self.assertTrue(stats["ok"])
+        self.assertEqual(stats["columns"], ["t_sales_delivery.ship_fee"])
+
+    def test_s4_s5_idempotent_when_present(self) -> None:
+        self._create_base_delivery()
+        ensure_sales_delivery_schema(self.conn)
         second = ensure_sales_delivery_schema(self.conn)
         self.assertTrue(second["ok"])
         self.assertEqual(second["columns"], [])
+        third = ensure_sales_delivery_schema(self.conn)
+        self.assertTrue(third["ok"])
+        self.assertEqual(third["columns"], [])
         row = self.conn.execute(
             "SELECT rcv_name, dlvry_group_no, ship_fee FROM t_sales_delivery WHERE dlvry_no='X-D001'"
         ).fetchone()

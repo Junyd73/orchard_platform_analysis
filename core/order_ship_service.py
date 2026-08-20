@@ -430,8 +430,9 @@ class OrderShipService:
         line_details: dict[int, list[tuple[str, float]]],
         user_id: str,
     ) -> None:
+        # 2C multi_delivery: table/columns 필수 (legacy silent skip과 분리)
         if not _table_exists(cur, "t_sales_delivery"):
-            return
+            raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
         has_group = _column_exists(cur, "t_sales_delivery", "dlvry_group_no")
         has_fee = _column_exists(cur, "t_sales_delivery", "ship_fee")
         if not (has_group and has_fee):

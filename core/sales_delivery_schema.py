@@ -34,6 +34,7 @@ def ensure_sales_delivery_schema(db: Path | str | sqlite3.Connection | Any) -> d
             ("t_sales_delivery",),
         ).fetchone()
         if not row:
+            stats["ok"] = False
             stats["reason"] = "table_missing"
             return stats
         cols = {
