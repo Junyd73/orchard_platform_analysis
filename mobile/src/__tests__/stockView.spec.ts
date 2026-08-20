@@ -43,7 +43,7 @@ async function openSheet() {
   await r.isReady()
   const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
   await flushPromises()
-  await wrapper.find('.stock-view__card').trigger('click')
+  await wrapper.find('.stock-view__row').trigger('click')
   await flushPromises()
   return wrapper
 }
@@ -93,12 +93,76 @@ describe('StockView', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
-  it('mount 시 fruit-stock을 조회하고 가용/현재를 표시', async () => {
+  it('mount 시 fruit-stock을 조회하고 1행 리스트로 가용수량을 표시', async () => {
     const wrapper = mount(StockView, { global: { plugins: [router()] } })
     await flushPromises()
     expect(listFruitStock).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('가용')
-    expect(wrapper.text()).toContain('현재 10')
+    expect(wrapper.find('.stock-view__row').exists()).toBe(true)
+    expect(wrapper.find('.stock-view__card').exists()).toBe(false)
+    expect(wrapper.text()).toContain('10박스')
+    expect(wrapper.text()).not.toContain('현재 10')
+    expect(wrapper.text()).not.toMatch(/가용(?!\d)/)
+  })
+
+  it('T1~T4 목록 1행 구조: 체크/상품정보/가용수량/판매', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    const row = wrapper.find('.stock-view__row')
+    expect(row.exists()).toBe(true)
+    expect(row.find('.stock-view__pick input').exists()).toBe(true)
+    expect(row.find('.stock-view__row-title').text()).toContain('신고 · 15kg · 25과 · 특')
+    expect(row.find('.stock-view__row-qty').text()).toContain('10박스')
+    expect(row.find('.stock-view__sell').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('현재 10')
+    expect(wrapper.find('.stock-view__qty-lbl').exists()).toBe(false)
+  })
+
+  it('T8 체크 클릭은 선택만 하고 조정 시트를 열지 않음', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()], attachTo: document.body } })
+    await flushPromises()
+    await wrapper.find('.stock-view__pick input').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.stock-log-sheet')).toBeNull()
+    expect(wrapper.find('.stock-view__row--selected').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('T9 판매 클릭은 판매 진입만 하고 조정 시트를 열지 않음', async () => {
+    const r = router()
+    await r.push('/orders')
+    await r.isReady()
+    const wrapper = mount(StockView, { global: { plugins: [r], attachTo: document.body } })
+    await flushPromises()
+    await wrapper.find('.stock-view__sell').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.stock-log-sheet')).toBeNull()
+    const store = useSalesPrefillStore()
+    expect(store.shipLines).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('T10 행 클릭 시 조정 시트 open', async () => {
+    const wrapper = await openSheet()
+    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('T12 소진 재고는 판매/선택 불가', async () => {
+    listFruitStock.mockResolvedValue([
+      {
+        farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
+        variety_cd: 'FR010101', variety_nm: '신고',
+        grade_cd: 'GR010100', grade_nm: '특',
+        size_cd: 'FR020101', size_nm: '25과',
+        weight: 15, harvest_year: 2026, storage_dt: '2026-08-19',
+        in_qty: 0, out_qty: 0, real_qty: 0, reserved_qty: 0, available_qty: 0,
+      },
+    ])
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.find('.stock-view__sell').exists()).toBe(false)
+    expect(wrapper.find('.stock-view__pick input').exists()).toBe(false)
+    expect(wrapper.text()).toContain('0박스')
   })
 
   it('원물 탭 전환 시 item_cd=FR010300으로 재조회', async () => {
@@ -170,7 +234,7 @@ describe('StockView', () => {
     expect(store.shipLines[1].item_cd).toBe('FR010202')
   })
 
-  it('T1~T4 헤더 단순화 + summary 제거 + 수량 min=1', async () => {
+  it('조정 시트: 헤더 단순화 + summary 제거 + 수량 min=1', async () => {
     const wrapper = await openSheet()
     const sheet = document.body.textContent || ''
     expect(sheet).toContain('신고 · 15kg · 25과 · 특')

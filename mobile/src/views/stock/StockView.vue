@@ -8,7 +8,6 @@ import type { StockItem, StockLog } from '@/api/stock'
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { ApiClientError } from '@/api/client'
 import OdsButton from '@/components/ods/OdsButton.vue'
-import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import { useAppStore } from '@/shared/stores/app'
@@ -452,61 +451,54 @@ function formatRegDt(dt: string) {
       </p>
     </div>
 
-    <!-- 재고 목록 -->
-    <div class="stock-view__list">
-      <OdsCard
+    <!-- 재고 목록 (1행 컴팩트 리스트) -->
+    <div class="stock-view__list" role="list">
+      <div
         v-for="row in filteredRows"
         :key="`${row.item_cd}_${row.variety_cd}_${row.grade_cd}_${row.size_cd}_${row.weight}_${row.storage_dt}`"
-        class="stock-view__card"
+        class="stock-view__row"
+        :class="{
+          'stock-view__row--selected': selectedKeys.includes(rowKey(row)),
+          'stock-view__row--zero': row.available_qty <= 0,
+        }"
+        role="listitem"
         @click="openAdjustSheet(row)"
       >
-        <!-- 카드 헤더 -->
-        <div class="stock-view__card-head">
-          <span class="stock-view__card-title">{{ cardTitle(row) }}</span>
-          <template v-if="isRaw">
-            <span class="stock-view__card-sub">{{ row.storage_dt }}</span>
-          </template>
-        </div>
-
-        <!-- 수량 표시 (Level 4) -->
-        <div class="stock-view__qty-row">
-          <!-- 가용재고가 핵심 -->
-          <div class="stock-view__qty-main">
-            <span class="stock-view__qty-val">{{ row.available_qty }}</span>
-            <span class="stock-view__qty-unit">{{ stockUnit(row.item_cd) }}</span>
-            <span class="stock-view__qty-lbl">가용</span>
-          </div>
-          <!-- 현재·배정 보조 -->
-          <div class="stock-view__qty-sub-row">
-            <span class="stock-view__qty-sub">현재 {{ row.real_qty }}</span>
-            <span v-if="row.reserved_qty > 0" class="stock-view__qty-sub">
-              · 배정 {{ row.reserved_qty }}
-            </span>
-          </div>
-        </div>
-
-        <!-- 소진 표시 -->
-        <p v-if="row.real_qty <= 0" class="stock-view__zero-badge">소진</p>
-        <div v-if="isSellable(row)" class="stock-view__sell-row">
-          <label class="stock-view__pick" @click.stop>
-            <input
-              type="checkbox"
-              :checked="selectedKeys.includes(rowKey(row))"
-              @click.prevent.stop="toggleSelect(row)"
-            >
-            선택
-          </label>
-          <OdsButton
-            type="button"
-            variant="secondary"
-            :block="false"
-            class="stock-view__sell"
-            @click.stop="sellProduct(row)"
+        <label
+          v-if="isSellable(row)"
+          class="stock-view__pick"
+          @click.stop
+        >
+          <input
+            type="checkbox"
+            :checked="selectedKeys.includes(rowKey(row))"
+            :aria-label="`${cardTitle(row)} 선택`"
+            @click.prevent.stop="toggleSelect(row)"
           >
-            판매
-          </OdsButton>
-        </div>
-      </OdsCard>
+        </label>
+        <span v-else class="stock-view__pick-spacer" aria-hidden="true" />
+
+        <span class="stock-view__row-title">{{ cardTitle(row) }}</span>
+
+        <span
+          class="stock-view__row-qty"
+          :class="{ 'stock-view__row-qty--muted': row.available_qty <= 0 }"
+        >
+          <strong>{{ row.available_qty }}</strong>{{ stockUnit(row.item_cd) }}
+        </span>
+
+        <OdsButton
+          v-if="isSellable(row)"
+          type="button"
+          variant="secondary"
+          :block="false"
+          class="stock-view__sell"
+          @click.stop="sellProduct(row)"
+        >
+          판매
+        </OdsButton>
+        <span v-else class="stock-view__sell-spacer" aria-hidden="true" />
+      </div>
     </div>
     <div v-if="selectedKeys.length" class="stock-view__batch">
       <OdsButton type="button" @click="sellSelected">선택 {{ selectedKeys.length }}건 판매</OdsButton>
@@ -712,88 +704,82 @@ function formatRegDt(dt: string) {
   color: var(--ods-color-text-secondary);
 }
 
-/* ── 재고 목록 ────────────────────────────────────────────────────── */
+/* ── 재고 목록 (1행 컴팩트) ───────────────────────────────────────── */
 .stock-view__list {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-8);
+  gap: 0;
+  background: var(--ods-color-white, #fff);
+  border-radius: var(--ods-radius-card);
+  overflow: hidden;
 }
-.stock-view__card {
+.stock-view__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--ods-space-8);
+  min-height: 48px;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-bottom: 1px solid var(--ods-color-border);
   cursor: pointer;
-  padding: var(--ods-space-12) var(--ods-space-16);
+  background: transparent;
 }
-.stock-view__card-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ods-space-8);
-  margin-bottom: var(--ods-space-8);
+.stock-view__row:last-child {
+  border-bottom: none;
 }
-.stock-view__card-title {
-  font: var(--ods-font-body-1);
+.stock-view__row--selected {
+  background: var(--ods-color-primary-subtle, #f0f7f4);
+}
+.stock-view__row-title {
+  min-width: 0;
+  font: var(--ods-font-body-2);
   font-weight: 600;
   color: var(--ods-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.stock-view__card-sub {
-  font: var(--ods-font-footnote);
-  color: var(--ods-color-text-secondary);
+.stock-view__row-qty {
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+  white-space: nowrap;
+  text-align: right;
 }
-
-/* ── 수량 표시 (Level 4) ──────────────────────────────────────────── */
-.stock-view__qty-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ods-space-8);
-}
-.stock-view__qty-main {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ods-space-4);
-}
-.stock-view__qty-val {
-  font-size: var(--ods-font-size-xl, 22px);
+.stock-view__row-qty strong {
   font-weight: 700;
   color: var(--ods-color-primary);
+  margin-right: 1px;
 }
-.stock-view__qty-unit {
-  font: var(--ods-font-body-2);
+.stock-view__row-qty--muted,
+.stock-view__row-qty--muted strong {
   color: var(--ods-color-text-secondary);
-}
-.stock-view__qty-lbl {
-  font: var(--ods-font-footnote);
-  color: var(--ods-color-text-secondary);
-  background: var(--ods-color-primary-subtle, #f0f7f4);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-.stock-view__qty-sub-row {
-  font: var(--ods-font-footnote);
-  color: var(--ods-color-text-tertiary, #999);
-}
-.stock-view__zero-badge {
-  display: inline-block;
-  font: var(--ods-font-footnote);
-  color: var(--ods-color-text-secondary);
-  background: var(--ods-color-surface);
-  border: 1px solid var(--ods-color-border);
-  border-radius: 4px;
-  padding: 1px 6px;
-  margin-top: var(--ods-space-4);
-}
-.stock-view__sell {
-  margin-top: 0;
-}
-.stock-view__sell-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ods-space-12);
-  margin-top: var(--ods-space-8);
+  font-weight: 500;
 }
 .stock-view__pick {
   display: flex;
   align-items: center;
-  gap: var(--ods-space-8);
-  font: var(--ods-font-form-help);
+  justify-content: center;
+  width: 20px;
+}
+.stock-view__pick input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ods-color-primary);
+  cursor: pointer;
+}
+.stock-view__pick-spacer,
+.stock-view__sell-spacer {
+  width: 20px;
+  height: 1px;
+}
+.stock-view__sell-spacer {
+  width: 52px;
+}
+.stock-view__sell {
+  margin-top: 0;
+  min-height: 32px;
+  padding: var(--ods-space-4) var(--ods-space-8);
+  white-space: nowrap;
 }
 .stock-view__batch {
   position: sticky;
