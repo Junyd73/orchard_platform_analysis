@@ -305,11 +305,63 @@ describe('SalesPreviewView 2B', () => {
     )
     const { wrapper } = await mountPreview()
     expect(wrapper.find('.page').classes()).toContain('page')
-    const style = wrapper.find('.page').attributes('style') || ''
     expect(wrapper.html()).not.toContain('2026-01-01')
     expect(wrapper.html()).not.toContain('2026-12-31')
     expect(wrapper.text()).not.toMatch(/LOT|포장일|저장일/)
-    void style
+    wrapper.unmount()
+  })
+
+  it('T1~T6 360/390 품목 2행 유지 · 소계 3행 분리 없음', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 3)
+    store.updateShipLine(0, { unit_price: 50000 })
+    const { wrapper } = await mountPreview()
+    const line = wrapper.find('[data-testid="sales-preview-line"]')
+    expect(line.find('.line__r1').exists()).toBe(true)
+    expect(line.find('.line__r2').exists()).toBe(true)
+    expect(line.findAll('.line__r1, .line__r2')).toHaveLength(2)
+    const r2Style = (wrapper.find('.line__r2').element as HTMLElement).className
+    expect(r2Style).toContain('line__r2')
+    // 소계는 r2 안 — 별도 row 클래스 없음
+    expect(line.find('.line__sub').element.parentElement?.classList.contains('line__r2')).toBe(true)
+    expect(wrapper.html()).not.toMatch(/grid-column:\s*1\s*\/\s*-1/)
+    wrapper.unmount()
+  })
+
+  it('T7~T11 배송비 clamp · 음수 방어 · 총액 미감소', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 2)
+    store.updateShipLine(0, { unit_price: 50000 })
+    store.setCustomer('C1', '홍길동')
+    const { wrapper } = await mountPreview()
+    const fee = wrapper.find('[data-testid="sales-preview-ship-fee"]')
+
+    await new DOMWrapper(fee.element).setValue('4000')
+    await flushPromises()
+    expect(store.shipFee).toBe(4000)
+    expect(wrapper.find('[data-testid="sales-preview-footer"]').text()).toContain('104,000')
+
+    await new DOMWrapper(fee.element).setValue('0')
+    await flushPromises()
+    expect(store.shipFee).toBe(0)
+
+    await new DOMWrapper(fee.element).setValue('-4000')
+    await flushPromises()
+    expect(store.shipFee).toBe(0)
+    expect(Number(store.shipFee)).toBeGreaterThanOrEqual(0)
+    expect(wrapper.find('[data-testid="sales-preview-footer"]').text()).toContain('100,000')
+    expect(wrapper.find('[data-testid="sales-preview-footer"]').text()).not.toContain('96,000')
+
+    // submit 방어: Store에 음수가 직접 들어간 경우
+    store.setDelivery({ shipFee: -1 })
+    await flushPromises()
+    expect(Number(store.shipFee)).toBeLessThan(0)
+    expect((wrapper.find('[data-testid="sales-preview-submit"]').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
+    await flushPromises()
+    expect(confirmShipment).not.toHaveBeenCalled()
+    // 합계는 safeShipFee(0) 기준 — 음수 배송비로 총액 감소 없음
+    expect(wrapper.find('[data-testid="sales-preview-footer"]').text()).toContain('100,000')
     wrapper.unmount()
   })
 

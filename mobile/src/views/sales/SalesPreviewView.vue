@@ -46,6 +46,7 @@ const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
 const MSG_NEED_ADDR = '택배는 받는분·연락처·주소가 필요합니다.'
+const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
 
@@ -85,11 +86,19 @@ const itemAmt = computed(() =>
 const totalQty = computed(() =>
   lines.value.reduce((s, ln) => s + Number(ln.qty), 0),
 )
-const payAmt = computed(() => itemAmt.value + Number(prefill.shipFee || 0))
+/** 배송비 표시·합계용 (음수/NaN → 0) */
+const safeShipFee = computed(() => normalizeShipFee(prefill.shipFee))
+const payAmt = computed(() => itemAmt.value + safeShipFee.value)
 const qtyIssue = computed(() => findShipQtyIssue(lines.value))
 const unitHint = computed(() =>
   lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
 )
+
+function normalizeShipFee(raw: unknown): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return Math.round(n)
+}
 
 const canSubmit = computed(() => {
   if (busy.value || successMsg.value) return false
@@ -97,6 +106,7 @@ const canSubmit = computed(() => {
   if (!String(prefill.custmId || '').trim()) return false
   if (qtyIssue.value) return false
   if (lines.value.some((ln) => Number(ln.unit_price) < 0)) return false
+  if (Number(prefill.shipFee) < 0) return false
   if (showAddress.value) {
     if (!prefill.rcvName.trim() || !prefill.rcvTel.trim() || !prefill.rcvAddr.trim()) {
       return false
@@ -143,6 +153,10 @@ function setPrice(idx: number, raw: string) {
   prefill.updateShipLine(idx, { unit_price: Number.isFinite(n) && n >= 0 ? n : 0 })
 }
 
+function setShipFee(raw: string) {
+  prefill.setDelivery({ shipFee: normalizeShipFee(raw) })
+}
+
 function removeLine(idx: number) {
   prefill.removeShipLine(idx)
 }
@@ -161,6 +175,7 @@ function validateBeforeConfirm(): string {
   if (!lines.value.length) return MSG_NO_PREFILL
   if (qtyIssue.value) return qtyIssue.value
   if (!String(prefill.custmId || '').trim()) return MSG_NEED_CUSTOMER
+  if (Number(prefill.shipFee) < 0) return MSG_SHIP_FEE_NEG
   if (showAddress.value) {
     if (!prefill.rcvName.trim() || !prefill.rcvTel.trim() || !prefill.rcvAddr.trim()) {
       return MSG_NEED_ADDR
@@ -180,7 +195,7 @@ async function onSubmit() {
     `${prefill.customerNm || prefill.custmId} / ${deliveryLabel(prefill.dlvryTp)}\n` +
     `${lines.value.length}품목 · 총 ${totalQty.value}${unitHint.value}\n` +
     `상품 ${formatOrderAmt(itemAmt.value)}원\n` +
-    `배송비 ${formatOrderAmt(prefill.shipFee)}원\n` +
+                `배송비 ${formatOrderAmt(safeShipFee.value)}원\n` +
     `최종 ${formatOrderAmt(payAmt.value)}원\n\n` +
     '판매를 확정하시겠습니까?'
   if (!window.confirm(confirmText)) return
@@ -197,7 +212,7 @@ async function onSubmit() {
         custmId: prefill.custmId,
         lines: lines.value,
         dlvryTp: prefill.dlvryTp,
-        shipFee: prefill.shipFee,
+        shipFee: safeShipFee.value,
         rcvName: prefill.rcvName,
         rcvTel: prefill.rcvTel,
         rcvAddr: prefill.rcvAddr,
@@ -428,7 +443,7 @@ onMounted(async () => {
             <p class="footer__amt">
               상품 {{ formatOrderAmt(itemAmt) }}원 · {{ LABEL_SHIP_FEE }}
               <OdsInput
-                :model-value="String(prefill.shipFee)"
+                :model-value="String(safeShipFee)"
                 type="number"
                 min="0"
                 step="1"
@@ -436,8 +451,9 @@ onMounted(async () => {
                 variant="form"
                 bare
                 class="footer__fee"
+                data-testid="sales-preview-ship-fee"
                 aria-label="배송비"
-                @update:model-value="prefill.setDelivery({ shipFee: Number($event) || 0 })"
+                @update:model-value="setShipFee($event)"
               />
               원
             </p>
@@ -562,25 +578,26 @@ onMounted(async () => {
   cursor: pointer;
 }
 .line__r2 {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--ods-space-6);
+  display: flex;
   align-items: center;
+  gap: var(--ods-space-4);
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 .qty {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
+  gap: 1px;
+  flex: 0 0 auto;
 }
 .qty__btn {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white, #fff);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
 }
@@ -590,18 +607,20 @@ onMounted(async () => {
 }
 .qty :deep(input.ods-input),
 .qty :deep(.qty__input.ods-input) {
-  width: 40px;
-  min-width: 40px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 2px;
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 1px;
   text-align: center;
   font-size: var(--ods-font-size-footnote, 12px);
 }
 .price {
   display: inline-flex;
   align-items: center;
-  gap: var(--ods-space-4);
+  gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .price__lbl {
@@ -612,20 +631,22 @@ onMounted(async () => {
 .price :deep(input.ods-input),
 .price :deep(.price__input.ods-input) {
   width: 100%;
-  min-width: 0;
-  max-width: 96px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 4px;
+  min-width: 52px;
+  max-width: 88px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 3px;
   text-align: right;
   font-size: var(--ods-font-size-footnote, 12px);
 }
 .line__sub {
-  justify-self: end;
+  flex: 0 0 auto;
+  margin-left: auto;
   font: var(--ods-font-footnote, 12px);
   font-weight: 700;
   color: var(--ods-color-text);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .lines__actions {
@@ -705,15 +726,32 @@ onMounted(async () => {
   font: var(--ods-font-body-2);
 }
 
-@media (max-width: 390px) {
+@media (max-width: 360px) {
   .line__r2 {
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-rows: auto auto;
+    gap: 2px;
   }
-  .line__sub {
-    grid-column: 1 / -1;
-    justify-self: end;
+  .qty__btn {
+    width: 24px;
+    height: 24px;
   }
+  .qty :deep(input.ods-input),
+  .qty :deep(.qty__input.ods-input) {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 24px;
+    min-height: 24px;
+  }
+  .price :deep(input.ods-input),
+  .price :deep(.price__input.ods-input) {
+    max-width: 72px;
+    min-width: 48px;
+    height: 24px;
+    min-height: 24px;
+  }
+}
+
+@media (max-width: 390px) {
   .footer {
     grid-template-columns: 1fr;
   }
