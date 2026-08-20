@@ -159,11 +159,11 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   }
 
   /**
-   * 신규 STOCK 판매 시작 여부.
-   * 이미 STOCK + shipLines 가 있으면 품목추가(헤더 유지), 그 외는 최초 진입.
+   * STOCK 판매 세션 여부.
+   * shipLines 가 비어도 source===STOCK 이면 동일 세션으로 유지한다.
    */
-  function isContinuingStockSale(): boolean {
-    return source.value === 'STOCK' && shipLines.value.length > 0
+  function isStockSaleSession(): boolean {
+    return source.value === 'STOCK'
   }
 
   /** 재고 선택으로 draft를 교체(기존 동작). 항상 신규 판매 시작으로 취급. */
@@ -180,25 +180,87 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   }
 
   /**
-   * 판매미리보기용 병합: 동일 stock 중복 line 금지, 기존 qty/단가 유지.
-   * 신규만 추가한다.
-   * 최초 STOCK 진입 시 고객/배송 초기화, 품목추가 병합 시 헤더 유지.
+   * 재고 판매 세션 보장.
+   * 이미 STOCK이면 헤더/라인 유지. 다른 source에서 전환 시에만 초기화.
    */
-  function mergeFromStockRows(rows: StockItem[]) {
-    const keepHeader = isContinuingStockSale()
+  function ensureStockSaleSession() {
+    if (isStockSaleSession()) {
+      shipMode.value = SHIP_MODE_DIRECT
+      orderNo.value = null
+      returnTo.value = 'stock'
+      allowModeChange.value = false
+      lastResult.value = null
+      return
+    }
     source.value = 'STOCK'
     lines.value = []
+    shipLines.value = []
     shipMode.value = SHIP_MODE_DIRECT
     orderNo.value = null
     returnTo.value = 'stock'
     allowModeChange.value = false
     lastResult.value = null
-    if (!keepHeader) {
-      resetStockSaleHeader()
-      // 주문/생산 draft 잔여 line 제거 — 신규 재고판매만 시작
-      shipLines.value = []
-    }
+    resetStockSaleHeader()
+  }
 
+  function getStockLine(key: string): ShipDraftLine | undefined {
+    return shipLines.value.find((ln) => stockDraftKey(ln) === key)
+  }
+
+  function hasStockLine(key: string): boolean {
+    return Boolean(getStockLine(key))
+  }
+
+  function clampStockQty(qty: number, available: number): number {
+    const max = Math.max(1, Math.floor(Number(available) || 0))
+    const n = Math.floor(Number(qty))
+    if (!Number.isFinite(n) || n < 1) return 1
+    return Math.min(n, max)
+  }
+
+  /** 미등록 상품 담기. 동일 key 중복 line 금지(있으면 qty만 갱신). */
+  function addStockLine(row: StockItem, qty: number) {
+    ensureStockSaleSession()
+    const draft = draftFromStock(row)
+    const key = stockDraftKey(draft)
+    const available = Number(row.available_qty) || 0
+    draft.qty = clampStockQty(qty, available)
+    draft.available_qty = available
+    const idx = shipLines.value.findIndex((ln) => stockDraftKey(ln) === key)
+    if (idx >= 0) {
+      shipLines.value = shipLines.value.map((ln, i) =>
+        i === idx ? { ...ln, qty: draft.qty, available_qty: available } : ln,
+      )
+      return
+    }
+    shipLines.value = [...shipLines.value, draft]
+  }
+
+  function updateStockLineQty(key: string, qty: number) {
+    const idx = shipLines.value.findIndex((ln) => stockDraftKey(ln) === key)
+    if (idx < 0) return
+    const cur = shipLines.value[idx]
+    const available = cur.available_qty != null ? Number(cur.available_qty) : Number(qty)
+    const nextQty = clampStockQty(qty, available > 0 ? available : qty)
+    shipLines.value = shipLines.value.map((ln, i) =>
+      i === idx ? { ...ln, qty: nextQty } : ln,
+    )
+  }
+
+  function removeStockLineByKey(key: string) {
+    shipLines.value = shipLines.value.filter((ln) => stockDraftKey(ln) !== key)
+    // source/header 유지 — 빈 shipLines + STOCK 세션 허용
+  }
+
+  const stockDraftTotalQty = computed(() =>
+    source.value === 'STOCK'
+      ? shipLines.value.reduce((s, ln) => s + Number(ln.qty || 0), 0)
+      : 0,
+  )
+
+  /** 동일 stock 중복 line 금지, 기존 qty 유지. 신규만 추가(호환용). */
+  function mergeFromStockRows(rows: StockItem[]) {
+    ensureStockSaleSession()
     const next = [...shipLines.value]
     const seen = new Set(next.map((ln) => stockDraftKey(ln)))
     for (const row of rows) {
@@ -313,12 +375,19 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     dlvryMsg,
     draftCount,
     draftKeys,
+    stockDraftTotalQty,
     setFromProduction,
     setFromOrder,
     setFromOrderLines,
     setFromStock,
     setFromStockRows,
     mergeFromStockRows,
+    ensureStockSaleSession,
+    getStockLine,
+    hasStockLine,
+    addStockLine,
+    updateStockLineQty,
+    removeStockLineByKey,
     removeShipLine,
     updateShipLine,
     setCustomer,
@@ -329,5 +398,6 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     remainingFor,
     clear,
     hasDraftKey,
+    isStockSaleSession,
   }
 })
