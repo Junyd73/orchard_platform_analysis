@@ -73,19 +73,25 @@ async function bumpPlus(wrapper: ReturnType<typeof mount>, index = 0, times = 1)
 }
 
 async function clickAdd(wrapper: ReturnType<typeof mount>, index = 0) {
-  const btns = wrapper.findAll('[data-testid="stock-row-add"]')
+  const btns = wrapper.findAll('[data-testid="stock-row-add"]').filter(
+    (b) => !(b.element as HTMLButtonElement).disabled,
+  )
   await btns[index].trigger('click')
   await flushPromises()
 }
 
 async function clickUpdate(wrapper: ReturnType<typeof mount>, index = 0) {
-  const btns = wrapper.findAll('[data-testid="stock-row-update"]')
+  const btns = wrapper.findAll('[data-testid="stock-row-update"]').filter(
+    (b) => !(b.element as HTMLButtonElement).disabled,
+  )
   await btns[index].trigger('click')
   await flushPromises()
 }
 
 async function clickRemove(wrapper: ReturnType<typeof mount>, index = 0) {
-  const btns = wrapper.findAll('[data-testid="stock-row-remove"]')
+  const btns = wrapper.findAll('[data-testid="stock-row-remove"]').filter(
+    (b) => !(b.element as HTMLButtonElement).disabled,
+  )
   await btns[index].trigger('click')
   await flushPromises()
 }
@@ -231,7 +237,8 @@ describe('StockView', () => {
     expect(head.exists()).toBe(true)
     expect(head.text()).toContain('상품')
     expect(head.text()).toContain('가용수량')
-    expect(head.text()).toContain('포장수량')
+    expect(head.text()).toContain('판매수량')
+    expect(head.text()).not.toContain('포장수량')
   })
 
   it('Floating Bar는 width 70% · 가운데 정렬', async () => {
@@ -341,7 +348,8 @@ describe('StockView', () => {
     store.removeShipLine(0)
     await flushPromises()
     expect(wrapper.find('[data-testid="stock-row-add"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="stock-row-update"]').exists()).toBe(false)
+    expect((wrapper.find('[data-testid="stock-row-add"]').element as HTMLButtonElement).disabled).toBe(false)
+    expect((wrapper.find('[data-testid="stock-row-update"]').element as HTMLButtonElement).disabled).toBe(true)
     wrapper.unmount()
   })
 
@@ -452,17 +460,55 @@ describe('StockView', () => {
     const wrapper = mount(StockView, { global: { plugins: [router()] } })
     await flushPromises()
     await clickAdd(wrapper)
-    // already in cart — no second add; update path only
-    expect(wrapper.findAll('[data-testid="stock-row-add"]')).toHaveLength(0)
+    // 담긴 뒤 카트는 disabled — 수정/비우기만 활성
+    expect((wrapper.find('[data-testid="stock-row-add"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.find('[data-testid="stock-row-update"]').element as HTMLButtonElement).disabled).toBe(false)
     expect(useSalesPrefillStore().shipLines).toHaveLength(1)
     wrapper.unmount()
   })
 
-  it('담기 컨트롤 클릭은 조정 시트를 열지 않음', async () => {
-    const wrapper = mount(StockView, { global: { plugins: [router()], attachTo: document.body } })
+  it('조회: 품종/중량/크기/등급 + 돋보기/새로고침 배치', async () => {
+    listFruitStock.mockResolvedValue([
+      stockRow(),
+      stockRow({
+        grade_cd: 'GR010200', grade_nm: '상', size_cd: 'FR020102', size_nm: '30과',
+        weight: 7.5, available_qty: 5,
+      }),
+    ])
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
     await flushPromises()
+    const queryCard = wrapper.find('[data-testid="stock-query-bar"]')
+    expect(queryCard.exists()).toBe(true)
+    expect(queryCard.classes()).toContain('ods-card')
+    expect(queryCard.attributes('aria-label')).toBe('조회조건')
+    expect(wrapper.find('[data-testid="stock-filter-variety"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stock-filter-weight"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stock-filter-size"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stock-filter-grade"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stock-search"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stock-refresh"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="stock-sale-row"]')).toHaveLength(2)
+
+    await wrapper.find('[data-testid="stock-filter-grade"]').setValue('GR010200')
+    await wrapper.find('[data-testid="stock-search"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="stock-sale-row"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('상')
+    wrapper.unmount()
+  })
+
+  it('아이콘 3개 고정 · 미담기 시 카트만 활성', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    const icons = wrapper.find('[data-testid="stock-row-icons"]')
+    expect(icons.findAll('button')).toHaveLength(3)
+    expect((wrapper.find('[data-testid="stock-row-add"]').element as HTMLButtonElement).disabled).toBe(false)
+    expect((wrapper.find('[data-testid="stock-row-update"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.find('[data-testid="stock-row-remove"]').element as HTMLButtonElement).disabled).toBe(true)
     await clickAdd(wrapper)
-    expect(document.querySelector('.stock-log-sheet')).toBeNull()
+    expect((wrapper.find('[data-testid="stock-row-add"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.find('[data-testid="stock-row-update"]').element as HTMLButtonElement).disabled).toBe(false)
+    expect((wrapper.find('[data-testid="stock-row-remove"]').element as HTMLButtonElement).disabled).toBe(false)
     wrapper.unmount()
   })
 

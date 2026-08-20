@@ -7,8 +7,8 @@
 | 항목 | SHA / 브랜치 |
 |------|----------------|
 | base | `c6e5edb93fa5234b7314ea9135aa48204138461d` (`main`) |
-| feature | `7bc54293df34e1bcbfdc5f6f7de4bb4089610ffa` (feat: sales preview workflow) |
-| prior feature | `a8bd39a3edb8feaf502c234c3ae181315028dc5d` |
+| feature | `c6a6a0926f387af3dd1269ace306a94dd9096a16` (query card + filters) |
+| prior feature | `7bc54293df34e1bcbfdc5f6f7de4bb4089610ffa` |
 | branch | `cursor/stage6-ship-stock-ux` |
 
 ## Review branch 목적
@@ -173,3 +173,16 @@ ui/pages/stock_page.py
 |------|-----|
 | private SHA | `f6e35c65fcfb62c1e06ed60c28cf0879d37c747d` |
 | 내용 | fixed 판매미리보기 바 · draft→판매예정 · STOCK 헤더 초기화/유지 · 배송 schema 검증 테스트 |
+
+## 재고 목록 UX — 조회조건 카드 (2026-08-20)
+
+| 항목 | 값 |
+|------|-----|
+| private branch | `cursor/stage6-ship-stock-ux` |
+| private SHA | `c6a6a0926f387af3dd1269ace306a94dd9096a16` |
+| 내용 | 포장수량→판매수량 · 품종/중량/크기/등급 조회 · 돋보기/새로고침 · 조회조건을 OdsCard로 상품 리스트와 구분 |
+
+### 핵심 파일
+
+- `mobile/src/views/stock/StockView.vue`
+- `mobile/src/__tests__/stockView.spec.ts`

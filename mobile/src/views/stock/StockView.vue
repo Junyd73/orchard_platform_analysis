@@ -8,6 +8,7 @@ import type { StockItem, StockLog } from '@/api/stock'
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { ApiClientError } from '@/api/client'
 import OdsButton from '@/components/ods/OdsButton.vue'
+import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import { useAppStore } from '@/composables/stores/app'
@@ -53,6 +54,17 @@ const includeZero = ref(false)
 const loading     = ref(false)
 const loadError   = ref('')
 const rows        = ref<StockItem[]>([])
+
+/** 조회 조건 (리스트박스 초안) / 적용값 — 빈 문자열 = 전체 */
+const FILTER_ALL = ''
+const draftVariety = ref(FILTER_ALL)
+const draftWeight = ref(FILTER_ALL)
+const draftSize = ref(FILTER_ALL)
+const draftGrade = ref(FILTER_ALL)
+const appliedVariety = ref(FILTER_ALL)
+const appliedWeight = ref(FILTER_ALL)
+const appliedSize = ref(FILTER_ALL)
+const appliedGrade = ref(FILTER_ALL)
 
 // 이력 모달
 const logTarget    = ref<StockItem | null>(null)
@@ -138,11 +150,85 @@ watch(adjustReason, () => {
 // ── computed ─────────────────────────────────────────────────────────
 const isRaw = computed(() => stockType.value === ITEM_RAW)
 
+type FilterOption = { value: string; label: string }
+
+function uniqOptions(
+  items: StockItem[],
+  pick: (r: StockItem) => { value: string; label: string },
+): FilterOption[] {
+  const map = new Map<string, string>()
+  for (const r of items) {
+    const { value, label } = pick(r)
+    if (!value || map.has(value)) continue
+    map.set(value, label || value)
+  }
+  return [...map.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ko'))
+}
+
+const varietyOptions = computed(() =>
+  uniqOptions(rows.value, (r) => ({
+    value: r.variety_cd,
+    label: r.variety_nm || r.variety_cd,
+  })),
+)
+const weightOptions = computed(() =>
+  uniqOptions(rows.value, (r) => ({
+    value: String(r.weight),
+    label: r.weight > 0 ? `${r.weight}kg` : String(r.weight),
+  })),
+)
+const sizeOptions = computed(() =>
+  uniqOptions(rows.value, (r) => ({
+    value: r.size_cd,
+    label: r.size_nm || r.size_cd,
+  })),
+)
+const gradeOptions = computed(() =>
+  uniqOptions(rows.value, (r) => ({
+    value: r.grade_cd,
+    label: r.grade_nm || r.grade_cd,
+  })),
+)
+
 const listEntries = computed(() =>
   buildStockListEntries(rows.value, { raw: isRaw.value }),
 )
 
-const filteredEntries = computed(() => listEntries.value)
+const filteredEntries = computed(() => {
+  const v = appliedVariety.value
+  const w = appliedWeight.value
+  const s = appliedSize.value
+  const g = appliedGrade.value
+  if (!v && !w && !s && !g) return listEntries.value
+  return listEntries.value.filter((entry) => {
+    const row = entry.row
+    if (v && row.variety_cd !== v) return false
+    if (w && String(row.weight) !== w) return false
+    if (s && row.size_cd !== s) return false
+    if (g && row.grade_cd !== g) return false
+    return true
+  })
+})
+
+function resetQueryFilters() {
+  draftVariety.value = FILTER_ALL
+  draftWeight.value = FILTER_ALL
+  draftSize.value = FILTER_ALL
+  draftGrade.value = FILTER_ALL
+  appliedVariety.value = FILTER_ALL
+  appliedWeight.value = FILTER_ALL
+  appliedSize.value = FILTER_ALL
+  appliedGrade.value = FILTER_ALL
+}
+
+function applyQuerySearch() {
+  appliedVariety.value = draftVariety.value
+  appliedWeight.value = draftWeight.value
+  appliedSize.value = draftSize.value
+  appliedGrade.value = draftGrade.value
+}
 
 // ── 데이터 로드 ───────────────────────────────────────────────────────
 async function load() {
@@ -173,7 +259,11 @@ async function load() {
   }
 }
 
-watch([stockType, includeZero, farmCd], load, { immediate: true })
+watch([includeZero, farmCd], load, { immediate: true })
+watch(stockType, () => {
+  resetQueryFilters()
+  void load()
+})
 
 async function loadAdjustReasons() {
   try {
@@ -546,14 +636,80 @@ const salesFabStyle = {
           v-model="includeZero"
           type="checkbox"
           class="stock-view__filter-check"
-          aria-label="소진 재고 포함"
+          aria-label="재고(0)포함"
         />
-        <span>소진 포함</span>
+        <span>재고(0)포함</span>
       </label>
-      <button type="button" class="stock-view__refresh-btn" :disabled="loading" @click="load">
-        {{ loading ? '로딩 중…' : '새로고침' }}
-      </button>
     </div>
+
+    <!-- 조회 조건: 상품 리스트와 구분되는 카드 -->
+    <OdsCard class="stock-view__query-card" aria-label="조회조건" data-testid="stock-query-bar">
+      <div class="stock-view__query-bar">
+        <OdsSelect
+          v-model="draftVariety"
+          class="stock-view__query-select"
+          aria-label="품종"
+          data-testid="stock-filter-variety"
+        >
+          <option :value="FILTER_ALL">품종</option>
+          <option v-for="o in varietyOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </OdsSelect>
+        <OdsSelect
+          v-model="draftWeight"
+          class="stock-view__query-select"
+          aria-label="중량"
+          data-testid="stock-filter-weight"
+        >
+          <option :value="FILTER_ALL">중량</option>
+          <option v-for="o in weightOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </OdsSelect>
+        <OdsSelect
+          v-model="draftSize"
+          class="stock-view__query-select"
+          aria-label="크기"
+          data-testid="stock-filter-size"
+        >
+          <option :value="FILTER_ALL">크기</option>
+          <option v-for="o in sizeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </OdsSelect>
+        <OdsSelect
+          v-model="draftGrade"
+          class="stock-view__query-select"
+          aria-label="등급"
+          data-testid="stock-filter-grade"
+        >
+          <option :value="FILTER_ALL">등급</option>
+          <option v-for="o in gradeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </OdsSelect>
+        <button
+          type="button"
+          class="stock-view__query-btn"
+          data-testid="stock-search"
+          aria-label="조회"
+          title="조회"
+          @click="applyQuerySearch"
+        >
+          <svg class="stock-view__query-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5.2" stroke="currentColor" stroke-width="1.6" />
+            <path d="M12.5 12.5L16.2 16.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="stock-view__refresh-btn"
+          data-testid="stock-refresh"
+          :disabled="loading"
+          :aria-label="loading ? '로딩 중' : '새로고침'"
+          :title="loading ? '로딩 중…' : '새로고침'"
+          @click="load"
+        >
+          <svg class="stock-view__refresh-icon" :class="{ 'is-spinning': loading }" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M16.2 10a6.2 6.2 0 11-1.7-4.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <path d="M14.2 3.8v3.4h3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
+    </OdsCard>
 
     <!-- 오류 -->
     <p v-if="loadError" class="stock-view__error">{{ loadError }}</p>
@@ -562,7 +718,7 @@ const salesFabStyle = {
     <div v-if="!loading && !loadError && filteredEntries.length === 0" class="stock-view__empty">
       <p class="stock-view__empty-title">재고 없음</p>
       <p class="stock-view__empty-desc">
-        {{ includeZero ? '등록된 재고가 없습니다.' : '현재 재고가 없습니다. 소진 포함을 선택하면 볼 수 있습니다.' }}
+        {{ includeZero ? '등록된 재고가 없습니다.' : '현재 재고가 없습니다. 재고(0)포함을 선택하면 볼 수 있습니다.' }}
       </p>
     </div>
 
@@ -576,7 +732,7 @@ const salesFabStyle = {
       <div class="stock-view__list-head" role="row" data-testid="stock-list-head">
         <span class="stock-view__head-title">상품</span>
         <span class="stock-view__head-qty">가용수량</span>
-        <span class="stock-view__head-pack">포장수량</span>
+        <span class="stock-view__head-pack">판매수량</span>
       </div>
       <div
         v-for="entry in filteredEntries"
@@ -633,36 +789,53 @@ const salesFabStyle = {
                 +
               </button>
             </div>
-            <template v-if="isInCart(entry.row)">
-              <OdsButton
-                type="button"
-                :block="false"
-                class="stock-view__cart-action"
-                data-testid="stock-row-update"
-                @click="updateCartQty(entry.row)"
-              >
-                수정
-              </OdsButton>
+            <!-- 아이콘 3개 고정: 담기 / 수정 / 비우기 — 상황에 따라 enabled -->
+            <div class="stock-view__icon-slot" data-testid="stock-row-icons">
               <button
                 type="button"
-                class="stock-view__cart-remove"
+                class="stock-view__icon-btn stock-view__icon-btn--add"
+                data-testid="stock-row-add"
+                :disabled="isInCart(entry.row)"
+                :aria-label="`${cardTitle(entry.row)} 담기`"
+                title="담기"
+                @click="addToCart(entry.row)"
+              >
+                <svg class="stock-view__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M3.5 5h1.2l1.1 8.2a1.4 1.4 0 001.4 1.2h6.6a1.4 1.4 0 001.4-1.15L16.2 7H6.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M8.2 16.6a.9.9 0 100 1.8.9.9 0 000-1.8zM14 16.6a.9.9 0 100 1.8.9.9 0 000-1.8z" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="stock-view__icon-btn stock-view__icon-btn--update"
+                data-testid="stock-row-update"
+                :disabled="!isInCart(entry.row)"
+                :aria-label="`${cardTitle(entry.row)} 수량 수정`"
+                title="수정"
+                @click="updateCartQty(entry.row)"
+              >
+                <svg class="stock-view__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M12.2 3.6l4.2 4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                  <path d="M4 16l.7-3.6L13.2 4l2.8 2.8L7.6 15.3 4 16z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="stock-view__icon-btn stock-view__icon-btn--remove"
                 data-testid="stock-row-remove"
+                :disabled="!isInCart(entry.row)"
                 :aria-label="`${cardTitle(entry.row)} 판매예정 제거`"
+                title="비우기"
                 @click="removeFromCart(entry.row)"
               >
-                ×
+                <svg class="stock-view__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M5.2 6.2h9.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                  <path d="M8 4.2h4l.8 2H7.2L8 4.2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+                  <path d="M6.4 6.2l.7 9.2a1.4 1.4 0 001.4 1.3h3a1.4 1.4 0 001.4-1.3l.7-9.2" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+                  <path d="M8.6 9.2v5M11.4 9.2v5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                </svg>
               </button>
-            </template>
-            <OdsButton
-              v-else
-              type="button"
-              :block="false"
-              class="stock-view__cart-action"
-              data-testid="stock-row-add"
-              @click="addToCart(entry.row)"
-            >
-              담기
-            </OdsButton>
+            </div>
           </div>
         </template>
         <span
@@ -900,27 +1073,73 @@ const salesFabStyle = {
   display: flex;
   align-items: center;
   gap: var(--ods-space-4);
-  font: var(--ods-font-footnote);
+  font-size: var(--ods-font-size-footnote, 12px);
+  line-height: 1.35;
+  font-weight: 500;
   color: var(--ods-color-text-secondary);
   cursor: pointer;
 }
 .stock-view__filter-check {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   accent-color: var(--ods-color-primary);
   cursor: pointer;
 }
+.stock-view__query-card {
+  padding: var(--ods-space-8) var(--ods-space-12);
+  background: var(--ods-color-bg-muted);
+  box-shadow: none;
+}
+.stock-view__query-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 28px 28px;
+  align-items: center;
+  gap: var(--ods-space-4);
+}
+.stock-view__query-select {
+  min-width: 0;
+  width: 100%;
+}
+.stock-view__query-bar :deep(select.ods-select) {
+  width: 100%;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 4px;
+  font-size: var(--ods-font-size-footnote, 12px);
+  line-height: 1.2;
+}
+.stock-view__query-btn,
 .stock-view__refresh-btn {
-  font: var(--ods-font-footnote);
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--ods-color-primary);
   background: transparent;
-  border: 1px solid var(--ods-color-primary);
+  border: none;
   border-radius: var(--ods-radius-button);
-  padding: var(--ods-space-4) var(--ods-space-8);
   cursor: pointer;
 }
+.stock-view__query-btn:disabled,
 .stock-view__refresh-btn:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+.stock-view__query-icon,
+.stock-view__refresh-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.stock-view__refresh-icon.is-spinning {
+  animation: stock-view-spin 0.8s linear infinite;
+}
+@keyframes stock-view-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ── 오류/빈 상태 ─────────────────────────────────────────────────── */
@@ -944,64 +1163,64 @@ const salesFabStyle = {
   color: var(--ods-color-text-secondary);
 }
 
-/* ── 재고 목록 (1행 compact) ─────────────────────────────────────── */
+/* ── 재고 목록 (1행 compact · 컬럼 정렬) ──────────────────────────── */
 .stock-view__list {
+  --stock-col-qty: 3.25rem;
+  --stock-col-stepper: 5.75rem;
+  --stock-col-icons: 5.25rem; /* 28px × 3 */
   display: flex;
   flex-direction: column;
   gap: 0;
+  margin: 0 calc(var(--ods-space-16) * -1); /* 화면 좌우에 맞춤 */
   background: var(--ods-color-white, #fff);
-  border-radius: var(--ods-radius-card);
+  border-radius: 0;
   overflow: hidden;
 }
-/* 리스트 본문과 동일 폰트 크기 (body-2) */
+/* 리스트 본문 — footnote(12px)로 한 단계 축소 */
 .stock-view__list-head,
 .stock-view__row,
 .stock-view__row-title,
 .stock-view__row-qty,
-.stock-view__row-qty strong,
-.stock-view__cart-action {
-  font-size: var(--ods-font-size-body-2, 14px);
-  line-height: var(--ods-line-height-body-2, 1.4);
+.stock-view__row-qty strong {
+  font-size: var(--ods-font-size-footnote, 12px);
+  line-height: 1.35;
+}
+.stock-view__list-head,
+.stock-view__row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    var(--stock-col-qty)
+    var(--stock-col-stepper)
+    var(--stock-col-icons);
+  align-items: center;
+  column-gap: var(--ods-space-6);
+  padding: var(--ods-space-4) var(--ods-space-16);
 }
 .stock-view__list-head {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--ods-space-6);
-  min-height: 36px;
-  padding: var(--ods-space-6) var(--ods-space-12);
+  min-height: 32px;
   border-bottom: 1px solid var(--ods-color-border);
-  background: var(--ods-color-bg-muted, #f7f5f0);
+  background: transparent;
   color: var(--ods-color-text-secondary);
   font-weight: 600;
   cursor: default;
   user-select: none;
 }
 .stock-view__head-title {
-  flex: 1 1 auto;
   min-width: 0;
   white-space: nowrap;
 }
 .stock-view__head-qty {
-  flex: 0 0 auto;
   white-space: nowrap;
   text-align: right;
-  min-width: 3.5rem;
 }
 .stock-view__head-pack {
-  flex: 0 0 auto;
+  grid-column: 3;
   white-space: nowrap;
-  /* stepper(~98px) + 담기 버튼 영역과 대략 정렬 */
-  min-width: 7.5rem;
   text-align: center;
 }
 .stock-view__row {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--ods-space-6);
-  min-height: 44px;
-  padding: var(--ods-space-6) var(--ods-space-12);
+  min-height: 40px;
   border-bottom: 1px solid var(--ods-color-border);
   cursor: pointer;
   background: transparent;
@@ -1013,7 +1232,6 @@ const salesFabStyle = {
   background: var(--ods-color-primary-subtle, #f0f7f4);
 }
 .stock-view__row-title {
-  flex: 1 1 auto;
   min-width: 0;
   font-weight: 500;
   color: var(--ods-color-text);
@@ -1022,8 +1240,6 @@ const salesFabStyle = {
   text-overflow: ellipsis;
 }
 .stock-view__row-qty {
-  flex: 0 0 auto;
-  min-width: 3.5rem;
   text-align: right;
   font-weight: 500;
   color: var(--ods-color-text);
@@ -1040,30 +1256,30 @@ const salesFabStyle = {
   font-weight: 500;
 }
 .stock-view__row-actions {
-  flex: 0 0 auto;
-  display: inline-flex;
-  flex-wrap: nowrap;
+  grid-column: 3 / 5;
+  display: grid;
+  grid-template-columns: var(--stock-col-stepper) var(--stock-col-icons);
   align-items: center;
-  gap: var(--ods-space-4);
-  min-width: 7.5rem;
-  justify-content: flex-end;
+  column-gap: var(--ods-space-6);
+  min-width: 0;
 }
 .stock-view__qty-stepper {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   flex-shrink: 0;
 }
 .stock-view__qty-btn {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
   padding: 0;
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white, #fff);
   color: var(--ods-color-text);
-  font-size: var(--ods-font-size-body-2, 14px);
+  font-size: var(--ods-font-size-footnote, 12px);
   line-height: 1;
   cursor: pointer;
 }
@@ -1073,17 +1289,17 @@ const salesFabStyle = {
 }
 /* bare OdsInput = root 자체가 input.ods-input — 자식 input 셀렉터는 매칭 안 됨 */
 :deep(input.stock-view__qty-input.ods-input) {
-  width: 38px;
-  min-width: 38px;
-  max-width: 40px;
-  height: 28px;
-  min-height: 28px;
-  max-height: 30px;
+  width: 34px;
+  min-width: 34px;
+  max-width: 36px;
+  height: 26px;
+  min-height: 26px;
+  max-height: 28px;
   box-sizing: border-box;
-  padding: 0 4px;
+  padding: 0 2px;
   margin: 0;
   text-align: center;
-  font-size: var(--ods-font-size-body-2, 14px);
+  font-size: var(--ods-font-size-footnote, 12px);
   line-height: 1.2;
   font-weight: 500;
   color: var(--ods-color-text);
@@ -1096,26 +1312,46 @@ const salesFabStyle = {
   -webkit-appearance: none;
   margin: 0;
 }
-.stock-view__cart-action {
-  min-height: 28px !important;
-  padding: 0 var(--ods-space-6) !important;
-  font-size: var(--ods-font-size-body-2, 14px) !important;
-  font-weight: 500 !important;
-  flex-shrink: 0;
-  white-space: nowrap;
+/* 아이콘 3칸 고정 슬롯 — enabled만 진하게 */
+.stock-view__icon-slot {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  justify-content: end;
+  align-items: center;
+  width: var(--stock-col-icons);
 }
-.stock-view__cart-remove {
+.stock-view__icon-btn {
   width: 28px;
   height: 28px;
   min-width: 28px;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
-  background: transparent;
-  color: var(--ods-color-text-secondary);
-  font-size: 18px;
-  line-height: 1;
+  border-radius: 0;
   cursor: pointer;
   flex-shrink: 0;
+  background: transparent;
+}
+.stock-view__icon-btn:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+  color: var(--ods-color-text-secondary) !important;
+}
+.stock-view__icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.stock-view__icon-btn--add {
+  color: var(--ods-color-primary);
+}
+.stock-view__icon-btn--update {
+  color: var(--ods-color-primary);
+}
+.stock-view__icon-btn--remove {
+  color: var(--ods-color-danger, #c53030);
 }
 .stock-adjust-pick-list {
   list-style: none;
@@ -1165,12 +1401,12 @@ const salesFabStyle = {
   gap: var(--ods-space-8);
   min-height: var(--stock-batch-bar-h, 50px);
   box-sizing: border-box;
-  padding: var(--ods-space-6) max(var(--ods-space-12), env(safe-area-inset-left, 0px))
-    var(--ods-space-6) max(var(--ods-space-12), env(safe-area-inset-right, 0px));
-  background: var(--ods-color-white, #fff);
-  border: 1px solid var(--ods-color-border);
+  /* 좌우 여백 확대 (12 → 20) */
+  padding: var(--ods-space-8) 20px;
+  background: var(--ods-color-primary-subtle, #e8f5ee);
+  border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 10px rgba(46, 125, 50, 0.12);
 }
 .stock-view__batch-count {
   font: var(--ods-font-body-2);
