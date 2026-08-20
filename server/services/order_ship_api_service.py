@@ -27,9 +27,40 @@ from core.order_ship_service import (  # noqa: E402
     ShipLineIn,
     ShipValidationError,
 )
+from core.order_ship_delivery import ShipDeliveryAllocIn  # noqa: E402
 
 
 def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfirmIn:
+    lines: list[ShipLineIn] = []
+    for ln in body.lines:
+        allocs = None
+        if ln.delivery_allocations is not None:
+            allocs = [
+                ShipDeliveryAllocIn(
+                    qty=float(a.qty),
+                    rcv_name=a.rcv_name or "",
+                    rcv_tel=a.rcv_tel or "",
+                    rcv_addr=a.rcv_addr or "",
+                    dlvry_msg=a.dlvry_msg or "",
+                    ship_fee=float(a.ship_fee or 0),
+                )
+                for a in ln.delivery_allocations
+            ]
+        lines.append(
+            ShipLineIn(
+                qty=ln.qty,
+                order_detail_id=ln.order_detail_id,
+                item_cd=ln.item_cd,
+                variety_cd=ln.variety_cd,
+                grade_cd=ln.grade_cd,
+                size_cd=ln.size_cd,
+                weight=ln.weight,
+                harvest_year=ln.harvest_year,
+                wh_cd=ln.wh_cd,
+                unit_price=ln.unit_price,
+                delivery_allocations=allocs,
+            )
+        )
     return ShipConfirmIn(
         farm_cd=farm_cd,
         ship_mode=body.ship_mode,
@@ -44,21 +75,7 @@ def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfir
         rcv_tel=getattr(body, "rcv_tel", "") or "",
         rcv_addr=getattr(body, "rcv_addr", "") or "",
         dlvry_msg=getattr(body, "dlvry_msg", "") or "",
-        lines=[
-            ShipLineIn(
-                qty=ln.qty,
-                order_detail_id=ln.order_detail_id,
-                item_cd=ln.item_cd,
-                variety_cd=ln.variety_cd,
-                grade_cd=ln.grade_cd,
-                size_cd=ln.size_cd,
-                weight=ln.weight,
-                harvest_year=ln.harvest_year,
-                wh_cd=ln.wh_cd,
-                unit_price=ln.unit_price,
-            )
-            for ln in body.lines
-        ],
+        lines=lines,
     )
 
 

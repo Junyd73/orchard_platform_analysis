@@ -2,6 +2,15 @@
 
 export type ShipMode = 'STOCK' | 'DIRECT'
 
+export type ShipDeliveryAllocation = {
+  qty: number
+  rcv_name: string
+  rcv_tel: string
+  rcv_addr: string
+  dlvry_msg?: string
+  ship_fee: number
+}
+
 export type ShipConfirmLine = {
   qty: number
   order_detail_id?: string | null
@@ -13,6 +22,8 @@ export type ShipConfirmLine = {
   harvest_year?: number
   wh_cd?: string
   unit_price?: number
+  /** null/미전송 = legacy. 배열 = 2C STOCK 택배 */
+  delivery_allocations?: ShipDeliveryAllocation[] | null
 }
 
 export type ShipConfirmRequest = {

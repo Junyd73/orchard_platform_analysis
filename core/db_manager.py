@@ -294,6 +294,12 @@ class DBManager:
 
         return ensure_sales_stock_trace_schema(self.conn)
 
+    def ensure_sales_delivery_schema(self):
+        """Stage 6 보완 2C 다배송지 컬럼. connect()에서 호출하지 않음."""
+        from core.sales_delivery_schema import ensure_sales_delivery_schema
+
+        return ensure_sales_delivery_schema(self.conn)
+
     def ensure_sales_workflow_schema(self):
         """판매 업무상태/유입경로 컬럼 보정."""
         try:

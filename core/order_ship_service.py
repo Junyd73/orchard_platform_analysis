@@ -10,6 +10,7 @@ from typing import Any
 from core.ops_biz_date import now_ops_str, today_ops
 from core.order_alloc_constants import COL_ALLOCATED_QTY, TABLE_ORDER_ALLOC
 from core.order_constants import (
+    DELIVERY_TP_PARCEL_CD,
     ORDER_STATUS_CANCEL_CD,
     ORDER_STATUS_DELIVERED_CD,
     ORDER_STATUS_PREP_CD,
@@ -20,9 +21,16 @@ from core.order_ship_constants import (
     IO_TYPE_OUT,
     MSG_ALLOC_OVER_SHIP,
     MSG_DATA_INTEGRITY,
+    MSG_DELIVERY_SCHEMA,
     MSG_DETAIL_REQUIRED,
     MSG_ORDER_LOCKED,
     MSG_ORDER_OVER_SHIP,
+    MSG_PARCEL_DEST_INCOMPLETE,
+    MSG_PARCEL_DEST_QTY,
+    MSG_PARCEL_DEST_REQUIRED,
+    MSG_PARCEL_QTY_MISMATCH,
+    MSG_PARCEL_SHIP_FEE_MISMATCH,
+    MSG_PARCEL_SHIP_FEE_NEG,
     MSG_REMARK_SALE_OUT,
     MSG_SCHEMA_PRECONDITION,
     MSG_SHIP_LINES_REQUIRED,
@@ -36,6 +44,12 @@ from core.order_ship_constants import (
     SHIP_MODE_STOCK,
     SHIP_MODES,
     STOCK_STATUS_DONE,
+)
+from core.order_ship_delivery import (
+    ShipDeliveryAllocIn,
+    alloc_qty_sum,
+    alloc_ship_fee_sum,
+    bridge_allocs_to_fifo_details,
 )
 from core.order_ship_qty import confirmed_shipped_qty, order_line_ship_remainder
 from core.sales_stock_trace_schema import REF_TYPE_SALE
@@ -70,6 +84,8 @@ class ShipLineIn:
     harvest_year: int = 0
     wh_cd: str = ""
     unit_price: float = 0.0
+    # None = legacy caller (미전송). list = 2C 명시(빈 배열이면 택배 검증 실패).
+    delivery_allocations: list[ShipDeliveryAllocIn] | None = None
 
 
 @dataclass
@@ -216,13 +232,18 @@ class OrderShipService:
             master = self._load_order_master(cur, farm, order_no)
             if not custm_id:
                 custm_id = str(master.get("custm_id") or "").strip() or None
+
+        # 재고 차감 전 배송배분 검증 (실패 시 OUT/sales 0건)
+        multi_delivery = self._validate_and_normalize_delivery(payload)
+
         splits: list[dict[str, Any]] = []
-        for line in payload.lines:
-            splits.extend(
-                self._plan_line(
-                    cur, farm=farm, mode=mode, order_no=order_no, line=line,
-                )
+        for line_idx, line in enumerate(payload.lines):
+            planned = self._plan_line(
+                cur, farm=farm, mode=mode, order_no=order_no, line=line,
             )
+            for sp in planned:
+                sp["_line_idx"] = line_idx
+            splits.extend(planned)
         for sp in splits:
             self._apply_stock(cur, mode=mode, split=sp, user_id=user_id, now_dt=now_dt)
 
@@ -245,12 +266,28 @@ class OrderShipService:
             user_id=user_id,
             now_dt=now_dt,
         )
+
+        # logical line → FIFO detail 목록 (배송 bridge / line별 배송비)
+        line_details: dict[int, list[tuple[str, float]]] = {}
+        line_fee_applied: set[int] = set()
         detail_rows: list[dict[str, Any]] = []
         stock_effects: list[dict[str, Any]] = []
+
         for idx, sp in enumerate(splits, start=1):
             det_no = f"{sales_no}-S{idx:0{SALES_DETAIL_SEQ_LEN}d}"
-            # 1판매=1배송비: 첫 detail에만 ship_fee 부여
-            line_ship_fee = ship_fee if idx == 1 else 0.0
+            line_idx = int(sp.get("_line_idx", 0))
+            if multi_delivery:
+                # 2C: logical line 배송비 합 → 해당 line 첫 FIFO detail만
+                if line_idx not in line_fee_applied:
+                    allocs = payload.lines[line_idx].delivery_allocations or []
+                    line_ship_fee = alloc_ship_fee_sum(allocs)
+                    line_fee_applied.add(line_idx)
+                else:
+                    line_ship_fee = 0.0
+            else:
+                # legacy: 판매 전체 배송비를 첫 detail에만
+                line_ship_fee = ship_fee if idx == 1 else 0.0
+
             self._insert_sales_detail(
                 cur,
                 farm=farm,
@@ -265,15 +302,7 @@ class OrderShipService:
             self._insert_stock_log(
                 cur, farm=farm, det_no=det_no, split=sp, user_id=user_id, now_dt=now_dt,
             )
-            self._insert_sales_delivery(
-                cur,
-                farm=farm,
-                sales_no=sales_no,
-                det_no=det_no,
-                qty=_as_float(sp["qty"]),
-                payload=payload,
-                user_id=user_id,
-            )
+            line_details.setdefault(line_idx, []).append((det_no, _as_float(sp["qty"])))
             detail_rows.append(
                 {
                     "sale_detail_no": det_no,
@@ -289,6 +318,29 @@ class OrderShipService:
                     "ship_mode": mode,
                 }
             )
+
+        if multi_delivery:
+            self._persist_multi_deliveries(
+                cur,
+                farm=farm,
+                sales_no=sales_no,
+                payload=payload,
+                line_details=line_details,
+                user_id=user_id,
+            )
+        else:
+            for det_no, qty in (
+                (d["sale_detail_no"], _as_float(d["qty"])) for d in detail_rows
+            ):
+                self._insert_sales_delivery(
+                    cur,
+                    farm=farm,
+                    sales_no=sales_no,
+                    det_no=det_no,
+                    qty=qty,
+                    payload=payload,
+                    user_id=user_id,
+                )
 
         order_status = None
         stock_status = None
@@ -310,6 +362,120 @@ class OrderShipService:
             "stock_status": stock_status,
             "remaining_order": remaining,
         }
+
+    def _validate_and_normalize_delivery(self, payload: ShipConfirmIn) -> bool:
+        """택배 2C allocation 검증. True면 multi-delivery 경로.
+
+        null/미전송 = legacy. 택배에서 한 line이라도 list면 전 line 배열 필수.
+        """
+        dlvry_tp = str(getattr(payload, "dlvry_tp", "") or "").strip()
+        is_parcel = dlvry_tp == DELIVERY_TP_PARCEL_CD
+        any_explicit = any(ln.delivery_allocations is not None for ln in payload.lines)
+        if not any_explicit:
+            return False
+        if not is_parcel:
+            # 방문/직접: allocation 미사용(legacy 유지). 명시해도 무시.
+            return False
+
+        fee_total = 0.0
+        for line in payload.lines:
+            allocs = line.delivery_allocations
+            if allocs is None:
+                raise ShipValidationError(
+                    MSG_PARCEL_DEST_REQUIRED, code="PARCEL_DEST_REQUIRED"
+                )
+            if not allocs:
+                raise ShipValidationError(
+                    MSG_PARCEL_DEST_REQUIRED, code="PARCEL_DEST_REQUIRED"
+                )
+            for alloc in allocs:
+                if not _qty_pos(_as_float(alloc.qty)):
+                    raise ShipValidationError(
+                        MSG_PARCEL_DEST_QTY, code="PARCEL_DEST_QTY"
+                    )
+                name = str(alloc.rcv_name or "").strip()
+                tel = str(alloc.rcv_tel or "").strip()
+                addr = str(alloc.rcv_addr or "").strip()
+                if not (name and tel and addr):
+                    raise ShipValidationError(
+                        MSG_PARCEL_DEST_INCOMPLETE, code="PARCEL_DEST_INCOMPLETE"
+                    )
+                fee = _as_float(alloc.ship_fee)
+                if fee < -_QTY_EPS:
+                    raise ShipValidationError(
+                        MSG_PARCEL_SHIP_FEE_NEG, code="PARCEL_SHIP_FEE_NEG"
+                    )
+                alloc.ship_fee = max(0.0, fee)
+                fee_total += alloc.ship_fee
+            if not _qty_eq(alloc_qty_sum(allocs), _as_float(line.qty)):
+                raise ShipValidationError(
+                    MSG_PARCEL_QTY_MISMATCH, code="PARCEL_QTY_MISMATCH"
+                )
+
+        req_fee = max(0.0, _as_float(getattr(payload, "ship_fee", 0) or 0))
+        if not _qty_eq(req_fee, fee_total):
+            raise ShipValidationError(
+                MSG_PARCEL_SHIP_FEE_MISMATCH, code="PARCEL_SHIP_FEE_MISMATCH"
+            )
+        payload.ship_fee = fee_total
+        return True
+
+    def _persist_multi_deliveries(
+        self,
+        cur: sqlite3.Cursor,
+        *,
+        farm: str,
+        sales_no: str,
+        payload: ShipConfirmIn,
+        line_details: dict[int, list[tuple[str, float]]],
+        user_id: str,
+    ) -> None:
+        if not _table_exists(cur, "t_sales_delivery"):
+            return
+        has_group = _column_exists(cur, "t_sales_delivery", "dlvry_group_no")
+        has_fee = _column_exists(cur, "t_sales_delivery", "ship_fee")
+        if not (has_group and has_fee):
+            raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
+
+        group_seq = 1
+        for line_idx, line in enumerate(payload.lines):
+            allocs = line.delivery_allocations or []
+            details = line_details.get(line_idx) or []
+            try:
+                rows, group_seq = bridge_allocs_to_fifo_details(
+                    sales_no=sales_no,
+                    detail_rows=details,
+                    allocations=allocs,
+                    group_seq_start=group_seq,
+                )
+            except ValueError as exc:
+                raise ShipValidationError(
+                    MSG_PARCEL_QTY_MISMATCH, code="PARCEL_QTY_MISMATCH"
+                ) from exc
+            for row in rows:
+                cur.execute(
+                    """
+                    INSERT INTO t_sales_delivery (
+                        dlvry_no, sale_detail_no, sales_no, farm_cd,
+                        rcv_name, rcv_tel, rcv_addr, dlvry_qty, dlvry_msg,
+                        dlvry_group_no, ship_fee, reg_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["dlvry_no"],
+                        row["sale_detail_no"],
+                        sales_no,
+                        farm,
+                        row["rcv_name"] or None,
+                        row["rcv_tel"] or None,
+                        row["rcv_addr"] or None,
+                        row["dlvry_qty"],
+                        row["dlvry_msg"] or None,
+                        row["dlvry_group_no"],
+                        float(row["ship_fee"] or 0),
+                        user_id,
+                    ),
+                )
 
     def _require_trace_schema(self, cur: sqlite3.Cursor) -> None:
         need = (

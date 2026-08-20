@@ -379,16 +379,112 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
-  it('P11 택배 선택 시 주소영역 표시(회귀)', async () => {
+  it('P11 택배 선택 시 공통 수령폼 없음 · 품목별 배송상태(2C)', async () => {
     const store = useSalesPrefillStore()
-    store.addStockLine(stock(), 1)
+    store.addStockLine(stock(), 3)
     store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
     const { wrapper } = await mountPreview()
-    expect(wrapper.find('[data-testid="sales-preview-addr"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('수령인')
+    expect(wrapper.find('[data-testid="sales-preview-addr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sales-preview-delivery-status"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('배송 0/3박스')
+    expect(wrapper.find('[data-testid="sales-preview-ship-fee"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sales-preview-ship-fee-sum"]').exists()).toBe(true)
     store.setDelivery({ dlvryTp: DELIVERY_TP_VISIT })
     await flushPromises()
-    expect(wrapper.find('[data-testid="sales-preview-addr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sales-preview-delivery-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sales-preview-ship-fee"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('2C 배송지 sheet · 지정합=판매수량 → 진행 가능 · 미지정 disabled', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ available_qty: 10 }), 3)
+    store.updateShipLine(0, { unit_price: 1000 })
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    const r = router()
+    await r.push('/orders/sales-preview')
+    await r.isReady()
+    const wrapper = mount(SalesPreviewView, {
+      attachTo: document.body,
+      ...mountOpts(r),
+    })
+    await flushPromises()
+    expect((wrapper.find('[data-testid="sales-preview-submit"]').element as HTMLButtonElement).disabled).toBe(true)
+
+    await wrapper.find('[data-testid="sales-preview-dest-open"]').trigger('click')
+    await flushPromises()
+    const sheet = document.querySelector('[data-testid="sales-preview-dest-sheet"]')
+    expect(sheet).toBeTruthy()
+    const addBtn = sheet!.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement
+    addBtn.click()
+    await flushPromises()
+    const row = sheet!.querySelector('[data-testid="sales-preview-dest-row"]')!
+    const inputs = row.querySelectorAll('input')
+    await new DOMWrapper(inputs[0]).setValue('3')
+    await new DOMWrapper(inputs[1]).setValue('홍길동')
+    await new DOMWrapper(inputs[2]).setValue('010')
+    await new DOMWrapper(inputs[3]).setValue('서울')
+    await new DOMWrapper(inputs[5]).setValue('4000')
+    ;(sheet!.querySelector('[data-testid="sales-preview-dest-done"]') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(store.shipLines[0].delivery_allocations).toHaveLength(1)
+    expect(store.shipLines[0].delivery_allocations?.[0].qty).toBe(3)
+    expect(wrapper.text()).toContain('배송 3/3박스 지정')
+    expect(wrapper.find('[data-testid="sales-preview-ship-fee-sum"]').text()).toContain('4,000')
+    expect((wrapper.find('[data-testid="sales-preview-submit"]').element as HTMLButtonElement).disabled).toBe(false)
+
+    store.updateShipLine(0, { qty: 2 })
+    await flushPromises()
+    expect(store.shipLines[0].delivery_allocations?.[0].qty).toBe(3)
+    expect(wrapper.text()).toContain('초과')
+    expect((wrapper.find('[data-testid="sales-preview-submit"]').element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('2C nested payload · confirm 취소 시 allocations 유지', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 2)
+    store.updateShipLine(0, { unit_price: 1000 })
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    store.setShipLineDeliveries(0, [
+      {
+        draft_id: 'd1',
+        qty: 1,
+        rcv_name: 'A',
+        rcv_tel: '1',
+        rcv_addr: 'addr1',
+        dlvry_msg: '',
+        ship_fee: 1000,
+      },
+      {
+        draft_id: 'd2',
+        qty: 1,
+        rcv_name: 'B',
+        rcv_tel: '2',
+        rcv_addr: 'addr2',
+        dlvry_msg: '문앞',
+        ship_fee: 2000,
+      },
+    ])
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { wrapper } = await mountPreview()
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
+    await flushPromises()
+    expect(confirmShipment).not.toHaveBeenCalled()
+    expect(store.shipLines[0].delivery_allocations).toHaveLength(2)
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
+    await flushPromises()
+    const body = confirmShipment.mock.calls[0][1] as {
+      ship_fee: number
+      lines: { delivery_allocations: unknown[] }[]
+    }
+    expect(body.ship_fee).toBe(3000)
+    expect(body.lines[0].delivery_allocations).toHaveLength(2)
+    expect(store.shipLines).toHaveLength(0)
     wrapper.unmount()
   })
 

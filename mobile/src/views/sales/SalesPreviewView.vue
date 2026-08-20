@@ -31,7 +31,15 @@ import {
   findShipQtyIssue,
   mapShipApiError,
   stockSaleSpecKey,
+  type ShipDeliveryDraft,
 } from '@/views/sales/shipConfirmModel'
+import {
+  allocQtySum,
+  deliveryStatusText,
+  emptyDeliveryDraft,
+  findParcelDeliveryIssue,
+  totalAllocShipFee,
+} from '@/views/sales/shipDeliveryModel'
 import { todayBizIso } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
@@ -44,11 +52,16 @@ const LABEL_SHIP_FEE = '배송'
 const LABEL_GO_SALE = '판매 진행'
 const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
+const LABEL_VIEW_DEST = '보기'
+const LABEL_DEST_SHEET = '배송지 배분'
+const LABEL_ADD_DEST = '+ 배송지 추가'
+const LABEL_DEST_DONE = '완료'
+const LABEL_SALE_QTY = '판매수량'
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
-const MSG_NEED_ADDR = '택배는 받는분·연락처·주소가 필요합니다.'
 const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
+const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요.'
 
 const router = useRouter()
 const { farmCd } = storeToRefs(useAppStore())
@@ -64,32 +77,35 @@ const deliveryOptions = ref<{ value: string; label: string }[]>([
   { value: DELIVERY_TP_DIRECT, label: '직접배송' },
 ])
 
+const destEditIdx = ref<number | null>(null)
+const destDrafts = ref<ShipDeliveryDraft[]>([])
+const destSheetErr = ref('')
+
 const lines = computed(() => prefill.shipLines)
+const isParcel = computed(() => isParcelDelivery(prefill.dlvryTp))
 const custmId = computed({
   get: () => prefill.custmId || '',
   set: (v: string) => {
     const c = customers.value.find((x) => x.custm_id === v)
     prefill.setCustomer(v || null, c?.custm_nm || '')
-    if (c && !prefill.rcvName) {
-      prefill.setDelivery({
-        rcvName: c.custm_nm || '',
-        rcvTel: c.mobile || '',
-      })
-    }
   },
 })
 
-const showAddress = computed(() => isParcelDelivery(prefill.dlvryTp))
 const itemAmt = computed(() =>
   lines.value.reduce((s, ln) => s + Number(ln.qty) * Number(ln.unit_price), 0),
 )
 const totalQty = computed(() =>
   lines.value.reduce((s, ln) => s + Number(ln.qty), 0),
 )
-/** 배송비 표시·합계용 (음수/NaN → 0) */
-const safeShipFee = computed(() => normalizeShipFee(prefill.shipFee))
+const safeShipFee = computed(() => {
+  if (isParcel.value) return totalAllocShipFee(lines.value)
+  return normalizeShipFee(prefill.shipFee)
+})
 const payAmt = computed(() => itemAmt.value + safeShipFee.value)
 const qtyIssue = computed(() => findShipQtyIssue(lines.value))
+const parcelIssue = computed(() =>
+  isParcel.value ? findParcelDeliveryIssue(lines.value) : '',
+)
 const unitHint = computed(() =>
   lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
 )
@@ -106,11 +122,10 @@ const canSubmit = computed(() => {
   if (!String(prefill.custmId || '').trim()) return false
   if (qtyIssue.value) return false
   if (lines.value.some((ln) => Number(ln.unit_price) < 0)) return false
-  if (Number(prefill.shipFee) < 0) return false
-  if (showAddress.value) {
-    if (!prefill.rcvName.trim() || !prefill.rcvTel.trim() || !prefill.rcvAddr.trim()) {
-      return false
-    }
+  if (isParcel.value) {
+    if (parcelIssue.value) return false
+  } else if (Number(prefill.shipFee) < 0) {
+    return false
   }
   return true
 })
@@ -123,6 +138,16 @@ function lineSubtotal(idx: number) {
   const ln = lines.value[idx]
   if (!ln) return 0
   return Number(ln.qty) * Number(ln.unit_price)
+}
+
+function lineUnit(ln: (typeof lines.value)[number]) {
+  return ln.item_cd === 'FR010300' ? '통' : '박스'
+}
+
+function lineDeliveryStatus(idx: number) {
+  const ln = lines.value[idx]
+  if (!ln) return ''
+  return deliveryStatusText(Number(ln.qty), allocQtySum(ln), lineUnit(ln))
 }
 
 function maxQty(idx: number) {
@@ -154,6 +179,7 @@ function setPrice(idx: number, raw: string) {
 }
 
 function setShipFee(raw: string) {
+  if (isParcel.value) return
   prefill.setDelivery({ shipFee: normalizeShipFee(raw) })
 }
 
@@ -171,15 +197,102 @@ function cancelSalePrep() {
   void router.replace({ name: 'orders', query: { tab: 'stock' } })
 }
 
+function openDestSheet(idx: number) {
+  const ln = lines.value[idx]
+  if (!ln) return
+  destEditIdx.value = idx
+  destSheetErr.value = ''
+  const existing = ln.delivery_allocations || []
+  destDrafts.value = existing.length ? existing.map((a) => ({ ...a })) : []
+}
+
+function closeDestSheet() {
+  destEditIdx.value = null
+  destDrafts.value = []
+  destSheetErr.value = ''
+}
+
+function customerDefaults() {
+  const c = customers.value.find((x) => x.custm_id === prefill.custmId)
+  return {
+    rcv_name: c?.custm_nm || '',
+    rcv_tel: c?.mobile || '',
+  }
+}
+
+function addDestDraft() {
+  const defs = customerDefaults()
+  destDrafts.value = [
+    ...destDrafts.value,
+    emptyDeliveryDraft({
+      qty: 1,
+      rcv_name: defs.rcv_name,
+      rcv_tel: defs.rcv_tel,
+    }),
+  ]
+}
+
+function removeDestDraft(di: number) {
+  destDrafts.value = destDrafts.value.filter((_, i) => i !== di)
+}
+
+function patchDestDraft(di: number, patch: Partial<ShipDeliveryDraft>) {
+  destDrafts.value = destDrafts.value.map((d, i) => (i === di ? { ...d, ...patch } : d))
+}
+
+function destAssignedSum() {
+  return destDrafts.value.reduce((s, d) => s + Number(d.qty || 0), 0)
+}
+
+function destSheetSummary() {
+  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
+  if (!ln) return ''
+  const sale = Number(ln.qty)
+  const got = destAssignedSum()
+  const remain = sale - got
+  const unit = lineUnit(ln)
+  if (remain > 0) return `지정 ${got} / ${sale}${unit} · 미지정 ${remain}${unit}`
+  if (remain < 0) return `지정 ${got} / ${sale}${unit} · ${-remain}초과`
+  return `지정 ${got} / ${sale}${unit}`
+}
+
+function commitDestSheet() {
+  if (destEditIdx.value == null) return
+  for (const d of destDrafts.value) {
+    if (!(Number(d.qty) >= 1)) {
+      destSheetErr.value = '배송수량은 1 이상이어야 합니다.'
+      return
+    }
+    if (Number(d.ship_fee) < 0) {
+      destSheetErr.value = MSG_SHIP_FEE_NEG
+      return
+    }
+    if (!String(d.rcv_name).trim() || !String(d.rcv_tel).trim() || !String(d.rcv_addr).trim()) {
+      destSheetErr.value = MSG_DEST_INCOMPLETE
+      return
+    }
+  }
+  const cleaned = destDrafts.value.map((d) => ({
+    ...d,
+    qty: Math.max(1, Math.floor(Number(d.qty))),
+    ship_fee: Math.max(0, Math.round(Number(d.ship_fee) || 0)),
+    rcv_name: String(d.rcv_name).trim(),
+    rcv_tel: String(d.rcv_tel).trim(),
+    rcv_addr: String(d.rcv_addr).trim(),
+    dlvry_msg: String(d.dlvry_msg || '').trim(),
+  }))
+  prefill.setShipLineDeliveries(destEditIdx.value, cleaned)
+  closeDestSheet()
+}
+
 function validateBeforeConfirm(): string {
   if (!lines.value.length) return MSG_NO_PREFILL
   if (qtyIssue.value) return qtyIssue.value
   if (!String(prefill.custmId || '').trim()) return MSG_NEED_CUSTOMER
-  if (Number(prefill.shipFee) < 0) return MSG_SHIP_FEE_NEG
-  if (showAddress.value) {
-    if (!prefill.rcvName.trim() || !prefill.rcvTel.trim() || !prefill.rcvAddr.trim()) {
-      return MSG_NEED_ADDR
-    }
+  if (isParcel.value) {
+    if (parcelIssue.value) return parcelIssue.value
+  } else if (Number(prefill.shipFee) < 0) {
+    return MSG_SHIP_FEE_NEG
   }
   return ''
 }
@@ -195,7 +308,7 @@ async function onSubmit() {
     `${prefill.customerNm || prefill.custmId} / ${deliveryLabel(prefill.dlvryTp)}\n` +
     `${lines.value.length}품목 · 총 ${totalQty.value}${unitHint.value}\n` +
     `상품 ${formatOrderAmt(itemAmt.value)}원\n` +
-                `배송비 ${formatOrderAmt(safeShipFee.value)}원\n` +
+    `배송비 ${formatOrderAmt(safeShipFee.value)}원\n` +
     `최종 ${formatOrderAmt(payAmt.value)}원\n\n` +
     '판매를 확정하시겠습니까?'
   if (!window.confirm(confirmText)) return
@@ -203,6 +316,8 @@ async function onSubmit() {
   busy.value = true
   errorMsg.value = ''
   try {
+    const parcel = isParcel.value
+    const firstAlloc = lines.value[0]?.delivery_allocations?.[0]
     const res = await confirmShipment(
       farmCd.value,
       buildShipConfirmRequest({
@@ -213,10 +328,11 @@ async function onSubmit() {
         lines: lines.value,
         dlvryTp: prefill.dlvryTp,
         shipFee: safeShipFee.value,
-        rcvName: prefill.rcvName,
-        rcvTel: prefill.rcvTel,
-        rcvAddr: prefill.rcvAddr,
-        dlvryMsg: prefill.dlvryMsg,
+        rcvName: parcel ? (firstAlloc?.rcv_name || '') : prefill.rcvName,
+        rcvTel: parcel ? (firstAlloc?.rcv_tel || '') : prefill.rcvTel,
+        rcvAddr: parcel ? (firstAlloc?.rcv_addr || '') : prefill.rcvAddr,
+        dlvryMsg: parcel ? (firstAlloc?.dlvry_msg || '') : prefill.dlvryMsg,
+        includeDeliveryAllocations: parcel,
       }),
     )
     successMsg.value =
@@ -237,6 +353,17 @@ function deliveryLabel(cd: string) {
 function goStock() {
   void router.replace({ name: 'orders', query: { tab: 'stock' } })
 }
+
+const destLineSpec = computed(() => {
+  if (destEditIdx.value == null) return ''
+  const ln = lines.value[destEditIdx.value]
+  return ln ? formatOrderLineSpec(ln) : ''
+})
+
+const destSaleQty = computed(() => {
+  if (destEditIdx.value == null) return 0
+  return Number(lines.value[destEditIdx.value]?.qty || 0)
+})
 
 onMounted(async () => {
   try {
@@ -268,7 +395,6 @@ onMounted(async () => {
       <p v-if="errorMsg" class="err" role="alert">{{ errorMsg }}</p>
 
       <template v-if="!successMsg">
-        <!-- 고객 / 배송 — compact (2C 전 1고객·1배송 유지) -->
         <section class="header-block" aria-label="고객 배송" data-testid="sales-preview-header">
           <div class="header-row">
             <span class="header-row__lbl">{{ LABEL_CUSTOMER }}</span>
@@ -293,44 +419,8 @@ onMounted(async () => {
               </option>
             </OdsSelect>
           </div>
-
-          <div v-if="showAddress" class="addr" data-testid="sales-preview-addr">
-            <OdsFormField :label="LABEL_RCV_NAME" required>
-              <OdsInput
-                :model-value="prefill.rcvName"
-                variant="form"
-                bare
-                @update:model-value="prefill.setDelivery({ rcvName: $event })"
-              />
-            </OdsFormField>
-            <OdsFormField :label="LABEL_RCV_TEL" required>
-              <OdsInput
-                :model-value="prefill.rcvTel"
-                variant="form"
-                bare
-                @update:model-value="prefill.setDelivery({ rcvTel: $event })"
-              />
-            </OdsFormField>
-            <OdsFormField :label="LABEL_RCV_ADDR" required>
-              <OdsInput
-                :model-value="prefill.rcvAddr"
-                variant="form"
-                bare
-                @update:model-value="prefill.setDelivery({ rcvAddr: $event })"
-              />
-            </OdsFormField>
-            <OdsFormField label="배송메모" optional>
-              <OdsInput
-                :model-value="prefill.dlvryMsg"
-                variant="form"
-                bare
-                @update:model-value="prefill.setDelivery({ dlvryMsg: $event })"
-              />
-            </OdsFormField>
-          </div>
         </section>
 
-        <!-- 판매 품목 리스트 (divider, 카드 없음) -->
         <section class="lines" aria-label="판매 품목" data-testid="sales-preview-lines">
           <p class="lines__head">판매 품목 {{ lines.length }}건</p>
 
@@ -411,6 +501,21 @@ onMounted(async () => {
                   {{ formatOrderAmt(lineSubtotal(idx)) }}원
                 </span>
               </div>
+              <div
+                v-if="isParcel"
+                class="line__r3"
+                data-testid="sales-preview-delivery-status"
+              >
+                <span class="line__dest-status">{{ lineDeliveryStatus(idx) }}</span>
+                <button
+                  type="button"
+                  class="line__dest-btn"
+                  data-testid="sales-preview-dest-open"
+                  @click="openDestSheet(idx)"
+                >
+                  {{ LABEL_VIEW_DEST }}
+                </button>
+              </div>
             </li>
           </ul>
 
@@ -436,13 +541,16 @@ onMounted(async () => {
           </div>
         </section>
 
-        <!-- 하단 compact summary -->
         <div class="footer" data-testid="sales-preview-footer" role="region" aria-label="합계">
           <div class="footer__meta">
             <p class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</p>
             <p class="footer__amt">
               상품 {{ formatOrderAmt(itemAmt) }}원 · {{ LABEL_SHIP_FEE }}
+              <template v-if="isParcel">
+                <span data-testid="sales-preview-ship-fee-sum">{{ formatOrderAmt(safeShipFee) }}</span>
+              </template>
               <OdsInput
+                v-else
                 :model-value="String(safeShipFee)"
                 type="number"
                 min="0"
@@ -478,6 +586,125 @@ onMounted(async () => {
       </OdsButton>
     </main>
     <OdsBottomNav />
+
+    <Teleport to="body">
+      <div
+        v-if="destEditIdx != null"
+        class="dest-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="LABEL_DEST_SHEET"
+        data-testid="sales-preview-dest-sheet"
+        @click.self="closeDestSheet"
+      >
+        <div class="dest-sheet">
+          <header class="dest-sheet__head">
+            <div>
+              <h3 class="dest-sheet__title">{{ LABEL_DEST_SHEET }}</h3>
+              <p class="dest-sheet__spec">{{ destLineSpec }}</p>
+              <p class="dest-sheet__qty">{{ LABEL_SALE_QTY }} {{ destSaleQty }}{{ unitHint }}</p>
+            </div>
+            <button type="button" class="dest-sheet__x" aria-label="닫기" @click="closeDestSheet">✕</button>
+          </header>
+
+          <div class="dest-sheet__body">
+            <div
+              v-for="(d, di) in destDrafts"
+              :key="d.draft_id"
+              class="dest-card"
+              data-testid="sales-preview-dest-row"
+            >
+              <p class="dest-card__lbl">배송지 {{ di + 1 }}</p>
+              <OdsFormField label="수량" required>
+                <OdsInput
+                  :model-value="String(d.qty)"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  variant="form"
+                  bare
+                  @update:model-value="patchDestDraft(di, { qty: Math.max(1, Math.floor(Number($event) || 1)) })"
+                />
+              </OdsFormField>
+              <OdsFormField :label="LABEL_RCV_NAME" required>
+                <OdsInput
+                  :model-value="d.rcv_name"
+                  variant="form"
+                  bare
+                  @update:model-value="patchDestDraft(di, { rcv_name: $event })"
+                />
+              </OdsFormField>
+              <OdsFormField :label="LABEL_RCV_TEL" required>
+                <OdsInput
+                  :model-value="d.rcv_tel"
+                  variant="form"
+                  bare
+                  @update:model-value="patchDestDraft(di, { rcv_tel: $event })"
+                />
+              </OdsFormField>
+              <OdsFormField :label="LABEL_RCV_ADDR" required>
+                <OdsInput
+                  :model-value="d.rcv_addr"
+                  variant="form"
+                  bare
+                  @update:model-value="patchDestDraft(di, { rcv_addr: $event })"
+                />
+              </OdsFormField>
+              <OdsFormField label="배송메모" optional>
+                <OdsInput
+                  :model-value="d.dlvry_msg"
+                  variant="form"
+                  bare
+                  @update:model-value="patchDestDraft(di, { dlvry_msg: $event })"
+                />
+              </OdsFormField>
+              <OdsFormField label="배송비" required>
+                <OdsInput
+                  :model-value="String(d.ship_fee)"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputmode="numeric"
+                  variant="form"
+                  bare
+                  data-testid="sales-preview-dest-fee"
+                  @update:model-value="patchDestDraft(di, { ship_fee: normalizeShipFee($event) })"
+                />
+              </OdsFormField>
+              <button
+                type="button"
+                class="dest-card__del"
+                data-testid="sales-preview-dest-remove"
+                @click="removeDestDraft(di)"
+              >
+                삭제
+              </button>
+            </div>
+
+            <OdsButton
+              type="button"
+              variant="secondary"
+              data-testid="sales-preview-dest-add"
+              @click="addDestDraft"
+            >
+              {{ LABEL_ADD_DEST }}
+            </OdsButton>
+
+            <p class="dest-sheet__sum" data-testid="sales-preview-dest-summary">
+              {{ destSheetSummary() }}
+            </p>
+            <p v-if="destSheetErr" class="dest-sheet__err" role="alert">{{ destSheetErr }}</p>
+          </div>
+
+          <footer class="dest-sheet__foot">
+            <OdsButton type="button" data-testid="sales-preview-dest-done" @click="commitDestSheet">
+              {{ LABEL_DEST_DONE }}
+            </OdsButton>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -778,4 +1005,118 @@ onMounted(async () => {
     width: 100%;
   }
 }
+
+.line__r3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  margin-top: var(--ods-space-6);
+  min-width: 0;
+}
+.line__dest-status {
+  font: var(--ods-font-footnote, 12px);
+  color: var(--ods-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.line__dest-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-primary, #2f6b4f);
+  font: var(--ods-font-footnote, 12px);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 var(--ods-space-4);
+}
+.dest-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.dest-sheet {
+  width: min(100%, var(--sales-preview-frame-max, 480px));
+  max-height: min(88vh, 720px);
+  background: var(--ods-color-bg, #FDFBF7);
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.dest-sheet__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-16);
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.dest-sheet__title {
+  margin: 0;
+  font: var(--ods-font-title-3);
+}
+.dest-sheet__spec,
+.dest-sheet__qty {
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-footnote, 12px);
+  color: var(--ods-color-text-secondary);
+}
+.dest-sheet__x {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--ods-color-text-secondary);
+}
+.dest-sheet__body {
+  overflow-y: auto;
+  padding: var(--ods-space-12) var(--ods-space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+  min-width: 0;
+}
+.dest-card {
+  border-bottom: 1px solid var(--ods-color-border);
+  padding-bottom: var(--ods-space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+.dest-card__lbl {
+  margin: 0;
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+}
+.dest-card__del {
+  align-self: flex-end;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-text-secondary);
+  cursor: pointer;
+  font: var(--ods-font-footnote, 12px);
+}
+.dest-sheet__sum {
+  margin: 0;
+  font: var(--ods-font-footnote, 12px);
+  color: var(--ods-color-text-secondary);
+}
+.dest-sheet__err {
+  margin: 0;
+  color: var(--ods-color-danger, #b00020);
+  font: var(--ods-font-footnote, 12px);
+}
+.dest-sheet__foot {
+  padding: var(--ods-space-12) var(--ods-space-16) calc(var(--ods-space-12) + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--ods-color-border);
+}
+
 </style>

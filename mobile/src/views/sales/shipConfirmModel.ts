@@ -35,6 +35,16 @@ export const ORDER_STATUS_DELIVERED = 'ST010400'
 
 export type ShipEntrySource = 'PRODUCTION' | 'ORDER' | 'STOCK'
 
+export type ShipDeliveryDraft = {
+  draft_id: string
+  qty: number
+  rcv_name: string
+  rcv_tel: string
+  rcv_addr: string
+  dlvry_msg: string
+  ship_fee: number
+}
+
 export type ShipDraftLine = {
   order_detail_id: string | null
   item_cd: string
@@ -54,6 +64,8 @@ export type ShipDraftLine = {
   grade_nm?: string
   size_nm?: string
   item_nm?: string
+  /** STOCK 택배 상품별 배송배분 (UI draft_id 포함). 수량 변경 시 자동 수정하지 않음. */
+  delivery_allocations?: ShipDeliveryDraft[]
 }
 
 /** 재고 draft 중복 판별 키 (storage_dt 포함) — LOT/재고추적·기존 호환용. 판매 UI 식별에 쓰지 말 것. */
@@ -131,19 +143,35 @@ export function buildShipConfirmRequest(input: {
   rcvTel?: string
   rcvAddr?: string
   dlvryMsg?: string
+  /** true면 각 line에 delivery_allocations 배열 포함 (STOCK 택배 2C) */
+  includeDeliveryAllocations?: boolean
 }): ShipConfirmRequest {
-  const lines: ShipConfirmLine[] = input.lines.map((ln) => ({
-    qty: Number(ln.qty),
-    order_detail_id: ln.order_detail_id,
-    item_cd: ln.item_cd,
-    variety_cd: ln.variety_cd,
-    grade_cd: ln.grade_cd,
-    size_cd: ln.size_cd,
-    weight: ln.weight,
-    harvest_year: ln.harvest_year,
-    wh_cd: ln.wh_cd,
-    unit_price: ln.unit_price,
-  }))
+  const includeAlloc = Boolean(input.includeDeliveryAllocations)
+  const lines: ShipConfirmLine[] = input.lines.map((ln) => {
+    const base: ShipConfirmLine = {
+      qty: Number(ln.qty),
+      order_detail_id: ln.order_detail_id,
+      item_cd: ln.item_cd,
+      variety_cd: ln.variety_cd,
+      grade_cd: ln.grade_cd,
+      size_cd: ln.size_cd,
+      weight: ln.weight,
+      harvest_year: ln.harvest_year,
+      wh_cd: ln.wh_cd,
+      unit_price: ln.unit_price,
+    }
+    if (includeAlloc) {
+      base.delivery_allocations = (ln.delivery_allocations || []).map((a) => ({
+        qty: Number(a.qty),
+        rcv_name: String(a.rcv_name || '').trim(),
+        rcv_tel: String(a.rcv_tel || '').trim(),
+        rcv_addr: String(a.rcv_addr || '').trim(),
+        dlvry_msg: String(a.dlvry_msg || '').trim(),
+        ship_fee: Math.max(0, Math.round(Number(a.ship_fee) || 0)),
+      }))
+    }
+    return base
+  })
   return {
     ship_mode: input.shipMode,
     sales_dt: input.salesDt,

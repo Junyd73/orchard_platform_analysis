@@ -289,12 +289,17 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
 
   function updateShipLine(
     index: number,
-    patch: Partial<Pick<ShipDraftLine, 'qty' | 'unit_price'>>,
+    patch: Partial<Pick<ShipDraftLine, 'qty' | 'unit_price' | 'delivery_allocations'>>,
   ) {
     const cur = shipLines.value[index]
     if (!cur) return
     const next = { ...cur, ...patch }
     shipLines.value = shipLines.value.map((ln, i) => (i === index ? next : ln))
+  }
+
+  /** 수량 변경 시 allocations는 유지(자동 축소/삭제 금지). */
+  function setShipLineDeliveries(index: number, allocations: ShipDraftLine['delivery_allocations']) {
+    updateShipLine(index, { delivery_allocations: allocations })
   }
 
   function setCustomer(id: string | null, name = '') {
@@ -399,6 +404,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     removeStockLineByKey,
     removeShipLine,
     updateShipLine,
+    setShipLineDeliveries,
     setCustomer,
     setDelivery,
     resetDelivery,
