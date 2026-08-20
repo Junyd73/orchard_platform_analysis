@@ -35,6 +35,9 @@ describe('StockView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     listFruitStock.mockReset()
+    listStockLogs.mockReset()
+    adjustStock.mockReset()
+    fetchCommonCodes.mockReset()
     listFruitStock.mockResolvedValue([
       {
         farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
@@ -127,7 +130,8 @@ describe('StockView', () => {
     expect(store.shipLines[1].item_cd).toBe('FR010202')
   })
 
-  it('T9 폐기는 증가 버튼을 막고 감소는 허용한다', async () => {
+  it('T1~T9: 조정 시트 오픈 시 이력 자동조회 없음 + 폐기 방향 버튼', async () => {
+    listStockLogs.mockRejectedValueOnce(new Error('boom'))
     const r = router()
     await r.push('/orders')
     await r.isReady()
@@ -139,6 +143,17 @@ describe('StockView', () => {
     await wrapper.find('.stock-view__card').trigger('click')
     await flushPromises()
     const sheet = document.body.textContent || ''
+    // 조정 시트 오픈 시 이력 API(listStockLogs)는 자동호출하지 않습니다.
+    expect(listStockLogs).not.toHaveBeenCalled()
+    // 오픈 직후 “이력을 불러오지 못했습니다” 문구가 노출되면 안 됩니다.
+    expect(sheet).not.toContain('이력을 불러오지 못했습니다')
+
+    // 입력 라벨/미리보기 표시 확인
+    expect(sheet).toContain('조정 사유')
+    expect(sheet).toContain('조정 수량')
+    expect(sheet).toContain('조정 방향')
+    expect(sheet).toContain('조정 후 현재')
+
     expect(sheet).toContain('폐기')
     expect(sheet).toContain('파손')
     expect(sheet).toContain('실사차이')
@@ -147,6 +162,106 @@ describe('StockView', () => {
     const dec = btns.find((b) => (b.textContent || '').includes('감소')) as HTMLButtonElement | undefined
     expect(inc?.disabled).toBe(true)
     expect(dec?.disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('T6~T7 조정 성공 시 완료 메시지(사유/증감/수량/결과수량) 표시', async () => {
+    const r = router()
+    await r.push('/orders')
+    await r.isReady()
+    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
+    await flushPromises()
+
+    await wrapper.find('.stock-view__card').trigger('click')
+    await flushPromises()
+
+    // 감소(OUT) 선택
+    const decBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
+      (b) => (b.textContent || '').includes('감소'),
+    ) as HTMLButtonElement | undefined
+    expect(decBtn).toBeTruthy()
+    decBtn?.click()
+    await flushPromises()
+
+    // 조정 적용
+    const applyBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
+      (b) => (b.textContent || '').includes('조정 적용'),
+    ) as HTMLButtonElement | undefined
+    expect(applyBtn).toBeTruthy()
+    applyBtn?.click()
+    await flushPromises()
+
+    const sheet = document.body.textContent || ''
+    expect(sheet).toContain('재고 조정이 완료되었습니다')
+    expect(sheet).toContain('폐기')
+    expect(sheet).toContain('감소')
+    expect(sheet).toContain('현재 10박스')
+    wrapper.unmount()
+  })
+
+  it('T8 감소 초과 시 가용재고 초과 오류 안내 + API 호출 차단', async () => {
+    const r = router()
+    await r.push('/orders')
+    await r.isReady()
+    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
+    await flushPromises()
+
+    await wrapper.find('.stock-view__card').trigger('click')
+    await flushPromises()
+
+    // 감소(OUT) 선택
+    const decBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
+      (b) => (b.textContent || '').includes('감소'),
+    ) as HTMLButtonElement | undefined
+    decBtn?.click()
+    await flushPromises()
+
+    // 조정 수량을 11(가용 10 초과)로 입력
+    const qtyInput = document.querySelector('.stock-log-adjust input.ods-input') as HTMLInputElement | null
+    expect(qtyInput).toBeTruthy()
+    qtyInput!.value = '11'
+    qtyInput!.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    await flushPromises()
+
+    // Vue v-model이 반영되었는지(입력값이 유지되는지) 확인
+    expect(qtyInput!.value).toBe('11')
+
+    const sheetAfterEdit = document.body.textContent || ''
+    expect(sheetAfterEdit).toContain('11박스')
+
+    const applyBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
+      (b) => (b.textContent || '').includes('조정 적용'),
+    ) as HTMLButtonElement | undefined
+    applyBtn?.click()
+    await flushPromises()
+
+    const sheet = document.body.textContent || ''
+    expect(sheet).toContain('가용재고보다 많이 줄일 수 없습니다')
+    // 실패 시도이므로 adjustStock 호출은 0건이어야 합니다.
+    expect(adjustStock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('T9 이력 조회는 “조정 이력 보기” 버튼에서만 동작', async () => {
+    listStockLogs.mockRejectedValueOnce(new Error('boom'))
+    const r = router()
+    await r.push('/orders')
+    await r.isReady()
+    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
+    await flushPromises()
+
+    await wrapper.find('.stock-view__card').trigger('click')
+    await flushPromises()
+    expect(listStockLogs).not.toHaveBeenCalled()
+
+    const histBtn = document.querySelector('.stock-log-history-btn') as HTMLButtonElement | null
+    expect(histBtn).toBeTruthy()
+    histBtn!.click()
+    await flushPromises()
+
+    expect(listStockLogs).toHaveBeenCalled()
+    const sheet = document.body.textContent || ''
+    expect(sheet).toContain('이력을 불러오지 못했습니다')
     wrapper.unmount()
   })
 })

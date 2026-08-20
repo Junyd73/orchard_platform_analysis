@@ -55,16 +55,54 @@ const logTarget    = ref<StockItem | null>(null)
 const logs         = ref<StockLog[]>([])
 const logsLoading  = ref(false)
 const logsError    = ref('')
+const historyOpen  = ref(false) // 조정 시트 open 시 이력 자동 조회를 하지 않습니다.
 const selectedKeys = ref<string[]>([])
 const adjustQty = ref('1')
 const adjustReason = ref(REASON_DISPOSE)
+const adjustDirection = ref<'IN' | 'OUT'>('IN')
 const adjustBusy = ref(false)
 const adjustError = ref('')
+const adjustSuccess = ref('')
 const adjustReasons = ref<{ value: string; label: string }[]>(
   ADJUST_REASON_OPTIONS.map((r) => ({ value: r.value, label: r.label })),
 )
 const canAdjustIn = computed(() => reasonAllowsIn(adjustReason.value))
 const canAdjustOut = computed(() => reasonAllowsOut(adjustReason.value))
+
+const adjustQtyNum = computed(() => Number(adjustQty.value))
+const adjustDirNm = computed(() => (adjustDirection.value === 'IN' ? '증가' : '감소'))
+const adjustReasonLabel = computed(
+  () => adjustReasons.value.find((r) => r.value === adjustReason.value)?.label || adjustReason.value,
+)
+
+const previewWarnOut = computed(() => {
+  if (!logTarget.value) return false
+  if (adjustDirection.value !== 'OUT') return false
+  return adjustQtyNum.value > logTarget.value.available_qty + 1e-9
+})
+
+const previewAfterQty = computed(() => {
+  if (!logTarget.value) return 0
+  const curr = Number(logTarget.value.real_qty || 0)
+  const qty = Math.max(0, adjustQtyNum.value)
+  return adjustDirection.value === 'IN' ? curr + qty : curr - qty
+})
+
+const previewText = computed(() => {
+  if (!logTarget.value) return ''
+  const unit = stockUnit(logTarget.value.item_cd)
+  const qty = adjustQtyNum.value
+  const warn = previewWarnOut.value ? ' (가용재고 초과)' : ''
+  return `${adjustReasonLabel.value}로 ${qty}${unit} ${adjustDirNm.value} · 조정 후 현재 ${previewAfterQty.value}${unit}${warn}`
+})
+
+const canApplyAdjust = computed(() => {
+  if (!logTarget.value) return false
+  if (!(adjustQtyNum.value > 0)) return false
+  if (adjustDirection.value === 'IN' && !canAdjustIn.value) return false
+  if (adjustDirection.value === 'OUT' && !canAdjustOut.value) return false
+  return true
+})
 
 // ── computed ─────────────────────────────────────────────────────────
 const isRaw = computed(() => stockType.value === ITEM_RAW)
@@ -120,28 +158,7 @@ watch(stockType, () => {
   selectedKeys.value = []
 })
 
-async function openLog(item: StockItem) {
-  logTarget.value = item
-  logs.value      = []
-  logsError.value = ''
-  adjustError.value = ''
-  adjustQty.value = '1'
-  logsLoading.value = true
-  try {
-    logs.value = await listStockLogs(farmCd.value, {
-      item_cd:      item.item_cd,
-      variety_cd:   item.variety_cd,
-      grade_cd:     item.grade_cd,
-      size_cd:      item.size_cd,
-      weight:       item.weight,
-      harvest_year: item.harvest_year,
-      storage_dt:   item.storage_dt,
-    })
-  } catch {
-    logsError.value = '이력을 불러오지 못했습니다.'
-  } finally {
-    logsLoading.value = false
-  }
+async function loadAdjustReasons() {
   try {
     const allowed = new Set<string>(ADJUST_REASON_OPTIONS.map((r) => r.value))
     const codes = await fetchCommonCodes(farmCd.value, PARENT_ADJUST_REASON)
@@ -156,6 +173,48 @@ async function openLog(item: StockItem) {
     }
   } catch {
     /* 로컬 기본 사유 코드 유지 */
+  }
+}
+
+async function openAdjustSheet(item: StockItem) {
+  // 조정 시트 진입 시에는 이력 API(listStockLogs)를 자동 호출하지 않습니다.
+  logTarget.value = item
+  logs.value = []
+  logsError.value = ''
+  logsLoading.value = false
+  historyOpen.value = false
+
+  adjustError.value = ''
+  adjustSuccess.value = ''
+  adjustQty.value = '1'
+  adjustDirection.value = 'IN'
+
+  await loadAdjustReasons()
+}
+
+async function openHistoryLogs() {
+  if (!logTarget.value) return
+  if (logsLoading.value) return
+
+  historyOpen.value = true
+  logsLoading.value = true
+  logsError.value = ''
+  logs.value = []
+  try {
+    const item = logTarget.value
+    logs.value = await listStockLogs(farmCd.value, {
+      item_cd: item.item_cd,
+      variety_cd: item.variety_cd,
+      grade_cd: item.grade_cd,
+      size_cd: item.size_cd,
+      weight: item.weight,
+      harvest_year: item.harvest_year,
+      storage_dt: item.storage_dt,
+    })
+  } catch {
+    logsError.value = '이력을 불러오지 못했습니다.'
+  } finally {
+    logsLoading.value = false
   }
 }
 
@@ -195,7 +254,7 @@ function sellProduct(row: StockItem) {
   void router.push({ name: 'ship-confirm' })
 }
 
-async function runAdjust(ioType: 'IN' | 'OUT') {
+async function runAdjust() {
   const row = logTarget.value
   if (!row || adjustBusy.value) return
   const qty = Number(adjustQty.value)
@@ -203,12 +262,23 @@ async function runAdjust(ioType: 'IN' | 'OUT') {
     adjustError.value = '수량을 입력해 주세요.'
     return
   }
+
+  const ioType = adjustDirection.value
   if ((ioType === 'IN' && !canAdjustIn.value) || (ioType === 'OUT' && !canAdjustOut.value)) {
     adjustError.value = '이 사유로는 선택한 조정을 할 수 없습니다.'
     return
   }
+
+  // UI에서 먼저 OUT 가능 여부를 차단(코어 reserved_qty 보호 포함 최종 방어).
+  if (ioType === 'OUT' && qty > row.available_qty + 1e-9) {
+    adjustError.value = '가용재고보다 많이 줄일 수 없습니다.'
+    adjustSuccess.value = ''
+    return
+  }
+
   adjustBusy.value = true
   adjustError.value = ''
+  adjustSuccess.value = ''
   try {
     await adjustStock(farmCd.value, {
       wh_cd: row.wh_cd,
@@ -227,7 +297,10 @@ async function runAdjust(ioType: 'IN' | 'OUT') {
     const fresh = rows.value.find((r) => rowKey(r) === rowKey(row))
     if (fresh) {
       logTarget.value = fresh
-      await openLog(fresh)
+      const reasonLabel = adjustReasons.value.find((r) => r.value === adjustReason.value)?.label || adjustReason.value
+      const dirNm = ioType === 'IN' ? '증가' : '감소'
+      const unit = stockUnit(fresh.item_cd)
+      adjustSuccess.value = `재고 조정이 완료되었습니다.\n${cardTitle(fresh)} / ${reasonLabel} / ${dirNm} ${qty}${unit} / 현재 ${fresh.real_qty}${unit}`
     } else {
       closeLog()
     }
@@ -240,6 +313,12 @@ async function runAdjust(ioType: 'IN' | 'OUT') {
 
 function closeLog() {
   logTarget.value = null
+  historyOpen.value = false
+  logs.value = []
+  logsError.value = ''
+  logsLoading.value = false
+  adjustError.value = ''
+  adjustSuccess.value = ''
 }
 
 // ── 헬퍼 ─────────────────────────────────────────────────────────────
@@ -339,7 +418,7 @@ function formatRegDt(dt: string) {
         v-for="row in filteredRows"
         :key="`${row.item_cd}_${row.variety_cd}_${row.grade_cd}_${row.size_cd}_${row.weight}_${row.storage_dt}`"
         class="stock-view__card"
-        @click="openLog(row)"
+        @click="openAdjustSheet(row)"
       >
         <!-- 카드 헤더 -->
         <div class="stock-view__card-head">
@@ -400,51 +479,97 @@ function formatRegDt(dt: string) {
         class="stock-log-overlay"
         role="dialog"
         aria-modal="true"
-        aria-label="재고 이력"
+        aria-label="재고 조정"
         @click.self="closeLog"
       >
         <div class="stock-log-sheet">
           <div class="stock-log-sheet__header">
-            <span class="stock-log-sheet__title">{{ cardTitle(logTarget) }} 이력</span>
+            <span class="stock-log-sheet__title">{{ cardTitle(logTarget) }} · 재고 조정</span>
             <button type="button" class="stock-log-sheet__close" aria-label="닫기" @click="closeLog">✕</button>
           </div>
-
-          <p v-if="logsLoading" class="stock-log-sheet__msg">로딩 중…</p>
-          <p v-else-if="logsError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ logsError }}</p>
-          <p v-else-if="logs.length === 0" class="stock-log-sheet__msg">이력이 없습니다.</p>
-
-          <ul v-else class="stock-log-list">
-            <li
-              v-for="log in logs"
-              :key="log.log_id"
-              class="stock-log__row"
-            >
-              <span class="stock-log__date">{{ formatRegDt(log.reg_dt) }}</span>
-              <span class="stock-log__type">
-                <template v-if="log.io_type === 'IN' || log.io_type === 'OUT'">{{ logDirNm(log) }} · {{ log.io_type_nm }}</template>
-                <template v-else>{{ log.io_type_nm }}</template>
-              </span>
-              <span class="stock-log__qty" :class="logQtyClass(log)">
-                {{ logSign(log) }}{{ log.qty }}{{ stockUnit(log.item_cd) }}
-              </span>
-              <span v-if="log.remark" class="stock-log__rmk">{{ log.remark }}</span>
-            </li>
-          </ul>
-
-          <!-- 현재고 요약 -->
+          <!-- 현재고 요약(조정 시트는 실행 중심) -->
           <div v-if="logTarget" class="stock-log-sheet__summary">
             <span>현재 {{ logTarget.real_qty }} · 배정 {{ logTarget.reserved_qty }} · 가용 {{ logTarget.available_qty }}</span>
           </div>
+
           <div v-if="logTarget" class="stock-log-adjust">
             <p class="stock-log-adjust__title">재고 조정</p>
+
+            <p class="stock-log-adjust__lbl">조정 사유</p>
             <OdsSelect v-model="adjustReason" variant="form">
-              <option v-for="r in adjustReasons" :key="r.value" :value="r.value">{{ r.label }}</option>
+              <option v-for="r in adjustReasons" :key="r.value" :value="r.value">
+                {{ r.label }}
+              </option>
             </OdsSelect>
+
+            <p class="stock-log-adjust__lbl">조정 수량</p>
             <OdsInput v-model="adjustQty" type="number" variant="form" bare />
-            <p v-if="adjustError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ adjustError }}</p>
+
+            <p class="stock-log-adjust__lbl">조정 방향</p>
             <div class="stock-log-adjust__btns">
-              <OdsButton type="button" variant="secondary" :disabled="adjustBusy || !canAdjustIn" @click="runAdjust('IN')">증가</OdsButton>
-              <OdsButton type="button" variant="secondary" :disabled="adjustBusy || !canAdjustOut" @click="runAdjust('OUT')">감소</OdsButton>
+              <OdsButton
+                type="button"
+                variant="secondary"
+                :disabled="adjustBusy || !canAdjustIn"
+                @click="adjustDirection = 'IN'"
+              >
+                증가
+              </OdsButton>
+              <OdsButton
+                type="button"
+                variant="secondary"
+                :disabled="adjustBusy || !canAdjustOut"
+                @click="adjustDirection = 'OUT'"
+              >
+                감소
+              </OdsButton>
+            </div>
+
+            <!-- 실행 미리보기 -->
+            <p v-if="previewText" class="stock-log-adjust__preview">{{ previewText }}</p>
+
+            <p v-if="adjustError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ adjustError }}</p>
+
+            <div class="stock-log-adjust__apply">
+              <OdsButton type="button" variant="secondary" :disabled="adjustBusy" @click="closeLog">
+                취소
+              </OdsButton>
+              <OdsButton type="button" variant="primary" :disabled="adjustBusy || !canApplyAdjust" @click="runAdjust">
+                조정 적용
+              </OdsButton>
+            </div>
+
+            <p v-if="adjustSuccess" class="stock-log-sheet__msg stock-log-sheet__msg--ok">{{ adjustSuccess }}</p>
+
+            <!-- 이력은 “필요할 때만” 버튼으로 분리해서 조회 -->
+            <div class="stock-log-history">
+              <OdsButton type="button" variant="secondary" class="stock-log-history-btn" @click="openHistoryLogs">
+                조정 이력 보기
+              </OdsButton>
+
+              <div v-if="historyOpen" class="stock-log-history__body">
+                <p v-if="logsLoading" class="stock-log-sheet__msg">로딩 중…</p>
+                <p v-else-if="logsError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ logsError }}</p>
+                <p v-else-if="logs.length === 0" class="stock-log-sheet__msg">이력이 없습니다.</p>
+
+                <ul v-else class="stock-log-list">
+                  <li
+                    v-for="log in logs"
+                    :key="log.log_id"
+                    class="stock-log__row"
+                  >
+                    <span class="stock-log__date">{{ formatRegDt(log.reg_dt) }}</span>
+                    <span class="stock-log__type">
+                      <template v-if="log.io_type === 'IN' || log.io_type === 'OUT'">{{ logDirNm(log) }} · {{ log.io_type_nm }}</template>
+                      <template v-else>{{ log.io_type_nm }}</template>
+                    </span>
+                    <span class="stock-log__qty" :class="logQtyClass(log)">
+                      {{ logSign(log) }}{{ log.qty }}{{ stockUnit(log.item_cd) }}
+                    </span>
+                    <span v-if="log.remark" class="stock-log__rmk">{{ log.remark }}</span>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -738,5 +863,48 @@ function formatRegDt(dt: string) {
 .stock-log-adjust__btns {
   display: flex;
   gap: var(--ods-space-8);
+}
+
+.stock-log-adjust__lbl {
+  margin: 0;
+  font: var(--ods-font-footnote);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+}
+
+.stock-log-adjust__preview {
+  margin: 0;
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text-secondary);
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border: 1px dashed var(--ods-color-border);
+  border-radius: var(--ods-radius-card);
+  white-space: pre-line;
+}
+
+.stock-log-adjust__apply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+}
+
+.stock-log-sheet__msg--ok {
+  color: #2F855A;
+  white-space: pre-line;
+}
+
+.stock-log-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+
+.stock-log-history__body {
+  margin-top: var(--ods-space-8);
+}
+
+.stock-log-history-btn {
+  align-self: flex-start;
 }
 </style>
