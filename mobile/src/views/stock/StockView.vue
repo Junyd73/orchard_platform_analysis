@@ -544,7 +544,6 @@ function formatRegDt(dt: string) {
               </div>
             </div>
 
-            <p class="stock-log-adjust__lbl">조정 방향</p>
             <div class="stock-log-adjust__btns">
               <OdsButton
                 type="button"
@@ -912,9 +911,16 @@ function formatRegDt(dt: string) {
 
 .stock-log-adjust__lbl {
   margin: 0;
-  font: var(--ods-font-footnote);
+  font: var(--ods-font-form-label, var(--ods-font-body-2));
+  font-size: var(--ods-font-size-body-2, 14px);
+  font-weight: 700;
+  color: var(--ods-color-text);
+}
+.stock-log-adjust__field :deep(.ods-select),
+.stock-log-adjust__field :deep(.ods-input) {
+  font: var(--ods-font-form-value, var(--ods-font-body-1));
   font-weight: 600;
-  color: var(--ods-color-text-secondary);
+  color: var(--ods-color-text);
 }
 
 .stock-log-adjust__preview {
