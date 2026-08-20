@@ -892,7 +892,6 @@ function formatRegDt(dt: string) {
   color: var(--ods-color-text-secondary);
 }
 .stock-log-adjust {
-  border-top: 1px solid var(--ods-color-border);
   padding-top: var(--ods-space-16);
   margin-top: var(--ods-space-4);
   display: flex;
@@ -913,7 +912,7 @@ function formatRegDt(dt: string) {
 .stock-log-adjust__lbl {
   margin: 0;
   font: var(--ods-font-form-label, var(--ods-font-body-2));
-  font-size: var(--ods-font-size-body-2, 14px);
+  font-size: calc(var(--ods-font-size-body-2, 14px) + 1px);
   font-weight: 700;
   color: var(--ods-color-text);
   white-space: nowrap;
