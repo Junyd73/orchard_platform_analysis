@@ -214,7 +214,7 @@ class OrderAllocationService:
     ) -> list[dict[str, Any]]:
         farm = str(farm_cd or "").strip()
         sql = """
-            SELECT l.log_id, l.farm_cd, l.item_cd, l.variety_cd, l.harvest_year,
+            SELECT l.log_seq AS log_id, l.farm_cd, l.item_cd, l.variety_cd, l.harvest_year,
                    l.grade_cd, l.size_cd, l.weight, l.io_type, l.qty,
                    COALESCE(l.remark, '') AS remark,
                    COALESCE(l.reg_id, '') AS reg_id,
@@ -245,7 +245,7 @@ class OrderAllocationService:
             sql += " AND l.harvest_year = ?"
             params.append(int(harvest_year))
         # t_stock_log에는 storage_dt 컬럼이 없음. 마스터 입고일과 조인하지 않음.
-        sql += " ORDER BY l.log_id DESC LIMIT ?"
+        sql += " ORDER BY l.log_seq DESC LIMIT ?"
         params.append(int(limit))
         cur = self.conn.cursor()
         try:

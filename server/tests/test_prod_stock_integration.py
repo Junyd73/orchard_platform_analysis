@@ -93,7 +93,7 @@ def _build_db() -> tuple[sqlite3.Connection, Path]:
            '2025-10-01',390,0,0,'U1',NULL,NULL);
 
         CREATE TABLE t_stock_log (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            log_seq INTEGER PRIMARY KEY AUTOINCREMENT,
             farm_cd TEXT, item_cd TEXT, variety_cd TEXT, harvest_year INTEGER,
             grade_cd TEXT, size_cd TEXT, weight REAL, io_type TEXT, qty REAL,
             remark TEXT, reg_id TEXT, reg_dt TEXT
@@ -162,7 +162,7 @@ class TestProdStockIntegration(unittest.TestCase):
         for r in prods:
             self.assertEqual(r["harvest_year"], 2026)
         logs = self.conn.execute(
-            "SELECT io_type, qty, remark FROM t_stock_log ORDER BY log_id"
+            "SELECT io_type, qty, remark FROM t_stock_log ORDER BY log_seq"
         ).fetchall()
         kinds = [(r[0], int(r[1]), r[2]) for r in logs]
         self.assertEqual(kinds.count(("OUT", 30, REMARK_RAW_OUT)), 1)

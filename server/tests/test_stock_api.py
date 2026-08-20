@@ -85,7 +85,7 @@ def _build_db() -> tuple[sqlite3.Connection, Path]:
         );
 
         CREATE TABLE t_stock_log (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            log_seq INTEGER PRIMARY KEY AUTOINCREMENT,
             farm_cd TEXT, item_cd TEXT, variety_cd TEXT, harvest_year INTEGER,
             grade_cd TEXT, size_cd TEXT, weight REAL, io_type TEXT, qty REAL,
             remark TEXT, reg_id TEXT, reg_dt TEXT
