@@ -48,11 +48,13 @@ import type { CustomerListItem } from '@/types/order'
 const LABEL_PAGE = '판매 미리보기'
 const LABEL_ADD_ITEM = '+ 품목 추가'
 const LABEL_CANCEL_PREP = '판매 준비 취소'
-const LABEL_SHIP_FEE = '배송'
+const LABEL_SHIP_FEE = '배송비'
+const LABEL_ITEM_AMT = '상품금액'
+const LABEL_TOTAL = '총액'
 const LABEL_GO_SALE = '판매 진행'
 const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
-const LABEL_VIEW_DEST = '보기'
+const LABEL_VIEW_DEST = '배송지 편집'
 const LABEL_DEST_SHEET = '배송지 배분'
 const LABEL_ADD_DEST = '+ 배송지 추가'
 const LABEL_DEST_DONE = '완료'
@@ -62,6 +64,8 @@ const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
 const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요.'
+const HINT_PARCEL_NEED = '배송지 배분이 필요한 품목이 있습니다.'
+const HINT_PARCEL_DONE = '모든 품목의 배송지가 지정되었습니다.'
 
 const router = useRouter()
 const { farmCd } = storeToRefs(useAppStore())
@@ -110,6 +114,29 @@ const unitHint = computed(() =>
   lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
 )
 
+/** 택배 상단 보조 안내 — 미지정 합계만 요약 */
+const parcelHeaderHint = computed(() => {
+  if (!isParcel.value || !lines.value.length) return ''
+  let unassigned = 0
+  let over = 0
+  let incomplete = false
+  for (const ln of lines.value) {
+    const sale = Math.floor(Number(ln.qty) || 0)
+    const got = Math.floor(allocQtySum(ln))
+    if (got < sale) {
+      unassigned += sale - got
+      incomplete = true
+    } else if (got > sale) {
+      over += got - sale
+      incomplete = true
+    }
+  }
+  if (!incomplete) return HINT_PARCEL_DONE
+  if (unassigned > 0) return `${HINT_PARCEL_NEED} · 미지정 ${unassigned}${unitHint.value}`
+  if (over > 0) return `${HINT_PARCEL_NEED} · 초과 ${over}${unitHint.value}`
+  return HINT_PARCEL_NEED
+})
+
 function normalizeShipFee(raw: unknown): number {
   const n = Number(raw)
   if (!Number.isFinite(n) || n < 0) return 0
@@ -148,6 +175,17 @@ function lineDeliveryStatus(idx: number) {
   const ln = lines.value[idx]
   if (!ln) return ''
   return deliveryStatusText(Number(ln.qty), allocQtySum(ln), lineUnit(ln))
+}
+
+/** ok | warn | danger — 배송상태 시각 구분 */
+function deliveryTone(idx: number): 'ok' | 'warn' | 'danger' {
+  const ln = lines.value[idx]
+  if (!ln) return 'warn'
+  const sale = Number(ln.qty)
+  const got = allocQtySum(ln)
+  if (Math.abs(got - sale) <= 1e-9) return 'ok'
+  if (got > sale) return 'danger'
+  return 'warn'
 }
 
 function maxQty(idx: number) {
@@ -402,7 +440,8 @@ onMounted(async () => {
       <p v-if="errorMsg" class="err" role="alert">{{ errorMsg }}</p>
 
       <template v-if="!successMsg">
-        <section class="header-block" aria-label="고객 배송" data-testid="sales-preview-header">
+        <!-- A. 상단 정보 -->
+        <section class="section section--header" aria-label="고객 배송" data-testid="sales-preview-header">
           <div class="header-row">
             <span class="header-row__lbl">{{ LABEL_CUSTOMER }}</span>
             <OdsSelect v-model="custmId" variant="form" class="header-row__ctrl" aria-label="고객 선택">
@@ -426,10 +465,22 @@ onMounted(async () => {
               </option>
             </OdsSelect>
           </div>
+          <p
+            v-if="isParcel && parcelHeaderHint"
+            class="header-hint"
+            :class="{
+              'header-hint--ok': !parcelIssue,
+              'header-hint--warn': Boolean(parcelIssue),
+            }"
+            data-testid="sales-preview-parcel-hint"
+          >
+            {{ parcelHeaderHint }}
+          </p>
         </section>
 
-        <section class="lines" aria-label="판매 품목" data-testid="sales-preview-lines">
-          <p class="lines__head">판매 품목 {{ lines.length }}건</p>
+        <!-- B. 판매 품목 -->
+        <section class="section section--lines" aria-label="판매 품목" data-testid="sales-preview-lines">
+          <h3 class="section__title">판매 품목 {{ lines.length }}건</h3>
 
           <p v-if="!lines.length" class="lines__empty" data-testid="sales-preview-empty">
             {{ LABEL_EMPTY_LINES }}
@@ -511,6 +562,7 @@ onMounted(async () => {
               <div
                 v-if="isParcel"
                 class="line__r3"
+                :class="`line__r3--${deliveryTone(idx)}`"
                 data-testid="sales-preview-delivery-status"
               >
                 <span class="line__dest-status">{{ lineDeliveryStatus(idx) }}</span>
@@ -526,6 +578,7 @@ onMounted(async () => {
             </li>
           </ul>
 
+          <!-- C. 보조 액션 -->
           <div class="lines__actions">
             <OdsButton
               type="button"
@@ -548,32 +601,41 @@ onMounted(async () => {
           </div>
         </section>
 
+        <!-- D. sticky summary -->
         <div class="footer" data-testid="sales-preview-footer" role="region" aria-label="합계">
           <div class="footer__meta">
             <p class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</p>
-            <p class="footer__amt">
-              상품 {{ formatOrderAmt(itemAmt) }}원 · {{ LABEL_SHIP_FEE }}
-              <template v-if="isParcel">
-                <span data-testid="sales-preview-ship-fee-sum">{{ formatOrderAmt(safeShipFee) }}</span>
-              </template>
-              <OdsInput
-                v-else
-                :model-value="String(safeShipFee)"
-                type="number"
-                min="0"
-                step="1"
-                inputmode="numeric"
-                variant="form"
-                bare
-                class="footer__fee"
-                data-testid="sales-preview-ship-fee"
-                aria-label="배송비"
-                @update:model-value="setShipFee($event)"
-              />
-              원
+            <p class="footer__row">
+              <span class="footer__lbl">{{ LABEL_ITEM_AMT }}</span>
+              <span class="footer__val">{{ formatOrderAmt(itemAmt) }}원</span>
+            </p>
+            <p class="footer__row">
+              <span class="footer__lbl">{{ LABEL_SHIP_FEE }}</span>
+              <span class="footer__val footer__val--fee">
+                <template v-if="isParcel">
+                  <span data-testid="sales-preview-ship-fee-sum">{{ formatOrderAmt(safeShipFee) }}</span>원
+                </template>
+                <template v-else>
+                  <OdsInput
+                    :model-value="String(safeShipFee)"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                    variant="form"
+                    bare
+                    class="footer__fee"
+                    data-testid="sales-preview-ship-fee"
+                    aria-label="배송비"
+                    @update:model-value="setShipFee($event)"
+                  />
+                  원
+                </template>
+              </span>
             </p>
             <p class="footer__total">
-              총 <strong>{{ formatOrderAmt(payAmt) }}원</strong>
+              <span class="footer__lbl">{{ LABEL_TOTAL }}</span>
+              <strong>{{ formatOrderAmt(payAmt) }}원</strong>
             </p>
           </div>
           <OdsButton
@@ -722,18 +784,17 @@ onMounted(async () => {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 4.75rem;
+  --sales-preview-footer-h: 8.5rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   min-height: 100%;
   width: 100%;
-  background: var(--ods-color-bg, #FDFBF7);
+  background: var(--ods-color-bg);
   overflow-x: hidden;
   box-sizing: border-box;
 }
 .content {
-  /* .ods-page-content: max-width 480 + 중앙 정렬 — 덮어쓰지 않음 */
-  gap: var(--ods-space-12);
+  gap: var(--ods-page-content-gap, var(--ods-space-16));
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin-inline: auto;
@@ -745,45 +806,60 @@ onMounted(async () => {
 }
 .title {
   margin: 0;
-  font: var(--ods-font-title-3);
+  font: var(--ods-font-title-2);
+  color: var(--ods-color-text);
 }
 
-.header-block {
+.section {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-8);
-  padding: var(--ods-space-8) 0;
+  gap: var(--ods-space-12);
+  min-width: 0;
+}
+.section--header {
+  gap: var(--ods-form-field-gap, 18px);
+  padding-bottom: var(--ods-space-16);
   border-bottom: 1px solid var(--ods-color-border);
+}
+.section__title {
+  margin: 0;
+  font: var(--ods-font-headline);
+  color: var(--ods-color-text);
 }
 .header-row {
   display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr);
+  grid-template-columns: 4.25rem minmax(0, 1fr);
   gap: var(--ods-space-8);
   align-items: center;
 }
 .header-row__lbl {
-  font: var(--ods-font-footnote, 12px);
-  color: var(--ods-color-text-secondary);
-  font-weight: 600;
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-text-label);
 }
 .header-row__ctrl {
   min-width: 0;
   width: 100%;
 }
-.addr {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-8);
+.header-hint {
+  margin: 0;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button, 8px);
+  font: var(--ods-font-form-help);
+  background: var(--ods-color-bg-muted);
+  color: var(--ods-color-text-secondary);
+}
+.header-hint--ok {
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+  color: var(--ods-color-primary);
+}
+.header-hint--warn {
+  background: color-mix(in srgb, var(--ods-color-caution) 18%, white);
+  color: var(--ods-color-gray-900);
 }
 
-.lines__head {
-  margin: 0 0 var(--ods-space-8);
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-}
 .lines__empty {
   margin: 0;
-  padding: var(--ods-space-16) 0;
+  padding: var(--ods-space-24) 0;
   font: var(--ods-font-body-2);
   color: var(--ods-color-text-secondary);
   text-align: center;
@@ -794,20 +870,22 @@ onMounted(async () => {
   padding: 0;
 }
 .line {
-  padding: var(--ods-space-10) 0;
+  padding: var(--ods-space-12) 0;
   border-bottom: 1px solid var(--ods-color-border);
   min-width: 0;
 }
+.line:last-child {
+  border-bottom: none;
+}
 .line__r1 {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  gap: var(--ods-space-4);
-  align-items: start;
-  margin-bottom: var(--ods-space-6);
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: var(--ods-space-8);
+  align-items: center;
+  margin-bottom: var(--ods-space-8);
 }
 .line__title {
-  font: var(--ods-font-footnote, 12px);
-  font-weight: 600;
+  font: var(--ods-font-headline);
   color: var(--ods-color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -815,39 +893,44 @@ onMounted(async () => {
   min-width: 0;
 }
 .line__remove {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border: none;
-  background: transparent;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button, 8px);
+  background: var(--ods-color-white);
   color: var(--ods-color-text-secondary);
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
+}
+.line__remove:active {
+  background: var(--ods-color-bg-muted);
 }
 .line__r2 {
   display: flex;
   align-items: center;
-  gap: var(--ods-space-4);
+  gap: var(--ods-space-8);
   min-width: 0;
   flex-wrap: nowrap;
 }
 .qty {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
+  gap: var(--ods-space-4);
   flex: 0 0 auto;
 }
 .qty__btn {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-white, #fff);
-  font-size: 13px;
+  border-radius: var(--ods-radius-button, 8px);
+  background: var(--ods-color-white);
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
+  color: var(--ods-color-text);
 }
 .qty__btn:disabled {
   opacity: 0.4;
@@ -855,53 +938,101 @@ onMounted(async () => {
 }
 .qty :deep(input.ods-input),
 .qty :deep(.qty__input.ods-input) {
-  width: 36px;
-  min-width: 36px;
-  max-width: 36px;
-  height: 26px;
-  min-height: 26px;
-  padding: 0 1px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 2px;
   text-align: center;
-  font-size: var(--ods-font-size-footnote, 12px);
+  font: var(--ods-font-form-value);
 }
 .price {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--ods-space-4);
   flex: 1 1 auto;
   min-width: 0;
 }
 .price__lbl {
   flex-shrink: 0;
-  font: var(--ods-font-footnote, 12px);
+  font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
 .price :deep(input.ods-input),
 .price :deep(.price__input.ods-input) {
   width: 100%;
-  min-width: 52px;
-  max-width: 88px;
-  height: 26px;
-  min-height: 26px;
-  padding: 0 3px;
+  min-width: 56px;
+  max-width: 96px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 var(--ods-space-4);
   text-align: right;
-  font-size: var(--ods-font-size-footnote, 12px);
+  font: var(--ods-font-form-value);
 }
 .line__sub {
   flex: 0 0 auto;
   margin-left: auto;
-  font: var(--ods-font-footnote, 12px);
-  font-weight: 700;
+  font: var(--ods-font-headline);
   color: var(--ods-color-text);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.line__r3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  margin-top: var(--ods-space-8);
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button, 8px);
+  min-width: 0;
+  background: var(--ods-color-bg-muted);
+}
+.line__r3--ok {
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+}
+.line__r3--warn {
+  background: color-mix(in srgb, var(--ods-color-caution) 16%, white);
+}
+.line__r3--danger {
+  background: color-mix(in srgb, var(--ods-color-danger) 12%, white);
+}
+.line__dest-status {
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.line__r3--ok .line__dest-status {
+  color: var(--ods-color-primary);
+}
+.line__r3--danger .line__dest-status {
+  color: var(--ods-color-danger);
+}
+.line__dest-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-primary);
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
 }
 
 .lines__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ods-space-8);
-  margin-top: var(--ods-space-12);
+  margin-top: var(--ods-space-4);
+  padding-top: var(--ods-space-12);
+  border-top: 1px solid var(--ods-color-border);
 }
 
 .footer {
@@ -912,57 +1043,84 @@ onMounted(async () => {
   z-index: 40;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--ods-space-8);
-  align-items: center;
+  gap: var(--ods-space-12);
+  align-items: end;
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-10) var(--ods-page-padding-x, var(--ods-space-16));
-  background: var(--ods-color-bg-muted, #f5f2ec);
+  padding: var(--ods-space-12) var(--ods-page-padding-x, var(--ods-space-16));
+  background: var(--ods-color-bg);
   border-top: 1px solid var(--ods-color-border);
-  box-shadow: none;
-  border-radius: 0;
+  box-shadow: 0 -4px 16px rgba(33, 33, 33, 0.06);
 }
 .footer__meta {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ods-space-4);
 }
-.footer__count,
-.footer__amt {
+.footer__count {
   margin: 0;
-  font: var(--ods-font-footnote, 12px);
+  font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
-.footer__total {
+.footer__row {
   margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
   font: var(--ods-font-body-2);
+  color: var(--ods-color-text-secondary);
+}
+.footer__lbl {
+  flex-shrink: 0;
+}
+.footer__val {
+  font-variant-numeric: tabular-nums;
   color: var(--ods-color-text);
 }
+.footer__val--fee {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+}
+.footer__total {
+  margin: var(--ods-space-4) 0 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  font: var(--ods-font-body-1);
+  color: var(--ods-color-text);
+}
+.footer__total .footer__lbl {
+  font: var(--ods-font-headline);
+}
 .footer__total strong {
-  font-size: 16px;
-  font-weight: 800;
+  font: var(--ods-font-title-2);
   color: var(--ods-color-primary);
+  font-variant-numeric: tabular-nums;
 }
 .footer__fee {
   display: inline-block;
-  width: 64px;
+  width: 72px;
   vertical-align: middle;
 }
 .footer :deep(.footer__fee.ods-input),
 .footer :deep(input.footer__fee) {
-  width: 64px;
-  height: 24px;
-  min-height: 24px;
-  padding: 0 4px;
+  width: 72px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 var(--ods-space-4);
   text-align: right;
-  font-size: var(--ods-font-size-footnote, 12px);
+  font: var(--ods-font-form-value);
 }
 .footer__go {
   flex-shrink: 0;
-  min-width: 96px;
+  min-width: 108px;
+  align-self: stretch;
 }
 
 .err {
@@ -971,73 +1129,54 @@ onMounted(async () => {
   font: var(--ods-font-body-2);
 }
 .ok {
-  color: #2f855a;
+  color: var(--ods-color-primary);
   white-space: pre-line;
-  background: #e6f4ea;
-  padding: var(--ods-space-8);
-  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button, 8px);
   font: var(--ods-font-body-2);
 }
 
 @media (max-width: 360px) {
   .line__r2 {
-    gap: 2px;
+    gap: var(--ods-space-4);
   }
   .qty__btn {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
   }
   .qty :deep(input.ods-input),
   .qty :deep(.qty__input.ods-input) {
-    width: 32px;
-    min-width: 32px;
-    max-width: 32px;
-    height: 24px;
-    min-height: 24px;
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    height: 28px;
+    min-height: 28px;
   }
   .price :deep(input.ods-input),
   .price :deep(.price__input.ods-input) {
-    max-width: 72px;
+    max-width: 80px;
     min-width: 48px;
-    height: 24px;
-    min-height: 24px;
+    height: 28px;
+    min-height: 28px;
+  }
+  .footer__go {
+    min-width: 96px;
   }
 }
 
 @media (max-width: 390px) {
+  .page {
+    --sales-preview-footer-h: 12.5rem;
+  }
   .footer {
     grid-template-columns: 1fr;
+    align-items: stretch;
   }
   .footer__go {
     width: 100%;
+    min-height: 48px;
   }
-}
-
-.line__r3 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ods-space-8);
-  margin-top: var(--ods-space-6);
-  min-width: 0;
-}
-.line__dest-status {
-  font: var(--ods-font-footnote, 12px);
-  color: var(--ods-color-text-secondary);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.line__dest-btn {
-  flex-shrink: 0;
-  border: none;
-  background: transparent;
-  color: var(--ods-color-primary, #2f6b4f);
-  font: var(--ods-font-footnote, 12px);
-  font-weight: 700;
-  cursor: pointer;
-  padding: 0 var(--ods-space-4);
 }
 .dest-overlay {
   position: fixed;
