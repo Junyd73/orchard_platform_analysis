@@ -60,52 +60,69 @@ const historyLoaded = ref(false) // 최초 펼침 1회만 listStockLogs 호출
 const selectedKeys = ref<string[]>([])
 const adjustQty = ref('1')
 const adjustReason = ref(REASON_DISPOSE)
-const adjustDirection = ref<'IN' | 'OUT'>('IN')
+const adjustDirection = ref<'IN' | 'OUT'>('OUT')
 const adjustBusy = ref(false)
 const adjustError = ref('')
-const adjustSuccess = ref('')
+/** 시트 닫힌 뒤 메인 화면에서 보이는 성공 안내 */
+const pageSuccess = ref('')
 const adjustReasons = ref<{ value: string; label: string }[]>(
   ADJUST_REASON_OPTIONS.map((r) => ({ value: r.value, label: r.label })),
 )
 const canAdjustIn = computed(() => reasonAllowsIn(adjustReason.value))
 const canAdjustOut = computed(() => reasonAllowsOut(adjustReason.value))
 
-const adjustQtyNum = computed(() => Number(adjustQty.value))
+const adjustQtyNum = computed(() => {
+  const n = Number(adjustQty.value)
+  return Number.isFinite(n) ? n : NaN
+})
 const adjustDirNm = computed(() => (adjustDirection.value === 'IN' ? '증가' : '감소'))
 const adjustReasonLabel = computed(
   () => adjustReasons.value.find((r) => r.value === adjustReason.value)?.label || adjustReason.value,
 )
 
+/** 사유에 맞게 미리보기/실행 방향을 즉시 정합 */
+function syncDirectionForReason() {
+  const allowIn = reasonAllowsIn(adjustReason.value)
+  const allowOut = reasonAllowsOut(adjustReason.value)
+  if (allowOut && !allowIn) {
+    adjustDirection.value = 'OUT'
+    return
+  }
+  if (allowIn && !allowOut) {
+    adjustDirection.value = 'IN'
+    return
+  }
+  // 실사차이/기타: 현재 방향이 유효하면 유지, 아니면 OUT 기본
+  if (adjustDirection.value !== 'IN' && adjustDirection.value !== 'OUT') {
+    adjustDirection.value = 'OUT'
+  }
+}
+
 const previewWarnOut = computed(() => {
   if (!logTarget.value) return false
   if (adjustDirection.value !== 'OUT') return false
+  if (!(adjustQtyNum.value > 0)) return false
   return adjustQtyNum.value > logTarget.value.available_qty + 1e-9
 })
-
-const previewWarnMessage = computed(() => (previewWarnOut.value ? '가용재고보다 많이 줄일 수 없습니다.' : ''))
 
 const previewAfterQty = computed(() => {
   if (!logTarget.value) return 0
   const curr = Number(logTarget.value.real_qty || 0)
-  const qty = Math.max(0, adjustQtyNum.value)
+  const qty = Math.max(0, Number.isFinite(adjustQtyNum.value) ? adjustQtyNum.value : 0)
   return adjustDirection.value === 'IN' ? curr + qty : curr - qty
 })
 
 const previewText = computed(() => {
   if (!logTarget.value) return ''
   const unit = stockUnit(logTarget.value.item_cd)
-  const qty = adjustQtyNum.value
+  const qty = Number.isFinite(adjustQtyNum.value) ? adjustQtyNum.value : 0
   const warn = previewWarnOut.value ? '\n(가용재고 초과)' : ''
   return `${adjustReasonLabel.value} · ${qty}${unit} ${adjustDirNm.value}\n현재 ${logTarget.value.real_qty}${unit} → 조정 후 ${previewAfterQty.value}${unit}${warn}`
 })
 
-const canApplyAdjust = computed(() => {
-  if (!logTarget.value) return false
-  if (!(adjustQtyNum.value > 0)) return false
-  if (adjustDirection.value === 'IN' && !canAdjustIn.value) return false
-  if (adjustDirection.value === 'OUT' && !canAdjustOut.value) return false
-  if (previewWarnOut.value) return false
-  return true
+watch(adjustReason, () => {
+  syncDirectionForReason()
+  adjustError.value = ''
 })
 
 // ── computed ─────────────────────────────────────────────────────────
@@ -190,11 +207,13 @@ async function openAdjustSheet(item: StockItem) {
   historyLoaded.value = false
 
   adjustError.value = ''
-  adjustSuccess.value = ''
+  pageSuccess.value = ''
   adjustQty.value = '1'
-  adjustDirection.value = 'IN'
+  adjustReason.value = REASON_DISPOSE
+  syncDirectionForReason()
 
   await loadAdjustReasons()
+  syncDirectionForReason()
 }
 
 async function openHistoryLogs() {
@@ -267,31 +286,39 @@ function sellProduct(row: StockItem) {
   void router.push({ name: 'ship-confirm' })
 }
 
-async function runAdjust() {
+async function requestAdjust(ioType: 'IN' | 'OUT') {
   const row = logTarget.value
   if (!row || adjustBusy.value) return
-  const qty = Number(adjustQty.value)
-  if (!(qty > 0)) {
+
+  adjustDirection.value = ioType
+  adjustError.value = ''
+  pageSuccess.value = ''
+
+  const qty = adjustQtyNum.value
+  if (!Number.isFinite(qty) || !(qty > 0)) {
     adjustError.value = '수량을 입력해 주세요.'
     return
   }
 
-  const ioType = adjustDirection.value
   if ((ioType === 'IN' && !canAdjustIn.value) || (ioType === 'OUT' && !canAdjustOut.value)) {
     adjustError.value = '이 사유로는 선택한 조정을 할 수 없습니다.'
     return
   }
 
-  // UI에서 먼저 OUT 가능 여부를 차단(코어 reserved_qty 보호 포함 최종 방어).
   if (ioType === 'OUT' && qty > row.available_qty + 1e-9) {
     adjustError.value = '가용재고보다 많이 줄일 수 없습니다.'
-    adjustSuccess.value = ''
     return
   }
 
+  const unit = stockUnit(row.item_cd)
+  const dirNm = ioType === 'IN' ? '증가' : '감소'
+  const after = ioType === 'IN' ? Number(row.real_qty) + qty : Number(row.real_qty) - qty
+  const confirmMsg =
+    `${adjustReasonLabel.value} 사유로 ${qty}${unit}를 ${dirNm}하시겠습니까?\n\n` +
+    `현재 ${row.real_qty}${unit} → 조정 후 ${after}${unit}`
+  if (!window.confirm(confirmMsg)) return
+
   adjustBusy.value = true
-  adjustError.value = ''
-  adjustSuccess.value = ''
   try {
     await adjustStock(farmCd.value, {
       wh_cd: row.wh_cd,
@@ -308,22 +335,11 @@ async function runAdjust() {
     })
     await load()
     const fresh = rows.value.find((r) => rowKey(r) === rowKey(row))
-    if (fresh) {
-      logTarget.value = fresh
-      const reasonLabel = adjustReasons.value.find((r) => r.value === adjustReason.value)?.label || adjustReason.value
-      const dirNm = ioType === 'IN' ? '증가' : '감소'
-      const unit = stockUnit(fresh.item_cd)
-      adjustSuccess.value = `재고 조정이 완료되었습니다.\n${cardTitle(fresh)} / ${reasonLabel} / ${dirNm} ${qty}${unit} / 현재 ${fresh.real_qty}${unit}`
-      // 이력 아코디언이 열린 상태면 stale 가능성이 있으므로 접고 캐시를 비웁니다.
-      if (historyOpen.value) {
-        historyOpen.value = false
-        historyLoaded.value = false
-        logs.value = []
-        logsError.value = ''
-      }
-    } else {
-      closeLog()
-    }
+    const currentQty = fresh ? fresh.real_qty : after
+    const title = fresh ? cardTitle(fresh) : cardTitle(row)
+    pageSuccess.value =
+      `재고 조정이 완료되었습니다.\n${title} · ${adjustReasonLabel.value} · ${qty}${unit} ${dirNm} · 현재 ${currentQty}${unit}`
+    closeLog()
   } catch (err) {
     adjustError.value = err instanceof ApiClientError ? err.message : '재고를 조정하지 못했습니다.'
   } finally {
@@ -339,7 +355,6 @@ function closeLog() {
   logsError.value = ''
   logsLoading.value = false
   adjustError.value = ''
-  adjustSuccess.value = ''
 }
 
 // ── 헬퍼 ─────────────────────────────────────────────────────────────
@@ -389,6 +404,7 @@ function formatRegDt(dt: string) {
 
 <template>
   <div class="stock-view">
+    <p v-if="pageSuccess" class="stock-view__page-ok">{{ pageSuccess }}</p>
 
     <!-- Level 2: 원물 / 상품 / 배즙 탭 -->
     <div class="stock-view__type-tabs" role="tablist" aria-label="재고 종류">
@@ -514,57 +530,43 @@ function formatRegDt(dt: string) {
           </div>
 
           <div v-if="logTarget" class="stock-log-adjust">
-            <p class="stock-log-adjust__title">재고 조정</p>
-
-            <p class="stock-log-adjust__lbl">조정 사유</p>
-            <OdsSelect v-model="adjustReason" variant="form">
-              <option v-for="r in adjustReasons" :key="r.value" :value="r.value">
-                {{ r.label }}
-              </option>
-            </OdsSelect>
-
-            <p class="stock-log-adjust__lbl">조정 수량</p>
-            <OdsInput v-model="adjustQty" type="number" variant="form" bare />
+            <div class="stock-log-adjust__row">
+              <div class="stock-log-adjust__field stock-log-adjust__field--reason">
+                <p class="stock-log-adjust__lbl">조정 사유</p>
+                <OdsSelect v-model="adjustReason" variant="form">
+                  <option v-for="r in adjustReasons" :key="r.value" :value="r.value">
+                    {{ r.label }}
+                  </option>
+                </OdsSelect>
+              </div>
+              <div class="stock-log-adjust__field stock-log-adjust__field--qty">
+                <p class="stock-log-adjust__lbl">조정 수량</p>
+                <OdsInput v-model="adjustQty" type="number" variant="form" bare />
+              </div>
+            </div>
 
             <p class="stock-log-adjust__lbl">조정 방향</p>
             <div class="stock-log-adjust__btns">
               <OdsButton
                 type="button"
-                variant="secondary"
+                variant="primary"
                 :disabled="adjustBusy || !canAdjustIn"
-                :class="{ 'stock-log-dir-btn--active': adjustDirection === 'IN' }"
-                @click="adjustDirection = 'IN'"
+                @click="requestAdjust('IN')"
               >
                 증가
               </OdsButton>
               <OdsButton
                 type="button"
-                variant="secondary"
+                variant="primary"
                 :disabled="adjustBusy || !canAdjustOut"
-                :class="{ 'stock-log-dir-btn--active': adjustDirection === 'OUT' }"
-                @click="adjustDirection = 'OUT'"
+                @click="requestAdjust('OUT')"
               >
                 감소
               </OdsButton>
             </div>
 
-            <!-- 실행 미리보기 -->
             <p v-if="previewText" class="stock-log-adjust__preview">{{ previewText }}</p>
-            <p v-if="previewWarnMessage" class="stock-log-sheet__msg stock-log-sheet__msg--err">
-              {{ previewWarnMessage }}
-            </p>
-
-            <p v-if="adjustSuccess" class="stock-log-sheet__msg stock-log-sheet__msg--ok">{{ adjustSuccess }}</p>
             <p v-if="adjustError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ adjustError }}</p>
-
-            <div class="stock-log-adjust__apply">
-              <OdsButton type="button" variant="secondary" :disabled="adjustBusy" @click="closeLog">
-                취소
-              </OdsButton>
-              <OdsButton type="button" variant="primary" :disabled="adjustBusy || !canApplyAdjust" @click="runAdjust">
-                조정 적용
-              </OdsButton>
-            </div>
 
             <!-- 이력은 “필요할 때만” 버튼으로 분리해서 조회 -->
             <div class="stock-log-history">
@@ -618,6 +620,15 @@ function formatRegDt(dt: string) {
   padding: var(--ods-space-12) var(--ods-space-16);
   min-height: 100%;
   background: var(--ods-color-bg, #FDFBF7);
+}
+.stock-view__page-ok {
+  margin: 0;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  font: var(--ods-font-body-2);
+  color: #2F855A;
+  background: #E6F4EA;
+  border-radius: var(--ods-radius-card);
+  white-space: pre-line;
 }
 
 /* ── Level 2 탭 (상품/원물/배즙) — 상단 4탭보다 작게 ─────────────── */
@@ -830,7 +841,7 @@ function formatRegDt(dt: string) {
   font: var(--ods-font-body-2);
   color: var(--ods-color-text-secondary);
   text-align: center;
-  padding: var(--ods-space-16) 0;
+  padding: var(--ods-space-8) 0;
 }
 .stock-log-sheet__msg--err {
   color: var(--ods-color-danger);
@@ -887,18 +898,21 @@ function formatRegDt(dt: string) {
   flex-direction: column;
   gap: var(--ods-space-8);
 }
-.stock-log-adjust__title {
-  margin: 0;
-  font: var(--ods-font-form-help);
-  font-weight: 700;
+.stock-log-adjust__row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr);
+  gap: var(--ods-space-8);
+  align-items: end;
+}
+.stock-log-adjust__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+  min-width: 0;
 }
 .stock-log-adjust__btns {
   display: flex;
   gap: var(--ods-space-8);
-}
-
-.stock-log-dir-btn--active {
-  border: 1px solid var(--ods-color-primary);
 }
 
 .stock-log-adjust__lbl {
@@ -918,29 +932,20 @@ function formatRegDt(dt: string) {
   white-space: pre-line;
 }
 
-.stock-log-adjust__apply {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ods-space-8);
-}
-
-.stock-log-sheet__msg--ok {
-  color: #2F855A;
-  white-space: pre-line;
-}
-
 .stock-log-history {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-8);
+  margin-top: var(--ods-space-4);
+  padding-top: var(--ods-space-8);
+  border-top: 1px solid var(--ods-color-border);
 }
 
 .stock-log-history__body {
-  margin-top: var(--ods-space-8);
+  margin-top: var(--ods-space-4);
 }
 
-.stock-log-history-btn {
-  align-self: flex-start;
+.stock-log-history-accordion-btn {
+  align-self: stretch;
 }
 </style>

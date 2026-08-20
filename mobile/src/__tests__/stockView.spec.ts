@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import StockView from '@/features/stock/StockView.vue'
 import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
+import {
+  REASON_COUNT_DIFF,
+  REASON_DISPOSE,
+  REASON_OTHER,
+  REASON_RETURN,
+} from '@/features/stock/stockAdjustConstants'
 
 const listFruitStock = vi.fn()
 const listStockLogs = vi.fn()
@@ -31,6 +37,38 @@ function router() {
   })
 }
 
+async function openSheet() {
+  const r = router()
+  await r.push('/orders')
+  await r.isReady()
+  const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
+  await flushPromises()
+  await wrapper.find('.stock-view__card').trigger('click')
+  await flushPromises()
+  return wrapper
+}
+
+function dirButtons() {
+  const btns = Array.from(document.querySelectorAll('.stock-log-adjust__btns button'))
+  const inc = btns.find((b) => (b.textContent || '').includes('증가')) as HTMLButtonElement | undefined
+  const dec = btns.find((b) => (b.textContent || '').includes('감소')) as HTMLButtonElement | undefined
+  return { inc, dec }
+}
+
+async function setReason(value: string) {
+  const el = document.querySelector('.stock-log-adjust select') as HTMLSelectElement | null
+  expect(el).toBeTruthy()
+  await new DOMWrapper(el!).setValue(value)
+  await flushPromises()
+}
+
+async function setQty(value: string) {
+  const el = document.querySelector('.stock-log-adjust input.ods-input') as HTMLInputElement | null
+  expect(el).toBeTruthy()
+  await new DOMWrapper(el!).setValue(value)
+  await flushPromises()
+}
+
 describe('StockView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -38,6 +76,7 @@ describe('StockView', () => {
     listStockLogs.mockReset()
     adjustStock.mockReset()
     fetchCommonCodes.mockReset()
+    vi.restoreAllMocks()
     listFruitStock.mockResolvedValue([
       {
         farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
@@ -51,6 +90,7 @@ describe('StockView', () => {
     listStockLogs.mockResolvedValue([])
     fetchCommonCodes.mockResolvedValue([])
     adjustStock.mockResolvedValue({ ok: true, qty: 1, io_type: 'OUT' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
   it('mount 시 fruit-stock을 조회하고 가용/현재를 표시', async () => {
@@ -130,146 +170,184 @@ describe('StockView', () => {
     expect(store.shipLines[1].item_cd).toBe('FR010202')
   })
 
-  it('T1~T9: 조정 시트 오픈 시 이력 자동조회 없음 + 폐기 방향 버튼', async () => {
-    listStockLogs.mockRejectedValueOnce(new Error('boom'))
-    const r = router()
-    await r.push('/orders')
-    await r.isReady()
-    const wrapper = mount(StockView, {
-      global: { plugins: [r] },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    await wrapper.find('.stock-view__card').trigger('click')
-    await flushPromises()
-    const sheet = document.body.textContent || ''
-    // 조정 시트 오픈 시 이력 API(listStockLogs)는 자동호출하지 않습니다.
+  it('T1 폐기: 증가 disabled / 감소 enabled + 이력 자동조회 없음', async () => {
+    const wrapper = await openSheet()
     expect(listStockLogs).not.toHaveBeenCalled()
-    // 오픈 직후 “이력을 불러오지 못했습니다” 문구가 노출되면 안 됩니다.
-    expect(sheet).not.toContain('이력을 불러오지 못했습니다')
+    const { inc, dec } = dirButtons()
+    expect(inc?.disabled).toBe(true)
+    expect(dec?.disabled).toBe(false)
+    expect(document.body.textContent || '').toContain('감소')
+    expect(document.body.textContent || '').not.toContain('조정 적용')
+    expect(document.querySelector('.stock-log-adjust__row')).toBeTruthy()
+    wrapper.unmount()
+  })
 
-    // 입력 라벨/미리보기 표시 확인
-    expect(sheet).toContain('조정 사유')
-    expect(sheet).toContain('조정 수량')
-    expect(sheet).toContain('조정 방향')
-    expect(sheet).toContain('조정 후')
+  it('T2 반품: 증가 enabled / 감소 disabled', async () => {
+    const wrapper = await openSheet()
+    await setReason(REASON_RETURN)
+    const { inc, dec } = dirButtons()
+    expect(inc?.disabled).toBe(false)
+    expect(dec?.disabled).toBe(true)
+    expect(document.body.textContent || '').toContain('증가')
+    wrapper.unmount()
+  })
 
-    expect(sheet).toContain('폐기')
-    expect(sheet).toContain('파손')
-    expect(sheet).toContain('실사차이')
-    const btns = Array.from(document.querySelectorAll('.stock-log-adjust button'))
-    const inc = btns.find((b) => (b.textContent || '').includes('증가')) as HTMLButtonElement | undefined
-    const dec = btns.find((b) => (b.textContent || '').includes('감소')) as HTMLButtonElement | undefined
+  it('T3 실사차이/기타: 증가·감소 모두 enabled', async () => {
+    const wrapper = await openSheet()
+    await setReason(REASON_COUNT_DIFF)
+    let btns = dirButtons()
+    expect(btns.inc?.disabled).toBe(false)
+    expect(btns.dec?.disabled).toBe(false)
+    await setReason(REASON_OTHER)
+    btns = dirButtons()
+    expect(btns.inc?.disabled).toBe(false)
+    expect(btns.dec?.disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('T4 사유 변경 시 금지 방향이 남지 않음', async () => {
+    const wrapper = await openSheet()
+    await setReason(REASON_RETURN)
+    expect((document.body.textContent || '')).toContain('증가')
+    await setReason(REASON_DISPOSE)
+    const sheet = document.body.textContent || ''
+    expect(sheet).toContain('감소')
+    expect(sheet).not.toMatch(/폐기 · \d+박스 증가/)
+    const { inc, dec } = dirButtons()
     expect(inc?.disabled).toBe(true)
     expect(dec?.disabled).toBe(false)
     wrapper.unmount()
   })
 
-  it('T6~T7 조정 성공 시 완료 메시지(사유/증감/수량/결과수량) 표시', async () => {
-    const r = router()
-    await r.push('/orders')
-    await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
-    await flushPromises()
-
-    await wrapper.find('.stock-view__card').trigger('click')
-    await flushPromises()
-
-    // 감소(OUT) 선택
-    const decBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
-      (b) => (b.textContent || '').includes('감소'),
-    ) as HTMLButtonElement | undefined
-    expect(decBtn).toBeTruthy()
-    decBtn?.click()
-    await flushPromises()
-
-    // 조정 적용
-    const applyBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
-      (b) => (b.textContent || '').includes('조정 적용'),
-    ) as HTMLButtonElement | undefined
-    expect(applyBtn).toBeTruthy()
-    applyBtn?.click()
-    await flushPromises()
-
+  it('T5 폐기 + qty3 → 미리보기 감소 / 조정 후 7', async () => {
+    const wrapper = await openSheet()
+    await setQty('3')
     const sheet = document.body.textContent || ''
-    expect(sheet).toContain('재고 조정이 완료되었습니다')
-    expect(sheet).toContain('폐기')
-    expect(sheet).toContain('감소')
-    expect(sheet).toContain('현재 10박스')
+    expect(sheet).toContain('폐기 · 3박스 감소')
+    expect(sheet).toContain('조정 후 7박스')
     wrapper.unmount()
   })
 
-  it('T8 감소 초과 시 가용재고 초과 오류 안내 + API 호출 차단', async () => {
-    const r = router()
-    await r.push('/orders')
-    await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
-    await flushPromises()
-
-    await wrapper.find('.stock-view__card').trigger('click')
-    await flushPromises()
-
-    // 감소(OUT) 선택
-    const decBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
-      (b) => (b.textContent || '').includes('감소'),
-    ) as HTMLButtonElement | undefined
-    decBtn?.click()
-    await flushPromises()
-
-    // 조정 수량을 11(가용 10 초과)로 입력
-    const qtyInput = document.querySelector('.stock-log-adjust input.ods-input') as HTMLInputElement | null
-    expect(qtyInput).toBeTruthy()
-    qtyInput!.value = '11'
-    qtyInput!.dispatchEvent(new InputEvent('input', { bubbles: true }))
-    await flushPromises()
-
-    // Vue v-model이 반영되었는지(입력값이 유지되는지) 확인
-    expect(qtyInput!.value).toBe('11')
-
-    const sheetAfterEdit = document.body.textContent || ''
-    expect(sheetAfterEdit).toContain('11박스')
-
-    const applyBtn = Array.from(document.querySelectorAll('.stock-log-adjust button')).find(
-      (b) => (b.textContent || '').includes('조정 적용'),
-    ) as HTMLButtonElement | undefined
-    expect(applyBtn).toBeTruthy()
-    // 미리보기 경고 상태에서는 “조정 적용”이 비활성화되어 API 호출을 막습니다.
-    expect(applyBtn?.disabled).toBe(true)
-
+  it('T6 반품 + qty2 → 미리보기 증가 / 조정 후 12', async () => {
+    const wrapper = await openSheet()
+    await setReason(REASON_RETURN)
+    await setQty('2')
     const sheet = document.body.textContent || ''
-    expect(sheet).toContain('가용재고보다 많이 줄일 수 없습니다')
-    // 실패 시도이므로 adjustStock 호출은 0건이어야 합니다.
+    expect(sheet).toContain('반품 · 2박스 증가')
+    expect(sheet).toContain('조정 후 12박스')
+    wrapper.unmount()
+  })
+
+  it('T7~T9 confirm 후 adjustStock 호출 / 취소 시 미호출', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = await openSheet()
+    await setQty('3')
+    const { dec } = dirButtons()
+    dec?.click()
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalled()
     expect(adjustStock).not.toHaveBeenCalled()
+    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
+
+    confirmSpy.mockReturnValue(true)
+    confirmSpy.mockClear()
+    dec?.click()
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(adjustStock).toHaveBeenCalledTimes(1)
+    expect(adjustStock.mock.calls[0][1]).toMatchObject({ io_type: 'OUT', qty: 3, reason_cd: REASON_DISPOSE })
     wrapper.unmount()
   })
 
-  it('T9 이력 아코디언: 최초만 조회 + 접힘/재펼침은 캐시 사용', async () => {
-    listStockLogs.mockRejectedValueOnce(new Error('boom'))
-    const r = router()
-    await r.push('/orders')
-    await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
+  it('T10 OUT 초과 시 confirm/API 금지 + 오류 표시', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    confirmSpy.mockClear()
+    const wrapper = await openSheet()
+    await setQty('11')
+    const { dec } = dirButtons()
+    dec?.click()
     await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(adjustStock).not.toHaveBeenCalled()
+    expect(document.body.textContent || '').toContain('가용재고보다 많이 줄일 수 없습니다')
+    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
+    wrapper.unmount()
+  })
 
-    await wrapper.find('.stock-view__card').trigger('click')
+  it('T11 성공 시 목록 reload + sheet close + 메인 성공 메시지', async () => {
+    listFruitStock
+      .mockResolvedValueOnce([
+        {
+          farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
+          variety_cd: 'FR010101', variety_nm: '신고',
+          grade_cd: 'GR010100', grade_nm: '특',
+          size_cd: 'FR020101', size_nm: '25과',
+          weight: 15, harvest_year: 2026, storage_dt: '2026-08-19',
+          in_qty: 10, out_qty: 0, real_qty: 10, reserved_qty: 0, available_qty: 10,
+        },
+      ])
+      .mockResolvedValue([
+        {
+          farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
+          variety_cd: 'FR010101', variety_nm: '신고',
+          grade_cd: 'GR010100', grade_nm: '특',
+          size_cd: 'FR020101', size_nm: '25과',
+          weight: 15, harvest_year: 2026, storage_dt: '2026-08-19',
+          in_qty: 10, out_qty: 3, real_qty: 7, reserved_qty: 0, available_qty: 7,
+        },
+      ])
+    const wrapper = await openSheet()
+    await setQty('3')
+    dirButtons().dec?.click()
     await flushPromises()
+    expect(document.querySelector('.stock-log-sheet')).toBeNull()
+    expect(wrapper.text()).toContain('재고 조정이 완료되었습니다')
+    expect(wrapper.text()).toContain('폐기')
+    expect(wrapper.text()).toContain('3박스 감소')
+    expect(wrapper.text()).toContain('현재 7박스')
+    expect(wrapper.text()).toContain('현재 7')
+    wrapper.unmount()
+  })
+
+  it('T12 실패 시 sheet 유지 + 입력값 유지', async () => {
+    adjustStock.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = await openSheet()
+    await setQty('2')
+    dirButtons().dec?.click()
+    await flushPromises()
+    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
+    const qtyInput = document.querySelector('.stock-log-adjust input.ods-input') as HTMLInputElement
+    expect(qtyInput.value).toBe('2')
+    expect(document.body.textContent || '').toContain('재고를 조정하지 못했습니다')
+    wrapper.unmount()
+  })
+
+  it('T14 조정 적용/취소 버튼 제거', async () => {
+    const wrapper = await openSheet()
+    const text = document.body.textContent || ''
+    expect(text).not.toContain('조정 적용')
+    const cancelOnly = Array.from(document.querySelectorAll('.stock-log-adjust button'))
+      .filter((b) => (b.textContent || '').trim() === '취소')
+    expect(cancelOnly).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('T15 이력 아코디언: 최초만 조회 + 접힘/재펼침 캐시', async () => {
+    listStockLogs.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = await openSheet()
     expect(listStockLogs).not.toHaveBeenCalled()
 
     const histBtn = document.querySelector('.stock-log-history-accordion-btn') as HTMLButtonElement | null
     expect(histBtn).toBeTruthy()
-    histBtn!.click() // 펼침(최초 조회)
+    histBtn!.click()
     await flushPromises()
-
     expect(listStockLogs).toHaveBeenCalledTimes(1)
-    const sheet = document.body.textContent || ''
-    expect(sheet).toContain('이력을 불러오지 못했습니다')
+    expect(document.body.textContent || '').toContain('이력을 불러오지 못했습니다')
 
-    // 접힘: 추가 API 호출 없음
     histBtn!.click()
     await flushPromises()
     expect(listStockLogs).toHaveBeenCalledTimes(1)
 
-    // 재펼침: 불필요 재호출 금지(캐시 유지)
     histBtn!.click()
     await flushPromises()
     expect(listStockLogs).toHaveBeenCalledTimes(1)
