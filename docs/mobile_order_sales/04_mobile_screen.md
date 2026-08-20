@@ -16,7 +16,7 @@
 - 하단 5탭: 홈 · 생육관찰 · 영농일지 · 농약관리 · **판매관리**
 - `/orders` → 상단 **[포장/생산] [재고] [주문] [판매]** (4등분 segmented)
 - 초기 탭: **주문** (목록·등록·상세 기존 Stage 2)
-- [포장/생산]: **Stage P** — `PackProdPanel` (배 포장/배즙 · 수확직후/저장원물 · 생산확정 · 재고저장/바로판매 prefill)
+- [포장/생산]: **Stage P** — `PackProdPanel` (배 포장 / 배즙 PROCESS·일반배즙|도라지배즙 선택 · 수확직후/저장원물 · 생산확정 · 재고저장/바로판매 prefill)
 - [재고]: Stage **5B** — `StockView`. 수기 IN/OUT **금지**. 카드 **판매** → `/orders/ship`
 - [판매]: 목록 placeholder. 확정 후 `?tab=sales` 복귀. 공통 화면은 `/orders/ship`
 - `/orders/new` 신규 주문. `/orders/:orderNo` 상세(조회·출고 CTA)

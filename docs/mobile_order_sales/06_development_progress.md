@@ -1,6 +1,7 @@
 # 06. Development progress
 
-> **Stage 6 로컬 완료** (DIRECT+STOCK+allocation). main 미머지 · 운영 미적용.  
+> **Stage 6 로컬 완료** (DIRECT+STOCK+allocation). main 반영 · 운영 이관 별도.  
+> 배즙 완제품 2종(일반/도라지)은 Stage 6 운영 보완. PROCESS 유형은 1개 유지.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-026 harvest_year **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
@@ -255,7 +256,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 - Mobile: `PackProdPanel.vue` · 판매관리 포장/생산 탭 · `salesPrefill` store
 - PC: `stock_page.save_production_log` → Core 위임 · 생산 후 [재고로 저장]=UI reset / [바로 판매]=prefill (판매 OUT은 Stage 5C)
 - **금지 준수:** `t_production_*` 없음 · HARVEST kg 환산 없음 · 판매 OUT/allocation consume 없음
-- **다음:** Stage 6-1 DIRECT E2E 확인. STOCK/Allocation 전환은 별도 승인
+- **배즙 2종 (Stage 6 보완):** PROCESS는 그대로 1유형. 완제품 `juice_item_cd` = 일반배즙 `FR010202`(기본) / 도라지배즙 `FR010201`. `item_cd`가 natural key. 중분류 `FR010200`은 레거시 재고만. 도라지 원료·BOM 없음. 기존 판매 row 재분류 없음.
 
 ## Stage 5B — 재고관리 (2026-08-19 구현 완료 · 로컬)
 

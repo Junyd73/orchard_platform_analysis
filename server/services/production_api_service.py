@@ -104,6 +104,7 @@ class ProductionApiService:
             harvest_work_id=body.harvest_work_id,
             juice_qty=body.juice_qty,
             juice_grade_cd=body.juice_grade_cd,
+            juice_item_cd=body.juice_item_cd,
         )
         with get_sqlite_write_connection(self.db_path) as conn:
             svc = ProductionService(conn)

@@ -26,7 +26,8 @@ from core.production_service import (  # noqa: E402
 from core.stock_constants import (  # noqa: E402
     INPUT_SOURCE_HARVEST,
     INPUT_SOURCE_RAW_STOCK,
-    ITEM_JUICE,
+    ITEM_JUICE_DORAJI,
+    ITEM_JUICE_PLAIN,
     ITEM_PRODUCT,
     ITEM_RAW,
     PROD_TYPE_PACK,
@@ -203,7 +204,7 @@ class ProductionServiceTests(unittest.TestCase):
         self.svc.confirm("U1", payload)
         juice_in = self.conn.execute(
             f"SELECT COALESCE(SUM(in_qty),0) FROM t_stock_master WHERE item_cd=?",
-            (ITEM_JUICE,),
+            (ITEM_JUICE_PLAIN,),
         ).fetchone()[0]
         self.assertEqual(float(juice_in), 4.0)
         self.assertEqual(_raw_out_qty(self.conn), 1.0)
@@ -332,8 +333,138 @@ class ProductionServiceTests(unittest.TestCase):
             ],
         )
         ln = self.svc.confirm("U1", payload)["prefill_lines"][0]
-        self.assertEqual(ln["item_cd"], ITEM_JUICE)
+        self.assertEqual(ln["item_cd"], ITEM_JUICE_PLAIN)
         self.assertEqual(ln["qty"], 7.0)
+        self.assertEqual(ln["item_nm"], "일반배즙")
+
+    def test_process_doraji_item_cd(self) -> None:
+        payload = ProductionConfirmIn(
+            farm_cd=FARM,
+            prod_type=PROD_TYPE_PROCESS,
+            input_source=INPUT_SOURCE_RAW_STOCK,
+            variety_cd=VARIETY,
+            juice_qty=2,
+            juice_item_cd=ITEM_JUICE_DORAJI,
+            raw_consumptions=[
+                RawStockConsumptionIn(
+                    wh_cd=WH,
+                    variety_cd=VARIETY,
+                    size_cd=RAW_SIZE,
+                    weight=20.0,
+                    harvest_year=2026,
+                    storage_dt="2026-08-10",
+                    qty=1,
+                )
+            ],
+        )
+        ln = self.svc.confirm("U1", payload)["prefill_lines"][0]
+        self.assertEqual(ln["item_cd"], ITEM_JUICE_DORAJI)
+        self.assertEqual(ln["item_nm"], "도라지배즙")
+        doraji = self.conn.execute(
+            "SELECT COALESCE(SUM(in_qty),0) FROM t_stock_master WHERE item_cd=?",
+            (ITEM_JUICE_DORAJI,),
+        ).fetchone()[0]
+        plain = self.conn.execute(
+            "SELECT COALESCE(SUM(in_qty),0) FROM t_stock_master WHERE item_cd=?",
+            (ITEM_JUICE_PLAIN,),
+        ).fetchone()[0]
+        self.assertEqual(float(doraji), 2.0)
+        self.assertEqual(float(plain), 0.0)
+
+    def test_process_invalid_juice_item_rejected(self) -> None:
+        with self.assertRaises(ProductionError) as ctx:
+            self.svc.confirm(
+                "U1",
+                ProductionConfirmIn(
+                    farm_cd=FARM,
+                    prod_type=PROD_TYPE_PROCESS,
+                    input_source=INPUT_SOURCE_RAW_STOCK,
+                    variety_cd=VARIETY,
+                    juice_qty=1,
+                    juice_item_cd="FR010200",
+                    raw_consumptions=[
+                        RawStockConsumptionIn(
+                            wh_cd=WH,
+                            variety_cd=VARIETY,
+                            size_cd=RAW_SIZE,
+                            weight=20.0,
+                            harvest_year=2026,
+                            storage_dt="2026-08-10",
+                            qty=1,
+                        )
+                    ],
+                ),
+            )
+        self.assertEqual(ctx.exception.code, "JUICE_ITEM")
+
+    def test_process_products_do_not_merge_stock(self) -> None:
+        raw = RawStockConsumptionIn(
+            wh_cd=WH,
+            variety_cd=VARIETY,
+            size_cd=RAW_SIZE,
+            weight=20.0,
+            harvest_year=2026,
+            storage_dt="2026-08-10",
+            qty=1,
+        )
+        self.svc.confirm(
+            "U1",
+            ProductionConfirmIn(
+                farm_cd=FARM,
+                prod_type=PROD_TYPE_PROCESS,
+                input_source=INPUT_SOURCE_RAW_STOCK,
+                variety_cd=VARIETY,
+                juice_qty=10,
+                juice_item_cd=ITEM_JUICE_PLAIN,
+                raw_consumptions=[raw],
+            ),
+        )
+        self.conn.execute(
+            "UPDATE t_stock_master SET in_qty=5, out_qty=0 WHERE item_cd=?",
+            (ITEM_RAW,),
+        )
+        self.conn.commit()
+        self.svc.confirm(
+            "U1",
+            ProductionConfirmIn(
+                farm_cd=FARM,
+                prod_type=PROD_TYPE_PROCESS,
+                input_source=INPUT_SOURCE_RAW_STOCK,
+                variety_cd=VARIETY,
+                juice_qty=5,
+                juice_item_cd=ITEM_JUICE_DORAJI,
+                raw_consumptions=[raw],
+            ),
+        )
+        rows = self.conn.execute(
+            """
+            SELECT item_cd, SUM(in_qty) FROM t_stock_master
+            WHERE item_cd IN (?, ?)
+            GROUP BY item_cd
+            ORDER BY item_cd
+            """,
+            (ITEM_JUICE_DORAJI, ITEM_JUICE_PLAIN),
+        ).fetchall()
+        self.assertEqual(
+            [(str(r[0]), float(r[1])) for r in rows],
+            [(ITEM_JUICE_DORAJI, 5.0), (ITEM_JUICE_PLAIN, 10.0)],
+        )
+
+    def test_pack_ignores_juice_item_cd(self) -> None:
+        res = self.svc.confirm(
+            "U1",
+            ProductionConfirmIn(
+                farm_cd=FARM,
+                prod_type=PROD_TYPE_PACK,
+                input_source=INPUT_SOURCE_HARVEST,
+                variety_cd=VARIETY,
+                pack_weight=15.0,
+                harvest_work_id=WORK_HARVEST,
+                juice_item_cd=ITEM_JUICE_DORAJI,
+                lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=1)],
+            ),
+        )
+        self.assertEqual(res["prefill_lines"][0]["item_cd"], ITEM_PRODUCT)
 
     def test_harvest_process_blocked(self) -> None:
         with self.assertRaises(ProductionError):

@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QDate, QRegularExpression, QEvent
 from PyQt6.QtGui import QBrush, QColor, QRegularExpressionValidator
 
 from core.code_manager import CodeManager
+from core.stock_constants import ITEM_JUICE, JUICE_STOCK_ITEM_CDS, PARENT_PEAR_VARIETY
 from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
@@ -1851,6 +1852,8 @@ class SalesPage(QWidget):
         items = self.code_mgr.get_common_codes('FR01')
         item_combo.addItem("선택", "")
         for i in items: item_combo.addItem(i['code_nm'], i['code_cd'])
+        for j in self.code_mgr.get_common_codes(ITEM_JUICE):
+            item_combo.addItem(j['code_nm'], j['code_cd'])
         item_combo.activated.connect(lambda _, r=row: self.update_variety_list(r))
 
         size_combo = widgets[3]
@@ -1995,7 +1998,8 @@ class SalesPage(QWidget):
         variety_combo.addItem("선택", "")
         
         if item_code:
-            varieties = self.code_mgr.get_common_codes(item_code) #
+            parent = PARENT_PEAR_VARIETY if item_code in JUICE_STOCK_ITEM_CDS else item_code
+            varieties = self.code_mgr.get_common_codes(parent)
             if varieties:
                 for v in varieties:
                     variety_combo.addItem(v['code_nm'], v['code_cd'])

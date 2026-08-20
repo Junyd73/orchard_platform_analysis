@@ -148,6 +148,7 @@ def _insert_stock(
     in_qty: float,
     reserved: float = 0,
     out_qty: float = 0,
+    item_cd: str = ITEM,
 ) -> int:
     cur = conn.execute(
         """
@@ -156,7 +157,7 @@ def _insert_stock(
             weight, harvest_year, storage_dt, in_qty, out_qty, reserved_qty, reg_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'T')
         """,
-        (FARM, WH, ITEM, VARIETY, GRADE, SIZE, WEIGHT, YEAR, storage_dt, in_qty, out_qty, reserved),
+        (FARM, WH, item_cd, VARIETY, GRADE, SIZE, WEIGHT, YEAR, storage_dt, in_qty, out_qty, reserved),
     )
     conn.commit()
     return int(cur.lastrowid)
@@ -214,12 +215,13 @@ def _ship(
     qty: float,
     order_no: str | None = None,
     det: str | None = None,
+    item_cd: str = ITEM,
     **extra: object,
 ) -> dict:
     line = ShipLineIn(
         qty=qty,
         order_detail_id=det,
-        item_cd=ITEM,
+        item_cd=item_cd,
         variety_cd=VARIETY,
         grade_cd=GRADE,
         size_cd=SIZE,
@@ -655,6 +657,19 @@ class OrderShipServiceTests(unittest.TestCase):
             order_no=order_no, det=f"{order_no}-01",
         )
         self.assertEqual(out["order_status_cd"], ORDER_STATUS_PREP_CD)
+
+    def test_direct_doraji_does_not_consume_plain_juice(self) -> None:
+        from core.stock_constants import ITEM_JUICE_DORAJI, ITEM_JUICE_PLAIN
+
+        plain_seq = _insert_stock(
+            self.conn, storage_dt="2026-01-01", in_qty=10, item_cd=ITEM_JUICE_PLAIN,
+        )
+        doraji_seq = _insert_stock(
+            self.conn, storage_dt="2026-02-01", in_qty=8, item_cd=ITEM_JUICE_DORAJI,
+        )
+        _ship(self.conn, mode=SHIP_MODE_DIRECT, qty=3, item_cd=ITEM_JUICE_DORAJI)
+        self.assertEqual(_stock_row(self.conn, plain_seq)["out_qty"], 0)
+        self.assertEqual(_stock_row(self.conn, doraji_seq)["out_qty"], 3)
 
 
 if __name__ == "__main__":

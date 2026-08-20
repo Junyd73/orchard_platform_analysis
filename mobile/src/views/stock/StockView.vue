@@ -12,13 +12,19 @@ import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
 const ITEM_PRODUCT = 'FR010100'
-const ITEM_JUICE   = 'FR010200'
 const ITEM_RAW     = 'FR010300'
+const STOCK_TAB_JUICE = 'JUICE'
+const JUICE_STOCK_CDS = ['FR010200', 'FR010202', 'FR010201'] as const
+const JUICE_LABEL: Record<string, string> = {
+  FR010202: '일반배즙',
+  FR010201: '도라지배즙',
+  FR010200: '배즙',
+}
 
 const STOCK_TYPES = [
   { value: ITEM_PRODUCT, label: '상품'  },
   { value: ITEM_RAW,     label: '원물'  },
-  { value: ITEM_JUICE,   label: '배즙'  },
+  { value: STOCK_TAB_JUICE, label: '배즙'  },
 ] as const
 
 // ── store ────────────────────────────────────────────────────────────
@@ -65,10 +71,22 @@ async function load() {
   loading.value  = true
   loadError.value = ''
   try {
-    rows.value = await listFruitStock(farmCd.value, {
-      item_cd: stockType.value,
-      include_zero: includeZero.value,
-    })
+    if (stockType.value === STOCK_TAB_JUICE) {
+      const groups = await Promise.all(
+        JUICE_STOCK_CDS.map((item_cd) =>
+          listFruitStock(farmCd.value, {
+            item_cd,
+            include_zero: includeZero.value,
+          }),
+        ),
+      )
+      rows.value = groups.flat()
+    } else {
+      rows.value = await listFruitStock(farmCd.value, {
+        item_cd: stockType.value,
+        include_zero: includeZero.value,
+      })
+    }
   } catch {
     loadError.value = '재고를 불러오지 못했습니다.'
   } finally {
@@ -101,7 +119,7 @@ async function openLog(item: StockItem) {
 }
 
 function sellProduct(row: StockItem) {
-  if (row.item_cd !== ITEM_PRODUCT && row.item_cd !== ITEM_JUICE) return
+  if (row.item_cd !== ITEM_PRODUCT && !JUICE_STOCK_CDS.includes(row.item_cd as typeof JUICE_STOCK_CDS[number])) return
   salesPrefill.setFromStock(row)
   void router.push({ name: 'ship-confirm' })
 }
@@ -122,8 +140,8 @@ function cardTitle(row: StockItem): string {
     if (row.size_nm) parts.push(row.size_nm)
     return parts.join(' · ')
   }
-  if (row.item_cd === ITEM_JUICE) {
-    return '배즙'
+  if (JUICE_STOCK_CDS.includes(row.item_cd as typeof JUICE_STOCK_CDS[number])) {
+    return JUICE_LABEL[row.item_cd] || row.item_nm || '배즙'
   }
   // 상품: 중량 · 과수 · 등급
   const wStr = row.weight > 0 ? `${row.weight}kg` : ''

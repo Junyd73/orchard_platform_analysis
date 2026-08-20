@@ -43,6 +43,7 @@ export type ShipDraftLine = {
   variety_nm?: string
   grade_nm?: string
   size_nm?: string
+  item_nm?: string
 }
 
 export function defaultShipMode(allocRemaining: number, hasOrder: boolean): ShipMode {

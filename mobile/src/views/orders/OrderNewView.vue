@@ -79,6 +79,7 @@ import {
   isParcelDelivery,
   isPearVariety,
   isVarietyCode,
+  PEAR_ITEM_CD,
   isWeightKgName,
   isWeightPackName,
   joinDot,
@@ -398,15 +399,12 @@ async function loadMasters() {
       fetchCommonCodes(farmCd.value, CODE_PARENT_DELIVERY),
     ])
     customers.value = cust
-    const small = fruit.filter((c) => isVarietyCode(c.code_cd))
+    const small = fruit.filter((c) => isPearVariety(c.code_cd))
     if (small.length) {
       varieties.value = small
     } else {
-      const mids = fruit.filter((c) => c.code_cd.length === 8 && c.code_cd.endsWith('00'))
-      const nested = await Promise.all(
-        mids.map((m) => fetchCommonCodes(farmCd.value, m.code_cd)),
-      )
-      varieties.value = nested.flat().filter((c) => isVarietyCode(c.code_cd))
+      varieties.value = (await fetchCommonCodes(farmCd.value, PEAR_ITEM_CD))
+        .filter((c) => isVarietyCode(c.code_cd))
     }
     grades.value = grade
     specs.value = spec

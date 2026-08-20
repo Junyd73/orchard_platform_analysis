@@ -14,7 +14,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve()
 _SERVER = _HERE.parents[1]
 _ROOT = _HERE.parents[2]
-for p in (_SERVER, _ROOT):
+for p in (_HERE.parent, _SERVER, _ROOT):
     s = str(p)
     if s not in sys.path:
         sys.path.insert(0, s)
@@ -24,6 +24,7 @@ from core.order_alloc_constants import (  # noqa: E402
     IO_TYPE_CANCEL_HOLD,
     IO_TYPE_HOLD,
     MSG_ALLOC_MIGRATE_BLOCKED,
+    MSG_ALLOC_NO_STOCK,
     MSG_ALLOC_QTY_BELOW,
     MSG_ALLOC_SPEC_LOCKED,
 )
@@ -71,6 +72,7 @@ def _insert_stock(
     in_qty: float,
     reserved: float = 0,
     farm: str = FARM,
+    item_cd: str = ITEM,
 ) -> None:
     conn.execute(
         """
@@ -82,7 +84,7 @@ def _insert_stock(
         (
             farm,
             WAREHOUSE_CD_DEFAULT,
-            ITEM,
+            item_cd,
             VARIETY,
             GRADE,
             SIZE,
@@ -447,6 +449,60 @@ class OrderAllocConcurrencyTest(unittest.TestCase):
         finally:
             conn.close()
             path.unlink(missing_ok=True)
+
+
+class JuiceProductAllocTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.path, self.conn = _open_alloc_db()
+        self.orders = OrderService(self.conn)
+        self.alloc = OrderAllocationService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def test_doraji_order_does_not_take_plain_juice_stock(self) -> None:
+        from core.stock_constants import ITEM_JUICE_DORAJI, ITEM_JUICE_PLAIN
+
+        _insert_stock(
+            self.conn,
+            storage_dt="2026-01-01",
+            in_qty=10,
+            item_cd=ITEM_JUICE_PLAIN,
+        )
+        payload = _sample_payload(qty=5)
+        payload.lines[0].item_cd = ITEM_JUICE_DORAJI
+        order_no = self.orders.create_order(FARM, payload, user_id="U1")
+        with self.assertRaises(AllocationConflictError) as ctx:
+            self.alloc.allocate(
+                FARM,
+                order_no,
+                order_detail_id=f"{order_no}-01",
+                auto=True,
+                user_id="U1",
+            )
+        self.assertIn(MSG_ALLOC_NO_STOCK, str(ctx.exception))
+
+    def test_plain_juice_order_allocates_plain_stock(self) -> None:
+        from core.stock_constants import ITEM_JUICE_PLAIN
+
+        _insert_stock(
+            self.conn,
+            storage_dt="2026-01-01",
+            in_qty=10,
+            item_cd=ITEM_JUICE_PLAIN,
+        )
+        payload = _sample_payload(qty=4)
+        payload.lines[0].item_cd = ITEM_JUICE_PLAIN
+        order_no = self.orders.create_order(FARM, payload, user_id="U1")
+        summary = self.alloc.allocate(
+            FARM,
+            order_no,
+            order_detail_id=f"{order_no}-01",
+            auto=True,
+            user_id="U1",
+        )
+        self.assertEqual(summary["details"][0]["allocated_qty"], 4)
 
 
 if __name__ == "__main__":

@@ -230,7 +230,7 @@ PROCESS 생산: `save_production_log`와 동일 패턴으로 `item_cd=FR010200` 
 | 유형 | 의미 | PC 근사 |
 |------|------|---------|
 | **PACK** | 포장배 생산 | `ProductionService` / `save_production_log` |
-| **PROCESS** | 배즙 가공 (박스) | `ProductionService` (RAW_STOCK만) |
+| **PROCESS** | 배즙 가공 (박스). 완제품 선택: 일반배즙 `FR010202` / 도라지배즙 `FR010201`. PROCESS 유형은 1개. 도라지 원료·BOM 없음 | `ProductionService` (RAW_STOCK만) |
 
 **투입 출처:**
 
@@ -472,7 +472,7 @@ Stage 5C 판매확정 전까지 **상품 `real_qty`는 변하지 않는다.**
 |------|-----------|------------------|---------|
 | 원물 | `FR010300` | farm + 창고 + item + 품종 + 원물구분(`size_cd`) + harvest_year + storage_dt | 신고 · 중과 · 2025-10-01 · 가용 240통 |
 | 상품 | `FR010100` | farm + 창고 + item + 품종 + 포장중량 + 과수(`size_cd`) + 등급 + harvest_year + storage_dt | 신고 · 15kg · 25과 · 특 · 가용 20박스 (현재 30 · 배정 10) |
-| 배즙 | `FR010200` | 동일 키. 사용 단위 **박스** (DEC-024) | 배즙 · 현재/배정/가용 |
+| 배즙 | `FR010201`/`FR010202` (+레거시 `FR010200`) | 동일 키. 사용 단위 **박스** (DEC-024). 완제품별로 재고 분리 | 배즙 탭 · 현재/배정/가용 |
 
 필드 의미:
 

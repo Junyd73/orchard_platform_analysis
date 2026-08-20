@@ -33,6 +33,7 @@ function draftFromProduction(ln: ProductionPrefillLine): ShipDraftLine {
     variety_nm: ln.variety_nm,
     grade_nm: ln.grade_nm,
     size_nm: ln.size_nm,
+    item_nm: ln.item_nm,
   }
 }
 
@@ -75,6 +76,7 @@ function draftFromStock(row: StockItem): ShipDraftLine {
     variety_nm: row.variety_nm,
     grade_nm: row.grade_nm,
     size_nm: row.size_nm,
+    item_nm: row.item_nm,
   }
 }
 

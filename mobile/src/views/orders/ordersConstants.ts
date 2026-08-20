@@ -212,8 +212,8 @@ export function isParcelDelivery(codeCd: string): boolean {
   return String(codeCd || '').trim() === DELIVERY_TP_PARCEL
 }
 
-export function joinDot(parts: string[]): string {
-  return parts.map((p) => p.trim()).filter(Boolean).join(' · ')
+export function joinDot(parts: Array<string | null | undefined>): string {
+  return parts.map((p) => String(p || '').trim()).filter(Boolean).join(' · ')
 }
 
 export function formatWeightLabel(weight: number): string {
@@ -224,6 +224,7 @@ export function formatWeightLabel(weight: number): string {
 }
 
 export function formatOrderLineSpec(line: {
+  item_nm?: string
   variety_nm?: string
   variety_cd: string
   grade_nm?: string
@@ -233,6 +234,7 @@ export function formatOrderLineSpec(line: {
   weight: number
 }): string {
   return joinDot([
+    line.item_nm,
     line.variety_nm || line.variety_cd,
     formatWeightLabel(line.weight),
     line.grade_nm || line.grade_cd,

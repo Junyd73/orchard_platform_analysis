@@ -27,7 +27,14 @@ export const LABEL_RAW_STOCK = '원물 재고'
 export const LABEL_VARIETY = '품종'
 export const LABEL_WEIGHT = '포장중량'
 export const LABEL_PRODUCTION = '생산결과'
+export const LABEL_JUICE_KIND = '배즙 종류'
 export const LABEL_JUICE_BOXES = '배즙 박스 수'
+export const ITEM_JUICE_PLAIN = 'FR010202'
+export const ITEM_JUICE_DORAJI = 'FR010201'
+export const JUICE_KIND_OPTIONS = [
+  { value: ITEM_JUICE_PLAIN, label: '일반배즙' },
+  { value: ITEM_JUICE_DORAJI, label: '도라지배즙' },
+] as const
 export const LABEL_CONFIRM = '생산확정'
 export const LABEL_SAVE_STOCK = '재고로 저장'
 export const LABEL_GO_SALES = '바로 판매'

@@ -34,6 +34,7 @@ import {
   LABEL_HARVEST_RECORD,
   LABEL_INPUT_SOURCE,
   LABEL_JUICE_BOXES,
+  LABEL_JUICE_KIND,
   LABEL_PROD_TYPE,
   LABEL_PRODUCTION,
   LABEL_RAW_STOCK,
@@ -52,6 +53,8 @@ import {
   MSG_SELECT_RAW,
   MSG_MIXED_YEAR,
   MSG_MIXED_VARIETY,
+  JUICE_KIND_OPTIONS,
+  ITEM_JUICE_PLAIN,
   PROD_TYPE_OPTIONS,
   PROD_TYPE_PACK,
   PROD_TYPE_PROCESS,
@@ -112,6 +115,7 @@ const weightCards = ref<WeightCard[]>([])
 
 // PROCESS 단순
 const juiceQty = ref('')
+const juiceItemCd = ref(ITEM_JUICE_PLAIN)
 
 // UI 상태
 const loading       = ref(false)
@@ -127,6 +131,7 @@ const isHarvest = computed(() => inputSource.value === INPUT_HARVEST)
 const isPack    = computed(() => prodType.value === PROD_TYPE_PACK)
 
 const prodTypeOptions = PROD_TYPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))
+const juiceKindOptions = JUICE_KIND_OPTIONS.map(o => ({ value: o.value, label: o.label }))
 const inputOptions = computed(() =>
   (prodType.value === PROD_TYPE_PROCESS
     ? INPUT_SOURCE_PROCESS_OPTIONS
@@ -332,6 +337,7 @@ function resetPostConfirm() {
   lastPrefill.value     = []
   weightCards.value     = []
   juiceQty.value        = ''
+  juiceItemCd.value     = ITEM_JUICE_PLAIN
   rawUseQtyMap.value    = {}
   selectedHarvestId.value = ''
   selectedRawKey.value  = ''
@@ -405,6 +411,7 @@ async function onConfirm() {
       harvest_work_id: isHarvest.value ? selectedHarvestId.value : undefined,
       work_ids:    [],
       juice_qty:   isPack.value ? 0 : Number(juiceQty.value),
+      juice_item_cd: isPack.value ? undefined : juiceItemCd.value,
       raw_consumptions: consumptions,
     })
     lastPrefill.value = res.prefill_lines || []
@@ -430,6 +437,7 @@ function onGoSales() {
         variety: varietyOptions.value,
         grade: gradeOptions.value,
         size: sizeOptions.value,
+        item: juiceKindOptions,
       }),
     )
   }
@@ -661,8 +669,19 @@ onMounted(async () => {
       </OdsCard>
     </template>
 
-    <!-- 생산결과 (PROCESS 단순) -->
+    <!-- 생산결과 (PROCESS) -->
     <OdsCard v-else class="pack-prod__section pack-prod__section--compact">
+      <p class="pack-prod__card-label">{{ LABEL_JUICE_KIND }}</p>
+      <div class="pack-prod__choice-row" role="group" :aria-label="LABEL_JUICE_KIND">
+        <button
+          v-for="o in juiceKindOptions"
+          :key="o.value"
+          type="button"
+          class="pack-prod__pick pack-prod__choice"
+          :class="{ 'pack-prod__pick--on': juiceItemCd === o.value }"
+          @click="juiceItemCd = o.value"
+        >{{ o.label }}</button>
+      </div>
       <OdsFormField :label="LABEL_JUICE_BOXES">
         <OdsInput v-model="juiceQty" inputmode="numeric" type="number" min="1" />
       </OdsFormField>
@@ -740,6 +759,15 @@ onMounted(async () => {
 .pack-prod__pick--on {
   border-color: var(--ods-color-primary);
   background: var(--ods-color-primary-subtle, #f0f7f4);
+}
+.pack-prod__choice-row {
+  display: flex;
+  gap: var(--ods-space-8);
+}
+.pack-prod__choice {
+  flex: 1;
+  justify-content: center;
+  text-align: center;
 }
 .pack-prod__pick-meta {
   font: var(--ods-font-footnote);

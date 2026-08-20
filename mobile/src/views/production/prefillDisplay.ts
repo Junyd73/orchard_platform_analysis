@@ -13,10 +13,12 @@ export function attachPrefillDisplayNames(
     variety: PrefillNameOption[]
     grade: PrefillNameOption[]
     size: PrefillNameOption[]
+    item?: PrefillNameOption[]
   },
 ): ProductionPrefillLine[] {
   return lines.map((ln) => ({
     ...ln,
+    item_nm: ln.item_nm || labelOf(lookups.item || [], ln.item_cd),
     variety_nm: ln.variety_nm || labelOf(lookups.variety, ln.variety_cd),
     grade_nm: ln.grade_nm || labelOf(lookups.grade, ln.grade_cd),
     size_nm: ln.size_nm || labelOf(lookups.size, ln.size_cd),

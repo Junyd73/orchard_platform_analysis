@@ -36,6 +36,7 @@ class ProductionConfirmRequest(BaseModel):
     harvest_work_id: str | None = None
     juice_qty: int = 0
     juice_grade_cd: str = "NONE"
+    juice_item_cd: str = "FR010202"
 
 
 class ProductionPrefillLineOut(BaseModel):
@@ -48,6 +49,7 @@ class ProductionPrefillLineOut(BaseModel):
     work_id: str | None = None
     harvest_year: int = 0
     wh_cd: str = "WH01"
+    item_nm: str = ""
 
 
 class ProductionConfirmResponse(BaseModel):
