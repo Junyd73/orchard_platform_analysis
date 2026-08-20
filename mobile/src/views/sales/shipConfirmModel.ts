@@ -56,7 +56,7 @@ export type ShipDraftLine = {
   item_nm?: string
 }
 
-/** 재고 draft 중복 판별 키 (storage_dt 포함) */
+/** 재고 draft 중복 판별 키 (storage_dt 포함) — LOT/재고추적·기존 호환용. 판매 UI 식별에 쓰지 말 것. */
 export function stockDraftKey(ln: Pick<
   ShipDraftLine,
   'item_cd' | 'variety_cd' | 'grade_cd' | 'size_cd' | 'weight' | 'harvest_year' | 'wh_cd' | 'storage_dt'
@@ -72,6 +72,27 @@ export function stockDraftKey(ln: Pick<
     ln.wh_cd,
   ].join('|')
 }
+
+/**
+ * 재고 직접판매 규격 키 (storage_dt 제외).
+ * 사용자 판매 상품 식별 = wh + item + variety + grade + size + weight + harvest_year
+ * 실제 OUT LOT는 Core DIRECT FIFO가 담당한다.
+ */
+export function stockSaleSpecKey(ln: Pick<
+  ShipDraftLine | { wh_cd: string; item_cd: string; variety_cd: string; grade_cd: string; size_cd: string; weight: number; harvest_year: number },
+  'wh_cd' | 'item_cd' | 'variety_cd' | 'grade_cd' | 'size_cd' | 'weight' | 'harvest_year'
+>): string {
+  return [
+    ln.wh_cd,
+    ln.item_cd,
+    ln.variety_cd,
+    ln.grade_cd,
+    ln.size_cd,
+    String(ln.weight),
+    String(ln.harvest_year),
+  ].join('|')
+}
+
 
 export function canUseStockMode(lines: ShipDraftLine[]): boolean {
   if (!lines.length) return false

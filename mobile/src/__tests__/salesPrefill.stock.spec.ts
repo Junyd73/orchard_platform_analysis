@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import type { StockItem } from '@/api/stock'
-import { stockDraftKey } from '@/views/sales/shipConfirmModel'
+import { stockSaleSpecKey } from '@/views/sales/shipConfirmModel'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 
 function stock(partial: Partial<StockItem> = {}): StockItem {
@@ -47,7 +47,7 @@ describe('salesPrefill stock helpers (2A)', () => {
     const store = useSalesPrefillStore()
     const row = stock()
     store.addStockLine(row, 3)
-    const key = stockDraftKey(store.shipLines[0])
+    const key = stockSaleSpecKey(store.shipLines[0])
     store.updateStockLineQty(key, 5)
     expect(store.shipLines).toHaveLength(1)
     expect(store.shipLines[0].qty).toBe(5)
@@ -58,7 +58,7 @@ describe('salesPrefill stock helpers (2A)', () => {
     const row = stock()
     store.addStockLine(row, 2)
     store.setCustomer('C1', '홍길동')
-    const key = stockDraftKey(store.shipLines[0])
+    const key = stockSaleSpecKey(store.shipLines[0])
     store.removeStockLineByKey(key)
     expect(store.shipLines).toHaveLength(0)
     expect(store.source).toBe('STOCK')
@@ -73,6 +73,16 @@ describe('salesPrefill stock helpers (2A)', () => {
     store.addStockLine(row, 4)
     expect(store.shipLines).toHaveLength(1)
     expect(store.shipLines[0].qty).toBe(4)
+  })
+
+  it('T10~T11 서로 다른 storage_dt도 동일 판매규격이면 1 line', () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ storage_dt: '2026-08-01', available_qty: 10 }), 2)
+    store.addStockLine(stock({ storage_dt: '2026-08-20', available_qty: 15 }), 5)
+    expect(store.shipLines).toHaveLength(1)
+    expect(store.shipLines[0].qty).toBe(5)
+    expect(store.shipLines[0].storage_dt || '').toBe('')
+    expect(stockSaleSpecKey(store.shipLines[0])).not.toContain('2026-08')
   })
 
   it('T9 ORDER shipLines는 STOCK 바구니로 취급하지 않음', () => {

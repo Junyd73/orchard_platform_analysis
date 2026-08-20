@@ -118,14 +118,16 @@ describe('SalesPreviewView', () => {
     expect(wrapper.text()).toContain('판매 품목 1건')
   })
 
-  it('P7 병합 시 기존 draft 유지', () => {
+  it('P7 병합 시 기존 draft 유지 · 동일 판매규격 storage_dt 달라도 1 line', () => {
     const store = useSalesPrefillStore()
     store.mergeFromStockRows([stock()])
     store.updateShipLine(0, { qty: 4, unit_price: 1000 })
     store.mergeFromStockRows([stock(), stock({ storage_dt: '2026-08-20', available_qty: 3 })])
-    expect(store.shipLines).toHaveLength(2)
+    expect(store.shipLines).toHaveLength(1)
     expect(store.shipLines[0].qty).toBe(4)
     expect(store.shipLines[0].unit_price).toBe(1000)
+    store.mergeFromStockRows([stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 2 })])
+    expect(store.shipLines).toHaveLength(2)
   })
 
   it('T11~T15 STOCK 최초 진입 헤더 초기화 / 품목추가 시 유지', () => {
@@ -192,7 +194,7 @@ describe('SalesPreviewView', () => {
       dlvryMsg: '문앞',
     })
     store.updateShipLine(0, { qty: 3, unit_price: 5000 })
-    store.mergeFromStockRows([stock({ storage_dt: '2026-08-21', available_qty: 4 })])
+    store.mergeFromStockRows([stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 4 })])
     expect(store.shipLines).toHaveLength(2)
     expect(store.custmId).toBe('B1')
     expect(store.customerNm).toBe('고객B')
@@ -202,7 +204,7 @@ describe('SalesPreviewView', () => {
     expect(store.shipLines[0].qty).toBe(3)
     expect(store.shipLines[0].unit_price).toBe(5000)
 
-    store.mergeFromStockRows([stock()])
+    store.mergeFromStockRows([stock({ storage_dt: '2026-08-21', available_qty: 4 })])
     expect(store.shipLines).toHaveLength(2)
   })
 

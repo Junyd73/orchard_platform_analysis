@@ -12,7 +12,11 @@ import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
-import { stockDraftKey } from '@/views/sales/shipConfirmModel'
+import { stockSaleSpecKey } from '@/views/sales/shipConfirmModel'
+import {
+  buildStockListEntries,
+  type StockListEntry,
+} from '@/views/stock/stockSaleList'
 import {
   ADJUST_REASON_OPTIONS,
   PARENT_ADJUST_REASON,
@@ -52,6 +56,8 @@ const rows        = ref<StockItem[]>([])
 
 // 이력 모달
 const logTarget    = ref<StockItem | null>(null)
+/** 동일 판매규격에 storage_dt가 여러 개일 때 조정 대상 선택 */
+const adjustPickSources = ref<StockItem[] | null>(null)
 const logs         = ref<StockLog[]>([])
 const logsLoading  = ref(false)
 const logsError    = ref('')
@@ -132,22 +138,11 @@ watch(adjustReason, () => {
 // ── computed ─────────────────────────────────────────────────────────
 const isRaw = computed(() => stockType.value === ITEM_RAW)
 
-const filteredRows = computed(() => {
-  // 상단 탭으로 item_cd 필터링은 이미 서버에서 처리.
-  // 클라이언트에서 추가 정렬: 상품은 품종→중량→등급→과수, 원물은 최근 입고일 우선
-  if (isRaw.value) {
-    return [...rows.value].sort((a, b) =>
-      b.storage_dt.localeCompare(a.storage_dt) ||
-      a.variety_cd.localeCompare(b.variety_cd),
-    )
-  }
-  return [...rows.value].sort((a, b) =>
-    a.variety_cd.localeCompare(b.variety_cd) ||
-    a.weight - b.weight ||
-    a.grade_cd.localeCompare(b.grade_cd) ||
-    a.size_cd.localeCompare(b.size_cd),
-  )
-})
+const listEntries = computed(() =>
+  buildStockListEntries(rows.value, { raw: isRaw.value }),
+)
+
+const filteredEntries = computed(() => listEntries.value)
 
 // ── 데이터 로드 ───────────────────────────────────────────────────────
 async function load() {
@@ -200,6 +195,7 @@ async function loadAdjustReasons() {
 
 async function openAdjustSheet(item: StockItem) {
   // 조정 시트 진입 시에는 이력 API(listStockLogs)를 자동 호출하지 않습니다.
+  adjustPickSources.value = null
   logTarget.value = item
   logs.value = []
   logsError.value = ''
@@ -215,6 +211,27 @@ async function openAdjustSheet(item: StockItem) {
 
   await loadAdjustReasons()
   syncDirectionForReason()
+}
+
+/**
+ * 행 클릭 → 재고조정.
+ * source 1건이면 바로 시트, 복수 storage_dt면 사용자 선택(자동 LOT 선택 금지).
+ */
+function onListRowClick(entry: StockListEntry) {
+  if (entry.sources.length <= 1) {
+    void openAdjustSheet(entry.sources[0] || entry.row)
+    return
+  }
+  adjustPickSources.value = entry.sources
+}
+
+function closeAdjustPick() {
+  adjustPickSources.value = null
+}
+
+function pickAdjustSource(item: StockItem) {
+  adjustPickSources.value = null
+  void openAdjustSheet(item)
 }
 
 async function openHistoryLogs() {
@@ -251,17 +268,8 @@ function closeHistoryAccordion() {
   historyOpen.value = false
 }
 
-function rowKey(row: StockItem): string {
-  return stockDraftKey({
-    item_cd: row.item_cd,
-    variety_cd: row.variety_cd,
-    grade_cd: row.grade_cd,
-    size_cd: row.size_cd,
-    weight: row.weight,
-    harvest_year: row.harvest_year,
-    storage_dt: row.storage_dt || '',
-    wh_cd: row.wh_cd,
-  })
+function saleKey(row: StockItem): string {
+  return stockSaleSpecKey(row)
 }
 
 function isSellable(row: StockItem): boolean {
@@ -269,7 +277,7 @@ function isSellable(row: StockItem): boolean {
 }
 
 function isInCart(row: StockItem): boolean {
-  return salesPrefill.source === 'STOCK' && salesPrefill.hasStockLine(rowKey(row))
+  return salesPrefill.source === 'STOCK' && salesPrefill.hasStockLine(saleKey(row))
 }
 
 function maxQty(row: StockItem): number {
@@ -285,7 +293,7 @@ function clampRowQty(row: StockItem, qty: number): number {
 
 /** 행에 표시하는 수량: 로컬 초안 > Store(담김) > 1 */
 function displayQty(row: StockItem): number {
-  const key = rowKey(row)
+  const key = saleKey(row)
   if (Object.prototype.hasOwnProperty.call(rowQtyByKey.value, key)) {
     return clampRowQty(row, rowQtyByKey.value[key])
   }
@@ -297,7 +305,7 @@ function displayQty(row: StockItem): number {
 }
 
 function setDisplayQty(row: StockItem, qty: number) {
-  const key = rowKey(row)
+  const key = saleKey(row)
   rowQtyByKey.value = { ...rowQtyByKey.value, [key]: clampRowQty(row, qty) }
 }
 
@@ -318,7 +326,7 @@ function clearLocalQty(key: string) {
 
 function addToCart(row: StockItem) {
   if (!isSellable(row)) return
-  const key = rowKey(row)
+  const key = saleKey(row)
   const qty = displayQty(row)
   salesPrefill.addStockLine(row, qty)
   clearLocalQty(key)
@@ -326,13 +334,13 @@ function addToCart(row: StockItem) {
 
 function updateCartQty(row: StockItem) {
   if (!isInCart(row)) return
-  const key = rowKey(row)
+  const key = saleKey(row)
   salesPrefill.updateStockLineQty(key, displayQty(row))
   clearLocalQty(key)
 }
 
 function removeFromCart(row: StockItem) {
-  const key = rowKey(row)
+  const key = saleKey(row)
   salesPrefill.removeStockLineByKey(key)
   rowQtyByKey.value = { ...rowQtyByKey.value, [key]: 1 }
 }
@@ -391,7 +399,17 @@ async function requestAdjust(ioType: 'IN' | 'OUT') {
       reason_cd: adjustReason.value,
     })
     await load()
-    const fresh = rows.value.find((r) => rowKey(r) === rowKey(row))
+    const fresh = rows.value.find(
+      (r) =>
+        r.item_cd === row.item_cd &&
+        r.variety_cd === row.variety_cd &&
+        r.grade_cd === row.grade_cd &&
+        r.size_cd === row.size_cd &&
+        r.weight === row.weight &&
+        r.harvest_year === row.harvest_year &&
+        r.wh_cd === row.wh_cd &&
+        r.storage_dt === row.storage_dt,
+    )
     const currentQty = fresh ? fresh.real_qty : after
     const title = fresh ? cardTitle(fresh) : cardTitle(row)
     pageSuccess.value =
@@ -406,6 +424,7 @@ async function requestAdjust(ioType: 'IN' | 'OUT') {
 
 function closeLog() {
   logTarget.value = null
+  adjustPickSources.value = null
   historyOpen.value = false
   historyLoaded.value = false
   logs.value = []
@@ -537,46 +556,44 @@ const salesFabStyle = {
     <p v-if="loadError" class="stock-view__error">{{ loadError }}</p>
 
     <!-- 빈 상태 -->
-    <div v-if="!loading && !loadError && filteredRows.length === 0" class="stock-view__empty">
+    <div v-if="!loading && !loadError && filteredEntries.length === 0" class="stock-view__empty">
       <p class="stock-view__empty-title">재고 없음</p>
       <p class="stock-view__empty-desc">
         {{ includeZero ? '등록된 재고가 없습니다.' : '현재 재고가 없습니다. 소진 포함을 선택하면 볼 수 있습니다.' }}
       </p>
     </div>
 
-    <!-- 재고 목록 (컴팩트: 제목 + 가용/수량/담기) -->
-    <div class="stock-view__list" role="list">
+    <!-- 재고 목록 (1행 compact) -->
+    <div class="stock-view__list" role="list" data-testid="stock-sale-list">
       <div
-        v-for="row in filteredRows"
-        :key="`${row.item_cd}_${row.variety_cd}_${row.grade_cd}_${row.size_cd}_${row.weight}_${row.storage_dt}`"
+        v-for="entry in filteredEntries"
+        :key="entry.listKey"
         class="stock-view__row"
         :class="{
-          'stock-view__row--in-cart': isInCart(row),
-          'stock-view__row--zero': row.available_qty <= 0,
+          'stock-view__row--in-cart': isSellable(entry.row) && isInCart(entry.row),
+          'stock-view__row--zero': entry.row.available_qty <= 0,
         }"
         role="listitem"
-        @click="openAdjustSheet(row)"
+        data-testid="stock-sale-row"
+        @click="onListRowClick(entry)"
       >
-        <div class="stock-view__row-main">
-          <span class="stock-view__row-title">{{ cardTitle(row) }}</span>
-          <div
-            v-if="isSellable(row)"
-            class="stock-view__row-cart"
-            @click.stop
+        <span class="stock-view__row-title">{{ cardTitle(entry.row) }}</span>
+
+        <template v-if="isSellable(entry.row)">
+          <span
+            class="stock-view__row-qty"
+            data-testid="stock-row-available"
           >
-            <span
-              class="stock-view__row-qty"
-              :class="{ 'stock-view__row-qty--muted': row.available_qty <= 0 }"
-            >
-              가용 <strong>{{ row.available_qty }}</strong>{{ stockUnit(row.item_cd) }}
-            </span>
+            <strong>{{ entry.row.available_qty }}</strong>{{ stockUnit(entry.row.item_cd) }}
+          </span>
+          <div class="stock-view__row-actions" @click.stop>
             <div class="stock-view__qty-stepper" data-testid="stock-row-stepper">
               <button
                 type="button"
                 class="stock-view__qty-btn"
-                :disabled="displayQty(row) <= 1"
-                :aria-label="`${cardTitle(row)} 수량 감소`"
-                @click="bumpQty(row, -1)"
+                :disabled="displayQty(entry.row) <= 1"
+                :aria-label="`${cardTitle(entry.row)} 수량 감소`"
+                @click="bumpQty(entry.row, -1)"
               >
                 −
               </button>
@@ -586,29 +603,29 @@ const salesFabStyle = {
                 type="number"
                 inputmode="numeric"
                 min="1"
-                :max="maxQty(row)"
+                :max="maxQty(entry.row)"
                 step="1"
-                :model-value="String(displayQty(row))"
-                :aria-label="`${cardTitle(row)} 판매 수량`"
-                @update:model-value="onQtyInput(row, $event)"
+                :model-value="String(displayQty(entry.row))"
+                :aria-label="`${cardTitle(entry.row)} 판매 수량`"
+                @update:model-value="onQtyInput(entry.row, $event)"
               />
               <button
                 type="button"
                 class="stock-view__qty-btn"
-                :disabled="displayQty(row) >= maxQty(row)"
-                :aria-label="`${cardTitle(row)} 수량 증가`"
-                @click="bumpQty(row, 1)"
+                :disabled="displayQty(entry.row) >= maxQty(entry.row)"
+                :aria-label="`${cardTitle(entry.row)} 수량 증가`"
+                @click="bumpQty(entry.row, 1)"
               >
                 +
               </button>
             </div>
-            <template v-if="isInCart(row)">
+            <template v-if="isInCart(entry.row)">
               <OdsButton
                 type="button"
                 :block="false"
                 class="stock-view__cart-action"
                 data-testid="stock-row-update"
-                @click="updateCartQty(row)"
+                @click="updateCartQty(entry.row)"
               >
                 수정
               </OdsButton>
@@ -616,8 +633,8 @@ const salesFabStyle = {
                 type="button"
                 class="stock-view__cart-remove"
                 data-testid="stock-row-remove"
-                :aria-label="`${cardTitle(row)} 판매예정 제거`"
-                @click="removeFromCart(row)"
+                :aria-label="`${cardTitle(entry.row)} 판매예정 제거`"
+                @click="removeFromCart(entry.row)"
               >
                 ×
               </button>
@@ -628,19 +645,19 @@ const salesFabStyle = {
               :block="false"
               class="stock-view__cart-action"
               data-testid="stock-row-add"
-              @click="addToCart(row)"
+              @click="addToCart(entry.row)"
             >
               담기
             </OdsButton>
           </div>
-          <span
-            v-else
-            class="stock-view__row-qty"
-            :class="{ 'stock-view__row-qty--muted': row.available_qty <= 0 }"
-          >
-            <strong>{{ row.available_qty }}</strong>{{ stockUnit(row.item_cd) }}
-          </span>
-        </div>
+        </template>
+        <span
+          v-else
+          class="stock-view__row-qty"
+          :class="{ 'stock-view__row-qty--muted': entry.row.available_qty <= 0 }"
+        >
+          <strong>{{ entry.row.available_qty }}</strong>{{ stockUnit(entry.row.item_cd) }}
+        </span>
       </div>
     </div>
 
@@ -660,6 +677,41 @@ const salesFabStyle = {
         <OdsButton type="button" :block="false" @click="openSalesPreview">
           판매 미리보기
         </OdsButton>
+      </div>
+    </Teleport>
+
+    <!-- 동일규격 복수 storage_dt → 조정 대상 선택 (자동 LOT 선택 없음) -->
+    <Teleport to="body">
+      <div
+        v-if="adjustPickSources"
+        class="stock-log-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="재고 조정 대상 선택"
+        data-testid="stock-adjust-pick"
+        @click.self="closeAdjustPick"
+      >
+        <div class="stock-log-sheet">
+          <div class="stock-log-sheet__header">
+            <span class="stock-log-sheet__title">조정할 재고 선택</span>
+            <button type="button" class="stock-log-sheet__close" aria-label="닫기" @click="closeAdjustPick">✕</button>
+          </div>
+          <p class="stock-log-sheet__msg">포장/저장일별로 재고를 선택해 주세요.</p>
+          <ul class="stock-adjust-pick-list">
+            <li v-for="src in adjustPickSources" :key="`${src.storage_dt}_${src.wh_cd}`">
+              <button
+                type="button"
+                class="stock-adjust-pick-btn"
+                @click="pickAdjustSource(src)"
+              >
+                <span>{{ src.storage_dt || '일자 없음' }}</span>
+                <span>
+                  <strong>{{ src.available_qty }}</strong>{{ stockUnit(src.item_cd) }}
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
       </div>
     </Teleport>
 
@@ -872,7 +924,7 @@ const salesFabStyle = {
   color: var(--ods-color-text-secondary);
 }
 
-/* ── 재고 목록 (컴팩트) ───────────────────────────────────────────── */
+/* ── 재고 목록 (1행 compact) ─────────────────────────────────────── */
 .stock-view__list {
   display: flex;
   flex-direction: column;
@@ -882,9 +934,12 @@ const salesFabStyle = {
   overflow: hidden;
 }
 .stock-view__row {
-  display: block;
-  min-height: 48px;
-  padding: var(--ods-space-8) var(--ods-space-12);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--ods-space-6);
+  min-height: 44px;
+  padding: var(--ods-space-6) var(--ods-space-12);
   border-bottom: 1px solid var(--ods-color-border);
   cursor: pointer;
   background: transparent;
@@ -895,13 +950,8 @@ const salesFabStyle = {
 .stock-view__row--in-cart {
   background: var(--ods-color-primary-subtle, #f0f7f4);
 }
-.stock-view__row-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
-  min-width: 0;
-}
 .stock-view__row-title {
+  flex: 1 1 auto;
   min-width: 0;
   font: var(--ods-font-body-2);
   font-weight: 600;
@@ -910,14 +960,8 @@ const salesFabStyle = {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.stock-view__row-cart {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ods-space-6);
-  min-width: 0;
-}
 .stock-view__row-qty {
+  flex: 0 0 auto;
   font: var(--ods-font-footnote);
   color: var(--ods-color-text);
   white-space: nowrap;
@@ -932,14 +976,23 @@ const salesFabStyle = {
   color: var(--ods-color-text-secondary);
   font-weight: 500;
 }
+.stock-view__row-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--ods-space-4);
+}
 .stock-view__qty-stepper {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 .stock-view__qty-btn {
   width: 28px;
   height: 28px;
+  min-width: 28px;
   padding: 0;
   border: 1px solid var(--ods-color-border);
   border-radius: var(--ods-radius-button);
@@ -954,25 +1007,28 @@ const salesFabStyle = {
   cursor: not-allowed;
 }
 .stock-view__qty-input {
-  width: 44px;
+  width: 36px;
+  flex-shrink: 0;
 }
-.stock-view__qty-input :deep(.ods-input),
-.stock-view__row-cart :deep(.stock-view__qty-input.ods-input),
-.stock-view__row-cart :deep(input.ods-input) {
+.stock-view__qty-input :deep(input.ods-input) {
   text-align: center;
-  padding-left: 4px;
-  padding-right: 4px;
+  padding-left: 2px;
+  padding-right: 2px;
   min-height: 28px;
   height: 28px;
+  font-size: 13px;
 }
 .stock-view__cart-action {
   min-height: 28px !important;
-  padding: 0 var(--ods-space-8) !important;
+  padding: 0 var(--ods-space-6) !important;
   font-size: 12px !important;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .stock-view__cart-remove {
   width: 28px;
   height: 28px;
+  min-width: 28px;
   padding: 0;
   border: none;
   background: transparent;
@@ -980,6 +1036,34 @@ const salesFabStyle = {
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+  flex-shrink: 0;
+}
+.stock-adjust-pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+}
+.stock-adjust-pick-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--ods-space-8);
+  min-height: 44px;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white, #fff);
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+  cursor: pointer;
+  text-align: left;
+}
+.stock-adjust-pick-btn strong {
+  color: var(--ods-color-primary);
 }
 .stock-view__batch {
   /* App 탭 캐러셀 transform 밖(body Teleport)에서 viewport 기준 fixed */

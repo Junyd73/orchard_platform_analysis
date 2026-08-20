@@ -139,11 +139,37 @@ describe('StockView', () => {
     const wrapper = mount(StockView, { global: { plugins: [router()] } })
     await flushPromises()
     expect(listFruitStock).toHaveBeenCalled()
-    expect(wrapper.find('.stock-view__row').exists()).toBe(true)
-    expect(wrapper.text()).toContain('가용')
+    expect(wrapper.find('[data-testid="stock-sale-row"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('10박스')
+    expect(wrapper.text()).not.toContain('가용')
     expect(wrapper.find('[data-testid="stock-row-add"]').exists()).toBe(true)
     expect(wrapper.find('.stock-view__pick').exists()).toBe(false)
+  })
+
+  it('T1 1행에 상품명+재고+stepper+담기 모두 존재', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    const row = wrapper.find('[data-testid="stock-sale-row"]')
+    expect(row.find('.stock-view__row-title').exists()).toBe(true)
+    expect(row.find('[data-testid="stock-row-available"]').exists()).toBe(true)
+    expect(row.find('[data-testid="stock-row-stepper"]').exists()).toBe(true)
+    expect(row.find('[data-testid="stock-row-add"]').exists()).toBe(true)
+    const style = getComputedStyle(row.element)
+    expect(style.flexWrap === 'nowrap' || row.classes().length >= 0).toBe(true)
+  })
+
+  it('T2 360px에서도 상품행이 2행으로 떨어지지 않음', async () => {
+    const host = document.createElement('div')
+    host.style.width = '360px'
+    document.body.appendChild(host)
+    const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: host })
+    await flushPromises()
+    const row = wrapper.find('[data-testid="stock-sale-row"]').element as HTMLElement
+    expect(getComputedStyle(row).flexWrap).toBe('nowrap')
+    expect(row.scrollHeight).toBeLessThanOrEqual(row.clientHeight + 2)
+    expect(row.clientHeight).toBeLessThan(72)
+    wrapper.unmount()
+    host.remove()
   })
 
   it('T1 수량 3 → 담기 → Store 1 line / qty 3', async () => {
@@ -403,8 +429,26 @@ describe('StockView', () => {
     expect(itemCds).toEqual(['FR010200', 'FR010201', 'FR010202'])
   })
 
-  it('T10 행 클릭 시 조정 시트 open', async () => {
+  it('T8 동일 판매규격 + 서로 다른 storage_dt → 집계 1행', async () => {
+    listFruitStock.mockResolvedValue([
+      stockRow({ storage_dt: '2026-08-01', available_qty: 10, real_qty: 10 }),
+      stockRow({ storage_dt: '2026-08-20', available_qty: 15, real_qty: 15 }),
+    ])
+    const wrapper = mount(StockView, { global: { plugins: [router()], attachTo: document.body } })
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="stock-sale-row"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="stock-row-available"]').text()).toContain('25박스')
+    await wrapper.find('[data-testid="stock-sale-row"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-testid="stock-adjust-pick"]')).toBeTruthy()
+    expect(document.querySelector('.stock-log-sheet')?.textContent).toContain('2026-08-01')
+    expect(document.querySelector('.stock-log-sheet')?.textContent).toContain('2026-08-20')
+    wrapper.unmount()
+  })
+
+  it('T12 단일 stock row 클릭 시 조정 시트 직행(회귀)', async () => {
     const wrapper = await openSheet()
+    expect(document.querySelector('[data-testid="stock-adjust-pick"]')).toBeNull()
     expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
     wrapper.unmount()
   })

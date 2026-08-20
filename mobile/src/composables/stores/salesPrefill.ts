@@ -8,6 +8,7 @@ import {
   canUseStockMode,
   defaultShipMode,
   stockDraftKey,
+  stockSaleSpecKey,
   type ShipDraftLine,
   type ShipEntrySource,
 } from '@/views/sales/shipConfirmModel'
@@ -75,7 +76,8 @@ function draftFromStock(row: StockItem): ShipDraftLine {
     weight: Number(row.weight) || 0,
     harvest_year: Number(row.harvest_year) || 0,
     wh_cd: row.wh_cd || DEFAULT_WAREHOUSE_CD,
-    storage_dt: row.storage_dt || '',
+    // 판매 식별에 storage_dt 미사용 — OUT은 Core DIRECT FIFO
+    storage_dt: '',
     available_qty: available,
     qty: available > 0 ? 1 : 0,
     unit_price: 0,
@@ -111,7 +113,15 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   const dlvryMsg = ref('')
 
   const draftCount = computed(() => shipLines.value.length)
-  const draftKeys = computed(() => new Set(shipLines.value.map((ln) => stockDraftKey(ln))))
+  /** STOCK 판매는 규격키, 그 외는 기존 draft key */
+  const draftKeys = computed(
+    () =>
+      new Set(
+        shipLines.value.map((ln) =>
+          source.value === 'STOCK' ? stockSaleSpecKey(ln) : stockDraftKey(ln),
+        ),
+      ),
+  )
 
   function setFromProduction(prefill: ProductionPrefillLine[]) {
     lines.value = prefill.map((ln) => ({ ...ln }))
@@ -204,7 +214,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   }
 
   function getStockLine(key: string): ShipDraftLine | undefined {
-    return shipLines.value.find((ln) => stockDraftKey(ln) === key)
+    return shipLines.value.find((ln) => stockSaleSpecKey(ln) === key)
   }
 
   function hasStockLine(key: string): boolean {
@@ -218,15 +228,15 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     return Math.min(n, max)
   }
 
-  /** 미등록 상품 담기. 동일 key 중복 line 금지(있으면 qty만 갱신). */
+  /** 미등록 상품 담기. 동일 판매규격 중복 line 금지(있으면 qty만 갱신). */
   function addStockLine(row: StockItem, qty: number) {
     ensureStockSaleSession()
     const draft = draftFromStock(row)
-    const key = stockDraftKey(draft)
+    const key = stockSaleSpecKey(draft)
     const available = Number(row.available_qty) || 0
     draft.qty = clampStockQty(qty, available)
     draft.available_qty = available
-    const idx = shipLines.value.findIndex((ln) => stockDraftKey(ln) === key)
+    const idx = shipLines.value.findIndex((ln) => stockSaleSpecKey(ln) === key)
     if (idx >= 0) {
       shipLines.value = shipLines.value.map((ln, i) =>
         i === idx ? { ...ln, qty: draft.qty, available_qty: available } : ln,
@@ -237,7 +247,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   }
 
   function updateStockLineQty(key: string, qty: number) {
-    const idx = shipLines.value.findIndex((ln) => stockDraftKey(ln) === key)
+    const idx = shipLines.value.findIndex((ln) => stockSaleSpecKey(ln) === key)
     if (idx < 0) return
     const cur = shipLines.value[idx]
     const available = cur.available_qty != null ? Number(cur.available_qty) : Number(qty)
@@ -248,8 +258,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   }
 
   function removeStockLineByKey(key: string) {
-    shipLines.value = shipLines.value.filter((ln) => stockDraftKey(ln) !== key)
-    // source/header 유지 — 빈 shipLines + STOCK 세션 허용
+    shipLines.value = shipLines.value.filter((ln) => stockSaleSpecKey(ln) !== key)
   }
 
   const stockDraftTotalQty = computed(() =>
@@ -258,14 +267,14 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
       : 0,
   )
 
-  /** 동일 stock 중복 line 금지, 기존 qty 유지. 신규만 추가(호환용). */
+  /** 동일 판매규격 중복 line 금지, 기존 qty 유지. 신규만 추가(호환용). */
   function mergeFromStockRows(rows: StockItem[]) {
     ensureStockSaleSession()
     const next = [...shipLines.value]
-    const seen = new Set(next.map((ln) => stockDraftKey(ln)))
+    const seen = new Set(next.map((ln) => stockSaleSpecKey(ln)))
     for (const row of rows) {
       const draft = draftFromStock(row)
-      const key = stockDraftKey(draft)
+      const key = stockSaleSpecKey(draft)
       if (seen.has(key)) continue
       seen.add(key)
       next.push(draft)
