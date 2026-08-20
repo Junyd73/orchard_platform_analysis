@@ -3,12 +3,23 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
+import { listFruitStock, listStockLogs, adjustStock } from '@/api/stock'
+import type { StockItem, StockLog } from '@/api/stock'
+import { fetchCommonCodes } from '@/api/commonCodes'
+import { ApiClientError } from '@/api/client'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
-import { listFruitStock, listStockLogs } from '@/api/stock'
-import type { StockItem, StockLog } from '@/api/stock'
+import OdsInput from '@/components/ods/OdsInput.vue'
+import OdsSelect from '@/components/ods/OdsSelect.vue'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import {
+  ADJUST_REASON_OPTIONS,
+  PARENT_ADJUST_REASON,
+  REASON_DISPOSE,
+  reasonAllowsIn,
+  reasonAllowsOut,
+} from '@/views/stock/stockAdjustConstants'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
 const ITEM_PRODUCT = 'FR010100'
@@ -44,6 +55,16 @@ const logTarget    = ref<StockItem | null>(null)
 const logs         = ref<StockLog[]>([])
 const logsLoading  = ref(false)
 const logsError    = ref('')
+const selectedKeys = ref<string[]>([])
+const adjustQty = ref('1')
+const adjustReason = ref(REASON_DISPOSE)
+const adjustBusy = ref(false)
+const adjustError = ref('')
+const adjustReasons = ref<{ value: string; label: string }[]>(
+  ADJUST_REASON_OPTIONS.map((r) => ({ value: r.value, label: r.label })),
+)
+const canAdjustIn = computed(() => reasonAllowsIn(adjustReason.value))
+const canAdjustOut = computed(() => reasonAllowsOut(adjustReason.value))
 
 // ── computed ─────────────────────────────────────────────────────────
 const isRaw = computed(() => stockType.value === ITEM_RAW)
@@ -95,12 +116,16 @@ async function load() {
 }
 
 watch([stockType, includeZero, farmCd], load, { immediate: true })
+watch(stockType, () => {
+  selectedKeys.value = []
+})
 
-// ── 이력 조회 ─────────────────────────────────────────────────────────
 async function openLog(item: StockItem) {
   logTarget.value = item
   logs.value      = []
   logsError.value = ''
+  adjustError.value = ''
+  adjustQty.value = '1'
   logsLoading.value = true
   try {
     logs.value = await listStockLogs(farmCd.value, {
@@ -110,18 +135,107 @@ async function openLog(item: StockItem) {
       size_cd:      item.size_cd,
       weight:       item.weight,
       harvest_year: item.harvest_year,
+      storage_dt:   item.storage_dt,
     })
   } catch {
     logsError.value = '이력을 불러오지 못했습니다.'
   } finally {
     logsLoading.value = false
   }
+  try {
+    const allowed = new Set<string>(ADJUST_REASON_OPTIONS.map((r) => r.value))
+    const codes = await fetchCommonCodes(farmCd.value, PARENT_ADJUST_REASON)
+    const mapped = codes
+      .filter((c) => allowed.has(c.code_cd))
+      .map((c) => ({ value: c.code_cd, label: c.code_nm || c.code_cd }))
+    if (mapped.length) {
+      adjustReasons.value = mapped
+      if (!adjustReasons.value.some((r) => r.value === adjustReason.value)) {
+        adjustReason.value = adjustReasons.value[0].value
+      }
+    }
+  } catch {
+    /* 로컬 기본 사유 코드 유지 */
+  }
+}
+
+function rowKey(row: StockItem): string {
+  return [
+    row.item_cd, row.variety_cd, row.grade_cd, row.size_cd,
+    String(row.weight), row.harvest_year, row.storage_dt, row.wh_cd,
+  ].join('|')
+}
+
+function isSellable(row: StockItem): boolean {
+  return row.item_cd !== ITEM_RAW && row.available_qty > 0
+}
+
+function toggleSelect(row: StockItem) {
+  const k = rowKey(row)
+  if (selectedKeys.value.includes(k)) {
+    selectedKeys.value = selectedKeys.value.filter((x) => x !== k)
+    return
+  }
+  selectedKeys.value = [...selectedKeys.value, k]
+}
+
+function sellSelected() {
+  const rows = filteredRows.value.filter(
+    (r) => isSellable(r) && selectedKeys.value.includes(rowKey(r)),
+  )
+  if (!rows.length) return
+  salesPrefill.setFromStockRows(rows)
+  selectedKeys.value = []
+  void router.push({ name: 'ship-confirm' })
 }
 
 function sellProduct(row: StockItem) {
-  if (row.item_cd !== ITEM_PRODUCT && !JUICE_STOCK_CDS.includes(row.item_cd as typeof JUICE_STOCK_CDS[number])) return
+  if (!isSellable(row)) return
   salesPrefill.setFromStock(row)
   void router.push({ name: 'ship-confirm' })
+}
+
+async function runAdjust(ioType: 'IN' | 'OUT') {
+  const row = logTarget.value
+  if (!row || adjustBusy.value) return
+  const qty = Number(adjustQty.value)
+  if (!(qty > 0)) {
+    adjustError.value = '수량을 입력해 주세요.'
+    return
+  }
+  if ((ioType === 'IN' && !canAdjustIn.value) || (ioType === 'OUT' && !canAdjustOut.value)) {
+    adjustError.value = '이 사유로는 선택한 조정을 할 수 없습니다.'
+    return
+  }
+  adjustBusy.value = true
+  adjustError.value = ''
+  try {
+    await adjustStock(farmCd.value, {
+      wh_cd: row.wh_cd,
+      item_cd: row.item_cd,
+      variety_cd: row.variety_cd,
+      grade_cd: row.grade_cd,
+      size_cd: row.size_cd,
+      weight: row.weight,
+      harvest_year: row.harvest_year,
+      storage_dt: row.storage_dt,
+      io_type: ioType,
+      qty,
+      reason_cd: adjustReason.value,
+    })
+    await load()
+    const fresh = rows.value.find((r) => rowKey(r) === rowKey(row))
+    if (fresh) {
+      logTarget.value = fresh
+      await openLog(fresh)
+    } else {
+      closeLog()
+    }
+  } catch (err) {
+    adjustError.value = err instanceof ApiClientError ? err.message : '재고를 조정하지 못했습니다.'
+  } finally {
+    adjustBusy.value = false
+  }
 }
 
 function closeLog() {
@@ -153,6 +267,12 @@ function logSign(log: StockLog) {
   if (log.io_type === 'IN') return '+'
   if (log.io_type === 'OUT') return '-'
   return ''
+}
+
+function logDirNm(log: StockLog) {
+  if (log.io_type === 'IN') return '증가'
+  if (log.io_type === 'OUT') return '감소'
+  return log.io_type_nm
 }
 
 function logQtyClass(log: StockLog) {
@@ -248,17 +368,29 @@ function formatRegDt(dt: string) {
 
         <!-- 소진 표시 -->
         <p v-if="row.real_qty <= 0" class="stock-view__zero-badge">소진</p>
-        <OdsButton
-          v-if="row.item_cd !== ITEM_RAW && row.available_qty > 0"
-          type="button"
-          variant="secondary"
-          :block="false"
-          class="stock-view__sell"
-          @click.stop="sellProduct(row)"
-        >
-          판매
-        </OdsButton>
+        <div v-if="isSellable(row)" class="stock-view__sell-row">
+          <label class="stock-view__pick" @click.stop>
+            <input
+              type="checkbox"
+              :checked="selectedKeys.includes(rowKey(row))"
+              @click.prevent.stop="toggleSelect(row)"
+            >
+            선택
+          </label>
+          <OdsButton
+            type="button"
+            variant="secondary"
+            :block="false"
+            class="stock-view__sell"
+            @click.stop="sellProduct(row)"
+          >
+            판매
+          </OdsButton>
+        </div>
       </OdsCard>
+    </div>
+    <div v-if="selectedKeys.length" class="stock-view__batch">
+      <OdsButton type="button" @click="sellSelected">선택 {{ selectedKeys.length }}건 판매</OdsButton>
     </div>
 
     <!-- 재고 이력 bottom sheet -->
@@ -288,16 +420,32 @@ function formatRegDt(dt: string) {
               class="stock-log__row"
             >
               <span class="stock-log__date">{{ formatRegDt(log.reg_dt) }}</span>
-              <span class="stock-log__type">{{ log.io_type_nm }}</span>
+              <span class="stock-log__type">
+                <template v-if="log.io_type === 'IN' || log.io_type === 'OUT'">{{ logDirNm(log) }} · {{ log.io_type_nm }}</template>
+                <template v-else>{{ log.io_type_nm }}</template>
+              </span>
               <span class="stock-log__qty" :class="logQtyClass(log)">
                 {{ logSign(log) }}{{ log.qty }}{{ stockUnit(log.item_cd) }}
               </span>
+              <span v-if="log.remark" class="stock-log__rmk">{{ log.remark }}</span>
             </li>
           </ul>
 
           <!-- 현재고 요약 -->
           <div v-if="logTarget" class="stock-log-sheet__summary">
             <span>현재 {{ logTarget.real_qty }} · 배정 {{ logTarget.reserved_qty }} · 가용 {{ logTarget.available_qty }}</span>
+          </div>
+          <div v-if="logTarget" class="stock-log-adjust">
+            <p class="stock-log-adjust__title">재고 조정</p>
+            <OdsSelect v-model="adjustReason" variant="form">
+              <option v-for="r in adjustReasons" :key="r.value" :value="r.value">{{ r.label }}</option>
+            </OdsSelect>
+            <OdsInput v-model="adjustQty" type="number" variant="form" bare />
+            <p v-if="adjustError" class="stock-log-sheet__msg stock-log-sheet__msg--err">{{ adjustError }}</p>
+            <div class="stock-log-adjust__btns">
+              <OdsButton type="button" variant="secondary" :disabled="adjustBusy || !canAdjustIn" @click="runAdjust('IN')">증가</OdsButton>
+              <OdsButton type="button" variant="secondary" :disabled="adjustBusy || !canAdjustOut" @click="runAdjust('OUT')">감소</OdsButton>
+            </div>
           </div>
         </div>
       </div>
@@ -464,7 +612,23 @@ function formatRegDt(dt: string) {
   margin-top: var(--ods-space-4);
 }
 .stock-view__sell {
+  margin-top: 0;
+}
+.stock-view__sell-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-12);
   margin-top: var(--ods-space-8);
+}
+.stock-view__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  font: var(--ods-font-form-help);
+}
+.stock-view__batch {
+  position: sticky;
+  bottom: var(--ods-space-8);
 }
 
 /* ── 이력 bottom sheet ────────────────────────────────────────────── */
@@ -554,4 +718,25 @@ function formatRegDt(dt: string) {
 }
 .stock-log__qty--in  { color: var(--ods-color-primary); }
 .stock-log__qty--out { color: var(--ods-color-danger); }
+.stock-log__rmk {
+  grid-column: 1 / -1;
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-secondary);
+}
+.stock-log-adjust {
+  border-top: 1px solid var(--ods-color-border);
+  padding-top: var(--ods-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+.stock-log-adjust__title {
+  margin: 0;
+  font: var(--ods-font-form-help);
+  font-weight: 700;
+}
+.stock-log-adjust__btns {
+  display: flex;
+  gap: var(--ods-space-8);
+}
 </style>

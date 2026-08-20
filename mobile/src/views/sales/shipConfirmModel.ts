@@ -6,6 +6,12 @@ export const SHIP_MODE_DIRECT: ShipMode = 'DIRECT'
 
 export const LABEL_SHIP_PAGE = '판매/출고'
 export const LABEL_CONFIRM_SHIP = '판매/출고 확정'
+export const HINT_SHIP_PRODUCTION =
+  '주문 없이 생산 결과를 바로 판매합니다. 예약접수와 무관합니다.'
+export const HINT_SHIP_STOCK =
+  '주문 없이 선택한 재고를 바로 판매합니다. 여러 상품을 한 번에 담을 수 있습니다.'
+export const HINT_SHIP_ORDER =
+  '예약주문 출고입니다. 출고하면 잔량이 있으면 배송준비, 전량이면 배송완료입니다.'
 export const LABEL_MODE = '출고방식'
 export const LABEL_MODE_STOCK = '배정재고 사용'
 export const LABEL_MODE_DIRECT = '일반재고 사용'

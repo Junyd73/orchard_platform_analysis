@@ -1,13 +1,34 @@
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize
 from PyQt6.QtGui import QColor
+from core.ops_biz_date import now_ops, now_ops_str, today_ops, today_ops_iso
+from core.production_service import (
+    ProductionConfirmIn,
+    ProductionError,
+    ProductionLineIn,
+    ProductionService,
+    RawStockConsumptionIn,
+)
+from core.stock_constants import (
+    DEFAULT_JUICE_WEIGHT,
+    DEFAULT_WH_CD,
+    INPUT_SOURCE_HARVEST,
+    INPUT_SOURCE_RAW_STOCK,
+    ITEM_JUICE_DORAJI,
+    ITEM_JUICE_PLAIN,
+    ITEM_PRODUCT,
+    JUICE_STOCK_ITEM_CDS,
+    LABEL_JUICE_DORAJI,
+    LABEL_JUICE_PLAIN,
+    PROD_TYPE_PACK,
+    PROD_TYPE_PROCESS,
+    RAW_CONTAINER_WEIGHT_KG,
+)
 
-# 📍 외부 스타일 파일 임포트
-from ui.styles import MainStyles
-
-# =================================================================
+from core.stock_adjust_constants import IO_TYPE_OUT, REASON_DISPOSE
+from core.stock_adjust_service import StockAdjustError, StockAdjustIn, StockAdjustService
 # 1. 커스텀 레이아웃: FlowLayout (자동 줄바꿈 최적화)
 # =================================================================
 class FlowLayout(QLayout):
@@ -121,7 +142,7 @@ class WorkCartCard(QFrame):
         self.data, self.work_qty, self.max_allowed = data, 0, int(max_stock)
         self.setFixedSize(138, 80)
         # 모드별 스타일 분기
-        is_p = data.get('item_cd') in ['FR010100', 'FR010200']
+        is_p = data.get('item_cd') in (ITEM_PRODUCT, *JUICE_STOCK_ITEM_CDS)
         style = "border: 2px solid #ED8936; background: #FFFAF0;" if is_p else "border: 2px solid #48BB78; background: #F0FFF4;"
         if data.get('is_new'): style = "border: 2px dashed #3182CE; background: #EBF8FF;"
         self.setStyleSheet(MainStyles.CARD + style)
@@ -201,8 +222,8 @@ class AuditHistoryDialog(QDialog):
         self.table.setRowCount(len(rows))
         
         for r, row in enumerate(rows):
-            # 수량 단위 구분 (배즙은 '포', 나머지는 '박스')
-            unit = "포" if row['item_nm'] == "배즙" else "박스"
+            # 수량 단위: 배즙·상품 모두 박스 (업무 의미 통일)
+            unit = "박스"
             qty_text = f"{int(row['qty'])} {unit}"
             
             # 📍 인덱스 재배치 (5번에 중량 삽입)
@@ -229,7 +250,15 @@ class StockPage(QWidget):
         self.selected_cards, self.sorting_data, self.size_buttons = [], {}, {}
         
         # 품목 상수 정의
-        self.ITEM_PRODUCT = 'FR010100'; self.ITEM_JUICE = 'FR010200'; self.ITEM_RAW = 'FR010300'; self.GRADE_NONE = 'NONE'
+        self.ITEM_PRODUCT = ITEM_PRODUCT
+        self.ITEM_JUICE = 'FR010200'
+        self.ITEM_RAW = 'FR010300'
+        self.GRADE_NONE = 'NONE'
+        # Stage P 생산확정: PACK/PROCESS · 투입원(HARVEST/RAW_STOCK)
+        self.prod_type = PROD_TYPE_PACK
+        self.prod_input_source = INPUT_SOURCE_RAW_STOCK
+        self.selected_harvest_row = None
+        self.selected_harvest_work_id = ""
         self.init_ui()
 
     def init_ui(self):
@@ -311,21 +340,250 @@ class StockPage(QWidget):
         head_layout.addWidget(QLabel("📦 포장 단위: ", styleSheet=MainStyles.LBL_GRID_HEADER))
         head_layout.addWidget(self.target_weight_combo); bottom_vbox.addLayout(head_layout)
         
+        # =============================================================
+        # Stage P 최소 UI: 생산구분 / 투입원
+        # =============================================================
+        prod_ctrl = QHBoxLayout()
+        self.prod_type_group = QButtonGroup(self)
+        self.btn_prod_pack = QPushButton("배 포장")
+        self.btn_prod_pack.setCheckable(True)
+        self.btn_prod_pack.setChecked(True)
+        self.btn_prod_pack.setStyleSheet(MainStyles.BTN_SUB)
+        self.btn_prod_pack.setFixedHeight(32)
+        self.btn_prod_pack.setFixedWidth(140)
+
+        self.btn_prod_process = QPushButton("배즙 생산")
+        self.btn_prod_process.setCheckable(True)
+        self.btn_prod_process.setStyleSheet(MainStyles.BTN_SUB)
+        self.btn_prod_process.setFixedHeight(32)
+        self.btn_prod_process.setFixedWidth(140)
+
+        self.prod_type_group.addButton(self.btn_prod_pack)
+        self.prod_type_group.addButton(self.btn_prod_process)
+        self.prod_type_group.buttonClicked.connect(self.handle_prod_type_change)
+        prod_ctrl.addWidget(self.btn_prod_pack)
+        prod_ctrl.addWidget(self.btn_prod_process)
+        prod_ctrl.addStretch()
+        bottom_vbox.addLayout(prod_ctrl)
+
+        src_ctrl = QHBoxLayout()
+        self.input_source_group = QButtonGroup(self)
+        self.btn_src_harvest = QPushButton("수확 직후")
+        self.btn_src_harvest.setCheckable(True)
+        self.btn_src_harvest.setStyleSheet(MainStyles.BTN_SUB)
+        self.btn_src_harvest.setFixedHeight(32)
+        self.btn_src_harvest.setFixedWidth(160)
+
+        self.btn_src_raw = QPushButton("저장 원물")
+        self.btn_src_raw.setCheckable(True)
+        self.btn_src_raw.setChecked(True)
+        self.btn_src_raw.setStyleSheet(MainStyles.BTN_SUB)
+        self.btn_src_raw.setFixedHeight(32)
+        self.btn_src_raw.setFixedWidth(160)
+
+        self.input_source_group.addButton(self.btn_src_harvest)
+        self.input_source_group.addButton(self.btn_src_raw)
+        self.input_source_group.buttonClicked.connect(self.handle_input_source_change)
+        src_ctrl.addWidget(self.btn_src_harvest)
+        src_ctrl.addWidget(self.btn_src_raw)
+        src_ctrl.addStretch()
+        bottom_vbox.addLayout(src_ctrl)
+
+        # 수확직후(HARVEST) 입력: 최근 영농일지 카드 선택
+        self.harvest_picker_label = QLabel("🍏 수확 기록(최근)", styleSheet=MainStyles.LBL_GRID_HEADER)
+        self.harvest_picker_scroll = QScrollArea()
+        self.harvest_picker_scroll.setFixedHeight(110)
+        self.harvest_picker_scroll.setWidgetResizable(True)
+        self.harvest_picker_container = QWidget()
+        self.harvest_picker_flow = FlowLayout(self.harvest_picker_container, margin=8)
+        self.harvest_picker_scroll.setWidget(self.harvest_picker_container)
+        bottom_vbox.addWidget(self.harvest_picker_label)
+        bottom_vbox.addWidget(self.harvest_picker_scroll)
+        self.harvest_picker_label.hide()
+        self.harvest_picker_scroll.hide()
+
+        # PROCESS(배즙 생산) 입력: 배즙 박스 수
+        self.process_qty_widget = QFrame()
+        process_lay = QHBoxLayout(self.process_qty_widget)
+        process_lay.setContentsMargins(0, 0, 0, 0)
+        process_lay.setSpacing(10)
+        process_lay.addWidget(QLabel("배즙 종류", styleSheet=MainStyles.LBL_GRID_HEADER))
+        self.juice_kind_combo = QComboBox()
+        self.juice_kind_combo.setFixedWidth(140)
+        self.juice_kind_combo.setStyleSheet("border: 1px solid #CBD5E0; height: 30px;")
+        self.juice_kind_combo.addItem(LABEL_JUICE_PLAIN, ITEM_JUICE_PLAIN)
+        self.juice_kind_combo.addItem(LABEL_JUICE_DORAJI, ITEM_JUICE_DORAJI)
+        process_lay.addWidget(self.juice_kind_combo)
+        process_lay.addWidget(QLabel("배즙 박스 수", styleSheet=MainStyles.LBL_GRID_HEADER))
+        self.juice_qty_spin = QSpinBox()
+        self.juice_qty_spin.setRange(0, 9999)
+        self.juice_qty_spin.setFixedWidth(140)
+        self.juice_qty_spin.setStyleSheet("border: 1px solid #CBD5E0; height: 30px;")
+        process_lay.addWidget(self.juice_qty_spin)
+        process_lay.addStretch()
+        bottom_vbox.addWidget(self.process_qty_widget)
+        self.process_qty_widget.hide()
+
         # 판매사이즈 가이드 및 타일 레이아웃
-        bottom_vbox.addWidget(QLabel("🔍 판매 사이즈 선택", styleSheet=MainStyles.LBL_GRID_HEADER))
+        self.size_section_label = QLabel("🔍 판매 사이즈 선택", styleSheet=MainStyles.LBL_GRID_HEADER)
+        bottom_vbox.addWidget(self.size_section_label)
         self.size_btn_container = QWidget(); self.size_btn_layout = QHBoxLayout(self.size_btn_container); self.size_btn_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        size_scroll = QScrollArea(); size_scroll.setFixedHeight(75); size_scroll.setWidgetResizable(True); size_scroll.setWidget(self.size_btn_container); bottom_vbox.addWidget(size_scroll)
-        self.tile_container = QWidget(); self.tile_layout = QGridLayout(self.tile_container); tile_scroll = QScrollArea(); tile_scroll.setWidgetResizable(True); tile_scroll.setWidget(self.tile_container); bottom_vbox.addWidget(tile_scroll)
+        self.size_scroll = QScrollArea()
+        self.size_scroll.setFixedHeight(75)
+        self.size_scroll.setWidgetResizable(True)
+        self.size_scroll.setWidget(self.size_btn_container)
+        bottom_vbox.addWidget(self.size_scroll)
+
+        self.tile_container = QWidget()
+        self.tile_layout = QGridLayout(self.tile_container)
+        self.tile_scroll = QScrollArea()
+        self.tile_scroll.setWidgetResizable(True)
+        self.tile_scroll.setWidget(self.tile_container)
+        bottom_vbox.addWidget(self.tile_scroll)
         
         # 📍 하단 패널 추가 (Index 1)
         self.master_layout.addWidget(self.bottom_panel)
         
         # 초기 모드 핸들링
         self.handle_mode_change()
+        self.apply_production_ui()
 
     # =============================================================
     # 4. 모드 전환 및 동적 액션바 핸들러
     # =============================================================
+
+    def reset_production_workbench(self):
+        """Stage P 생산입력 패널(작업대/수량)을 초기화합니다."""
+        self.selected_cards.clear()
+        self.sorting_data.clear()
+        self.juice_qty_spin.setValue(0)
+        self.selected_harvest_row = None
+        self.selected_harvest_work_id = ""
+        while self.cart_layout.count():
+            item = self.cart_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.init_sorting_pad()
+
+    def handle_prod_type_change(self, btn: QPushButton):
+        """[배 포장] / [배즙 생산] 선택."""
+        if btn == self.btn_prod_process:
+            self.prod_type = PROD_TYPE_PROCESS
+            self.prod_input_source = INPUT_SOURCE_RAW_STOCK
+            self.btn_src_raw.setChecked(True)
+        else:
+            self.prod_type = PROD_TYPE_PACK
+            # 기본: 저장 원물
+            if self.btn_src_raw.isEnabled():
+                self.prod_input_source = INPUT_SOURCE_RAW_STOCK
+            self.btn_src_raw.setChecked(True)
+        self.reset_production_workbench()
+        self.apply_production_ui()
+
+    def handle_input_source_change(self, btn: QPushButton):
+        """투입원 [수확 직후] / [저장 원물] 선택."""
+        if btn == self.btn_src_harvest:
+            if self.prod_type != PROD_TYPE_PACK:
+                # PROCESS에서는 UI 차단이 원칙이지만, 안전장치로 되돌립니다.
+                self.prod_input_source = INPUT_SOURCE_RAW_STOCK
+                self.btn_src_raw.setChecked(True)
+            else:
+                self.prod_input_source = INPUT_SOURCE_HARVEST
+        else:
+            self.prod_input_source = INPUT_SOURCE_RAW_STOCK
+
+        self.reset_production_workbench()
+        self.apply_production_ui()
+
+        # HARVEST 선택 시 최근 수확기록을 먼저 로드
+        if self.prod_type == PROD_TYPE_PACK and self.prod_input_source == INPUT_SOURCE_HARVEST:
+            self.load_harvest_records_ui()
+            # 첫 카드 자동 선택 → 바로 생산수량 입력 가능
+            if self.harvest_records:
+                first = self.harvest_records[0]
+                self.select_harvest_record(first)
+
+    def apply_production_ui(self):
+        """Stage P 생산구분/투입원에 따라 하위 패널을 보이게/감추게 합니다."""
+        if self.prod_type == PROD_TYPE_PROCESS:
+            # PROCESS: 저장원물만 허용
+            self.btn_src_harvest.hide()
+            self.btn_src_raw.show()
+            self.prod_input_source = INPUT_SOURCE_RAW_STOCK
+            self.btn_src_raw.setChecked(True)
+
+            self.target_weight_combo.hide()
+            self.size_section_label.hide()
+            self.size_scroll.hide()
+            self.tile_scroll.hide()
+            self.process_qty_widget.show()
+            self.harvest_picker_label.hide()
+            self.harvest_picker_scroll.hide()
+        else:
+            # PACK
+            self.btn_src_harvest.show()
+            self.btn_src_raw.show()
+            self.target_weight_combo.show()
+            self.size_section_label.show()
+            self.size_scroll.show()
+            self.tile_scroll.show()
+            self.process_qty_widget.hide()
+
+            if self.prod_input_source == INPUT_SOURCE_HARVEST:
+                self.harvest_picker_label.show()
+                self.harvest_picker_scroll.show()
+            else:
+                self.harvest_picker_label.hide()
+                self.harvest_picker_scroll.hide()
+
+        # 입력 컨트롤 변경 시 gauge/패드 상태 동기화
+        self.update_gauge()
+
+    def load_harvest_records_ui(self):
+        """HARVEST 입력용 최근 수확기록 버튼을 로드합니다."""
+        svc = ProductionService(self.db.conn)
+        to_dt = today_ops_iso()
+        from_dt = (today_ops() - timedelta(days=14)).isoformat()
+
+        # 다이렉트 로드: UI 표시는 가장 최근부터
+        self.harvest_records = svc.list_harvest_records(
+            self.farm_cd,
+            from_dt=from_dt,
+            to_dt=to_dt,
+            limit=10,
+        )
+
+        # 기존 버튼 제거
+        while self.harvest_picker_flow.count():
+            it = self.harvest_picker_flow.takeAt(0)
+            if it and it.widget():
+                it.widget().deleteLater()
+
+        self.harvest_btns = {}
+        for row in self.harvest_records:
+            work_id = str(row.get("work_id") or "")
+            btn = QPushButton(
+                f"{row.get('work_dt','')} · {row.get('variety_nm','') or work_id} · 상자 {row.get('harvest_container_qty', 0)}"
+            )
+            btn.setCheckable(True)
+            btn.setFixedHeight(40)
+            btn.setStyleSheet(MainStyles.BTN_SUB)
+            btn.clicked.connect(lambda _, r=row: self.select_harvest_record(r))
+            self.harvest_picker_flow.addWidget(btn)
+            self.harvest_btns[work_id] = btn
+
+    def select_harvest_record(self, row: dict):
+        """선택한 수확기록을 production 패드에 반영합니다."""
+        self.selected_harvest_row = row
+        self.selected_harvest_work_id = str(row.get("work_id") or "")
+
+        # 버튼 선택 UI 갱신
+        for wid, btn in getattr(self, "harvest_btns", {}).items():
+            btn.setChecked(wid == self.selected_harvest_work_id)
+
+        # PACK/HARVEST는 raw 카드 없이도 패드 입력 가능
+        if self.prod_type == PROD_TYPE_PACK and self.prod_input_source == INPUT_SOURCE_HARVEST:
+            self.init_sorting_pad()
 
     def handle_mode_change(self):
         """[수정] 상품 모드에 '실사 이력' 확인 버튼을 추가합니다."""
@@ -354,6 +612,7 @@ class StockPage(QWidget):
             self.master_layout.setStretch(1, 0) 
             
         self.load_inventory()
+        self.apply_production_ui()
 
     def add_action_btn(self, text, callback, style):
         """표준 버튼 스타일(styles.py)을 적용한 액션 버튼 생성"""
@@ -384,7 +643,8 @@ class StockPage(QWidget):
             # 원물은 신선도와 입고일이 중요하므로 입고일 순 유지
             order_by = "m.storage_dt ASC" 
         else:
-            where_clause = f"m.item_cd IN ('{self.ITEM_PRODUCT}', '{self.ITEM_JUICE}')"
+            juice_codes = "', '".join(JUICE_STOCK_ITEM_CDS)
+            where_clause = f"m.item_cd IN ('{self.ITEM_PRODUCT}', '{juice_codes}')"
             params = (self.farm_cd,)
             # 📍 [핵심] 마이너스 재고(작업필요분)를 가장 위에 올리고, 
             # 그 안에서 대표님이 요청하신 [품종->중량->등급->사이즈] 순으로 정렬합니다.
@@ -427,6 +687,12 @@ class StockPage(QWidget):
 
     def handle_inventory_click(self, card):
         """원물/상품 클릭 시 작업대로 안전하게 이동 (정수 변환 포함)"""
+        # PACK + HARVEST는 원물 재고 OUT을 만들지 않으므로,
+        # 이 모드에서는 원물 카드 클릭(작업대 반영)을 차단합니다.
+        if self.prod_type == PROD_TYPE_PACK and self.prod_input_source == INPUT_SOURCE_HARVEST:
+            QMessageBox.information(self, "수확 직후", "수확 기록에서 먼저 작업을 선택해 주세요.")
+            return
+
         qty = min(30, int(card.current_qty)); card.update_display(-qty)
         max_limit = int(card.data.get('available_qty', 9999))
         exist = next((c for c in self.selected_cards if c.data == card.data), None)
@@ -462,7 +728,7 @@ class StockPage(QWidget):
                     'size_cd': s['code_cd'],
                     'size_nm': s['code_nm'],
                     'is_new': True,
-                    'storage_dt': datetime.now().strftime('%Y-%m-%d')
+                    'storage_dt': today_ops_iso()
                 }
                 new_card = WorkCartCard(placeholder)
                 new_card.spin.setValue(0)
@@ -478,7 +744,7 @@ class StockPage(QWidget):
         """[📍 수정] 원물 등록 시 20.0kg 중량 정보를 로그에 포함합니다."""
         valid = [c for c in self.selected_cards if c.work_qty > 0]
         if not valid: return
-        t_dt, ok = QInputDialog.getText(self, "저장일", "일자:", text=datetime.now().strftime('%Y-%m-%d'))
+        t_dt, ok = QInputDialog.getText(self, "저장일", "일자:", text=today_ops_iso())
         if not ok: return
         
         queries = []
@@ -486,7 +752,7 @@ class StockPage(QWidget):
             r, qty, yr = c.data, c.work_qty, t_dt[:4]
             # 마스터 업데이트
             queries.append(("INSERT OR IGNORE INTO t_stock_master (farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt, in_qty, out_qty, reg_id) VALUES (?, ?, ?, ?, 'NONE', ?, 20.0, ?, ?, 0, 0, ?)", (self.farm_cd, r['wh_cd'], self.ITEM_RAW, r['variety_cd'], r['size_cd'], yr, t_dt, self.user_id)))
-            queries.append(("UPDATE t_stock_master SET in_qty = in_qty + ?, mod_dt = datetime('now','localtime'), mod_id = ? WHERE farm_cd=? AND storage_dt=? AND wh_cd=? AND item_cd=? AND size_cd=?", (qty, self.user_id, self.farm_cd, t_dt, r['wh_cd'], self.ITEM_RAW, r['size_cd'])))
+            queries.append(("UPDATE t_stock_master SET in_qty = in_qty + ?, mod_dt = '" + now_ops_str() + "', mod_id = ? WHERE farm_cd=? AND storage_dt=? AND wh_cd=? AND item_cd=? AND size_cd=?", (qty, self.user_id, self.farm_cd, t_dt, r['wh_cd'], self.ITEM_RAW, r['size_cd'])))
             
             # 📍 [핵심]: 로그에 weight(20.0) 추가
             sql_log = """
@@ -499,16 +765,35 @@ class StockPage(QWidget):
             QMessageBox.information(self, "성공", "원물 장부 및 중량 기록 완료."); self.clear_all_refresh()
 
     def dispose_raw_material(self):
-        """원물/상품 통합 폐기 로직"""
+        """원물/상품 폐기 — Core 조정 OUT."""
         targets = [c for c in self.selected_cards if c.work_qty > 0]
         if not targets: return
         if QMessageBox.question(self, '폐기', "불량 폐기하시겠습니까?") != QMessageBox.StandardButton.Yes: return
-        queries = []
-        for c in targets:
-            r, qty = c.data, c.work_qty
-            queries.append(("UPDATE t_stock_master SET out_qty = out_qty + ?, mod_dt = datetime('now','localtime'), mod_id = ? WHERE farm_cd=? AND storage_dt=? AND wh_cd=? AND item_cd=? AND size_cd=?", (qty, self.user_id, self.farm_cd, r['storage_dt'], r['wh_cd'], r['item_cd'], r['size_cd'])))
-            queries.append(("INSERT INTO t_stock_log (farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, io_type, qty, remark, reg_id) VALUES (?, ?, ?, ?, ?, ?, 'OUT', ?, '품질 폐기', ?)", (self.farm_cd, r['item_cd'], r['variety_cd'], r.get('harvest_year', datetime.now().year), r.get('grade_cd','NONE'), r['size_cd'], qty, self.user_id)))
-        if self.db.execute_transaction(queries): QMessageBox.information(self, "성공", "폐기 완료."); self.clear_all_refresh()
+        svc = StockAdjustService(self.db.conn)
+        try:
+            for c in targets:
+                r, qty = c.data, c.work_qty
+                svc.adjust(
+                    StockAdjustIn(
+                        farm_cd=self.farm_cd,
+                        wh_cd=str(r.get("wh_cd") or DEFAULT_WH_CD),
+                        item_cd=str(r["item_cd"]),
+                        variety_cd=str(r["variety_cd"]),
+                        grade_cd=str(r.get("grade_cd") or "NONE"),
+                        size_cd=str(r["size_cd"]),
+                        weight=float(r.get("weight") or 0),
+                        harvest_year=int(r.get("harvest_year") or today_ops().year),
+                        storage_dt=str(r["storage_dt"])[:10],
+                        io_type=IO_TYPE_OUT,
+                        qty=float(qty),
+                        reason_cd=REASON_DISPOSE,
+                    ),
+                    user_id=self.user_id,
+                )
+            QMessageBox.information(self, "성공", "폐기 완료.")
+            self.clear_all_refresh()
+        except StockAdjustError as exc:
+            QMessageBox.critical(self, "폐기 실패", str(exc.message))
 
     # 상품실사 처리 로직(문제가 발생한 상품의 수량을 조정하고 사유를 기록한다.)
     def audit_product_stock(self):
@@ -526,7 +811,7 @@ class StockPage(QWidget):
             if audit_qty > in_qty: new_in, new_out = audit_qty, 0
             else: new_in, new_out = in_qty, in_qty - audit_qty
             
-            sql_master = "UPDATE t_stock_master SET in_qty = ?, out_qty = ?, mod_dt = datetime('now','localtime'), mod_id = ? WHERE farm_cd=? AND storage_dt=? AND wh_cd=? AND item_cd=? AND size_cd=? AND variety_cd=? AND grade_cd=?"
+            sql_master = "UPDATE t_stock_master SET in_qty = ?, out_qty = ?, mod_dt = '" + now_ops_str() + "', mod_id = ? WHERE farm_cd=? AND storage_dt=? AND wh_cd=? AND item_cd=? AND size_cd=? AND variety_cd=? AND grade_cd=?"
             queries.append((sql_master, (new_in, new_out, self.user_id, self.farm_cd, r['storage_dt'], r['wh_cd'], r['item_cd'], r['size_cd'], r['variety_cd'], r.get('grade_cd','NONE'))))
             
             # 📍 [핵심]: 로그에 기존 중량(orig_weight) 포함
@@ -540,115 +825,206 @@ class StockPage(QWidget):
             QMessageBox.information(self, "성공", "실사 및 중량 로그 동기화 완료."); self.clear_all_refresh()
 
     def save_production_log(self):
-        """
-        [📍아토스 진짜 최종본] 
-        1. 다이(FR) 통합 + 시즌 단일 바구니 최적화
-        2. 원물 정밀 차감 (오염 방지)
-        3. 작업 지시 상태 변경 (t_work_detail -> 'DONE') 추가
-        """
-        if not self.selected_cards: return
-        if QMessageBox.question(self, '확정', "선택한 원물을 소모하여 상품 생산을 저장하시겠습니까?") != QMessageBox.StandardButton.Yes: return
-
+        """Stage P 생산확정 — core.ProductionService SSOT."""
         try:
-            cursor = self.db.conn.cursor()
-            now = datetime.now()
-            p_dt = now.strftime('%Y-%m-%d')
-            yr = now.strftime('%Y')
-            
-            u_w = float(self.target_weight_combo.currentText().replace('kg',''))
-            ref = self.selected_cards[0].data  # 기준 정보
-            queries = []
+            is_pack = self.prod_type == PROD_TYPE_PACK
+            is_process = self.prod_type == PROD_TYPE_PROCESS
+            if not (is_pack or is_process):
+                QMessageBox.critical(self, "저장 실패", "생산구분이 올바르지 않습니다.")
+                return
 
-            # ==========================================================
-            # 1. [작업 상태 변경] work_id가 있는 카드만 완료(DONE) 처리
-            # ==========================================================
-            sql_work_done = """
-                UPDATE t_work_detail 
-                SET status_cd = 'DONE', mod_id = ?, mod_dt = datetime('now','localtime')
-                WHERE work_id = ?
-            """
-            work_ids = []
-            for c in self.selected_cards:
-                w_id = str((c.data or {}).get("work_id") or "").strip()
+            # 생산확정 메시지(UX: 내부 코드 노출 금지)
+            if is_pack and self.prod_input_source == INPUT_SOURCE_HARVEST:
+                title = "확정"
+                text = "선택한 수확기록을 기반으로 배 포장 생산을 저장하시겠습니까?"
+            elif is_pack:
+                title = "확정"
+                text = "선택한 원물을 소모하여 배 포장 생산을 저장하시겠습니까?"
+            else:
+                title = "확정"
+                text = "선택한 원물을 소모하여 배즙 생산을 저장하시겠습니까?"
+
+            if QMessageBox.question(self, title, text) != QMessageBox.StandardButton.Yes:
+                return
+
+            svc = ProductionService(self.db.conn)
+
+            # ----------------------------
+            # PACK
+            # ----------------------------
+            if is_pack:
+                u_w = float(self.target_weight_combo.currentText().replace('kg', '')) \
+                    if 'kg' in self.target_weight_combo.currentText() else 0.0
+
+                # 투입원/입력 상태 먼저 검증 (UX: 수량 입력 메시지보다 우선)
+                if self.prod_input_source == INPUT_SOURCE_RAW_STOCK:
+                    raw_targets = [c for c in self.selected_cards if c.work_qty > 0]
+                    if not raw_targets:
+                        QMessageBox.warning(self, "입력", "원물 재고를 선택해 주세요.")
+                        return
+                else:
+                    if not self.selected_harvest_row or not self.selected_harvest_work_id:
+                        QMessageBox.warning(self, "입력", "수확 기록을 선택해 주세요.")
+                        return
+
+                lines: list[ProductionLineIn] = []
+                for dai_cd, grades in self.sorting_data.items():
+                    for g_cd, qty in grades.items():
+                        if qty > 0:
+                            lines.append(
+                                ProductionLineIn(grade_cd=g_cd, size_cd=dai_cd, qty=int(qty))
+                            )
+                if not lines:
+                    QMessageBox.warning(self, "입력", "생산 수량을 입력해 주세요.")
+                    return
+
+                if self.prod_input_source == INPUT_SOURCE_RAW_STOCK:
+                    raw_targets = [c for c in self.selected_cards if c.work_qty > 0]
+                    if not raw_targets:
+                        QMessageBox.warning(self, "입력", "원물 재고를 선택해 주세요.")
+                        return
+                    ref = raw_targets[0].data
+
+                    raw_consumptions: list[RawStockConsumptionIn] = []
+                    work_ids: list[str] = []
+                    for c in raw_targets:
+                        r = c.data
+                        raw_consumptions.append(
+                            RawStockConsumptionIn(
+                                wh_cd=r['wh_cd'],
+                                variety_cd=r['variety_cd'],
+                                size_cd=r['size_cd'],
+                                weight=float(r['weight']),
+                                harvest_year=int(r['harvest_year']),
+                                storage_dt=str(r['storage_dt'])[:10],
+                                qty=int(c.work_qty),
+                            )
+                        )
+                        w_id = str((r or {}).get("work_id") or "").strip()
+                        if w_id:
+                            work_ids.append(w_id)
+
+                    payload = ProductionConfirmIn(
+                        farm_cd=self.farm_cd,
+                        prod_type=PROD_TYPE_PACK,
+                        input_source=INPUT_SOURCE_RAW_STOCK,
+                        variety_cd=ref['variety_cd'],
+                        wh_cd=ref['wh_cd'],
+                        pack_weight=u_w,
+                        lines=lines,
+                        raw_consumptions=raw_consumptions,
+                        work_ids=work_ids,
+                    )
+                else:
+                    if not self.selected_harvest_row or not self.selected_harvest_work_id:
+                        QMessageBox.warning(self, "입력", "수확 기록을 선택해 주세요.")
+                        return
+                    payload = ProductionConfirmIn(
+                        farm_cd=self.farm_cd,
+                        prod_type=PROD_TYPE_PACK,
+                        input_source=INPUT_SOURCE_HARVEST,
+                        variety_cd=str(self.selected_harvest_row.get('variety_cd') or ''),
+                        wh_cd=DEFAULT_WH_CD,
+                        pack_weight=u_w,
+                        lines=lines,
+                        raw_consumptions=[],
+                        harvest_work_id=self.selected_harvest_work_id,
+                        work_ids=[],
+                    )
+
+                result = svc.confirm(self.user_id, payload)
+                self._after_production_confirm(result.get("prefill_lines") or [])
+                return
+
+            # ----------------------------
+            # PROCESS (배즙 생산)
+            # ----------------------------
+            raw_targets = [c for c in self.selected_cards if c.work_qty > 0]
+            if not raw_targets:
+                QMessageBox.warning(self, "입력", "원물 재고를 선택해 주세요.")
+                return
+            juice_qty = int(self.juice_qty_spin.value())
+            if juice_qty < 1:
+                QMessageBox.warning(self, "입력", "배즙 박스 수를 입력해 주세요.")
+                return
+
+            ref = raw_targets[0].data
+            raw_consumptions: list[RawStockConsumptionIn] = []
+            work_ids: list[str] = []
+            for c in raw_targets:
+                r = c.data
+                raw_consumptions.append(
+                    RawStockConsumptionIn(
+                        wh_cd=r['wh_cd'],
+                        variety_cd=r['variety_cd'],
+                        size_cd=r['size_cd'],
+                        weight=float(r['weight']),
+                        harvest_year=int(r['harvest_year']),
+                        storage_dt=str(r['storage_dt'])[:10],
+                        qty=int(c.work_qty),
+                    )
+                )
+                w_id = str((r or {}).get("work_id") or "").strip()
                 if w_id:
                     work_ids.append(w_id)
-            for w_id in sorted(set(work_ids)):
-                queries.append((sql_work_done, (self.user_id, w_id)))
 
-            # ==========================================================
-            # 2. [상품 생산] 다이(FR) 단위 통합 + 단일 바구니 누적 (IN)
-            # ==========================================================
-            for dai_cd, grades in self.sorting_data.items():
-                for g_cd, qty in grades.items():
-                    if qty > 0:
-                        # 올해 해당 규격 최초 입력일 조회
-                        check_sql = """
-                            SELECT storage_dt FROM t_stock_master 
-                            WHERE farm_cd=? AND wh_cd=? AND item_cd=? AND variety_cd=? AND grade_cd=? AND size_cd=? AND weight=? AND harvest_year=?
-                        """
-                        cursor.execute(check_sql, (self.farm_cd, ref['wh_cd'], self.ITEM_PRODUCT, ref['variety_cd'], g_cd, dai_cd, u_w, yr))
-                        existing_record = cursor.fetchone()
+            payload = ProductionConfirmIn(
+                farm_cd=self.farm_cd,
+                prod_type=PROD_TYPE_PROCESS,
+                input_source=INPUT_SOURCE_RAW_STOCK,
+                variety_cd=ref['variety_cd'],
+                wh_cd=ref['wh_cd'],
+                pack_weight=0.0,
+                lines=[],
+                raw_consumptions=raw_consumptions,
+                work_ids=work_ids,
+                juice_qty=juice_qty,
+                juice_grade_cd=self.GRADE_NONE,
+                juice_item_cd=str(self.juice_kind_combo.currentData() or ITEM_JUICE_PLAIN),
+            )
+            result = svc.confirm(self.user_id, payload)
+            self._after_production_confirm(result.get("prefill_lines") or [])
 
-                        target_storage_dt = existing_record[0] if existing_record else p_dt
-
-                        # UPSERT (Insert or Ignore + Update)
-                        ins_sql = """
-                            INSERT OR IGNORE INTO t_stock_master 
-                            (farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt, in_qty, out_qty, reserved_qty, reg_id) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)
-                        """
-                        queries.append((ins_sql, (self.farm_cd, ref['wh_cd'], self.ITEM_PRODUCT, ref['variety_cd'], g_cd, dai_cd, u_w, yr, target_storage_dt, self.user_id)))
-
-                        upd_sql = """
-                            UPDATE t_stock_master 
-                            SET in_qty = in_qty + ?, mod_dt = datetime('now','localtime'), mod_id = ? 
-                            WHERE farm_cd=? AND wh_cd=? AND item_cd=? AND variety_cd=? AND grade_cd=? AND size_cd=? AND weight=? AND harvest_year=? AND storage_dt=?
-                        """
-                        queries.append((upd_sql, (qty, self.user_id, self.farm_cd, ref['wh_cd'], self.ITEM_PRODUCT, ref['variety_cd'], g_cd, dai_cd, u_w, yr, target_storage_dt)))
-                        
-                        # 상품 생산 로그
-                        log_sql = """
-                            INSERT INTO t_stock_log 
-                            (farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, weight, io_type, qty, remark, reg_id) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'IN', ?, '선별생산 (다이통합)', ?)
-                        """
-                        queries.append((log_sql, (self.farm_cd, self.ITEM_PRODUCT, ref['variety_cd'], yr, g_cd, dai_cd, u_w, qty, self.user_id)))
-
-            # ==========================================================
-            # 3. [원물 소모] 선택된 원물 카드별 재고 정밀 차감 (OUT)
-            # ==========================================================
-            for c in self.selected_cards:
-                c_data = c.data
-                raw_upd = """
-                    UPDATE t_stock_master 
-                    SET out_qty = out_qty + ?, mod_dt = datetime('now','localtime'), mod_id = ? 
-                    WHERE farm_cd=? AND wh_cd=? AND item_cd=? AND variety_cd=? AND size_cd=? AND weight=? AND harvest_year=? AND storage_dt=?
-                """
-                queries.append((raw_upd, (c.work_qty, self.user_id, self.farm_cd, c_data['wh_cd'], self.ITEM_RAW, c_data['variety_cd'], c_data['size_cd'], c_data['weight'], c_data['harvest_year'], c_data['storage_dt'])))
-
-                raw_log = """
-                    INSERT INTO t_stock_log 
-                    (farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, weight, io_type, qty, remark, reg_id) 
-                    VALUES (?, ?, ?, ?, 'NONE', ?, ?, 'OUT', ?, '생산 원물 소모', ?)
-                """
-                queries.append((raw_log, (self.farm_cd, self.ITEM_RAW, c_data['variety_cd'], c_data['harvest_year'], c_data['size_cd'], c_data['weight'], c.work_qty, self.user_id)))
-
-            # 4. 트랜잭션 실행
-            if self.db.execute_transaction(queries):
-                QMessageBox.information(self, "성공", "상품 생산 및 작업 지시 완료 처리가 모두 성공했습니다.")
-                self.clear_all_refresh()
-            else:
-                raise Exception("트랜잭션 실행 중 오류가 발생했습니다.")
-
+        except ProductionError as e:
+            QMessageBox.critical(self, "저장 실패", str(e))
         except Exception as e:
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "저장 실패", f"에러 발생: {str(e)}")
 
+    def _after_production_confirm(self, prefill_lines):
+        """생산확정 후 재고저장 / 바로판매 선택 (판매 OUT은 Stage S)."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("생산 완료")
+        msg.setText("상품 재고에 반영되었습니다.")
+        msg.setInformativeText("다음 작업을 선택하세요.")
+        btn_stock = msg.addButton("재고로 저장", QMessageBox.ButtonRole.AcceptRole)
+        btn_sales = msg.addButton("바로 판매", QMessageBox.ButtonRole.ActionRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        self.clear_all_refresh()
+        if clicked == btn_sales and prefill_lines:
+            QMessageBox.information(
+                self,
+                "바로 판매",
+                "판매 화면 prefill 연동은 모바일·Stage S에서 이어집니다.",
+            )
+
     def clear_all_refresh(self):
-        self.selected_cards.clear(); self.sorting_data.clear()
-        while self.cart_layout.count(): self.cart_layout.takeAt(0).widget().deleteLater()
-        self.load_inventory(); self.init_sorting_pad()
+        self.selected_cards.clear()
+        self.sorting_data.clear()
+        self.juice_qty_spin.setValue(0)
+        self.selected_harvest_row = None
+        self.selected_harvest_work_id = ""
+        while self.cart_layout.count():
+            item = self.cart_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        # 수확 기록 버튼 선택은 새로고침/초기화 단계에서는 유지해도 되지만,
+        # 생산패드는 입력 상태에 따라 재구성되므로 일단 패드만 재조회합니다.
+        self.load_inventory()
+        self.apply_production_ui()
+        self.init_sorting_pad()
 
     def remove_from_cart(self, card):
         if card in self.selected_cards: self.selected_cards.remove(card)
@@ -662,11 +1038,28 @@ class StockPage(QWidget):
             item = self.tile_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         self.size_buttons.clear()
-        
-        targets = [c for c in self.selected_cards if c.work_qty > 0]
-        if not targets or not self.btn_mode_raw.isChecked(): 
+
+        # PACK/PROCESS 모두 원물 모드에서만 작업합니다.
+        if not self.btn_mode_raw.isChecked():
             self.update_gauge()
             return
+
+        # PROCESS: 배즙 생산은 grade/size 입력패드가 아니라 박스 수 입력입니다.
+        if self.prod_type == PROD_TYPE_PROCESS:
+            self.update_gauge()
+            return
+
+        # PACK: 입력원(투입원) 기준으로 생산패드 활성 조건 결정
+        if self.prod_input_source == INPUT_SOURCE_RAW_STOCK:
+            targets = [c for c in self.selected_cards if c.work_qty > 0]
+            if not targets:
+                self.update_gauge()
+                return
+        else:
+            # HARVEST
+            if not self.selected_harvest_work_id:
+                self.update_gauge()
+                return
 
         # 📍 [변경] 배 다이(판매사이즈) 공통코드 그룹(FR020100)을 불러옵니다.
         # 이 코드는 DB의 m_common_code 설정에 따라 달라질 수 있습니다.
@@ -705,13 +1098,35 @@ class StockPage(QWidget):
         수율 계산 공식:
         $$Ratio = \\frac{TotalOutKg}{TotalInKg} \\times 100$$
         """
-        total_in_kg = sum(c.work_qty * 20.0 for c in self.selected_cards)
-        unit_w = float(self.target_weight_combo.currentText().replace('kg','')) if 'kg' in self.target_weight_combo.currentText() else 15.0
+        # size/tiles는 PACK에서만 의미가 있으므로, 먼저 버튼 텍스트 갱신부터 수행합니다.
         for s_cd, (btn, base_nm) in self.size_buttons.items():
-            tot = sum(self.sorting_data.get(s_cd, {}).values()); btn.setText(f"{base_nm}\n({tot}박스)" if tot > 0 else base_nm)
-        total_out_qty = sum(sum(g.values()) for g in self.sorting_data.values()); total_out_kg = total_out_qty * unit_w
+            tot = sum(self.sorting_data.get(s_cd, {}).values())
+            btn.setText(f"{base_nm}\n({tot}박스)" if tot > 0 else base_nm)
+
+        # PACK + HARVEST: HARVEST 투입은 kg 환산을 금지합니다.
+        if self.prod_type == PROD_TYPE_PACK and self.prod_input_source == INPUT_SOURCE_HARVEST:
+            self.yield_bar.setValue(0)
+            self.lbl_gauge.setText("⚖️ 수율 계산 불가 / 수확직후")
+            return
+
+        total_in_kg = sum(c.work_qty * RAW_CONTAINER_WEIGHT_KG for c in self.selected_cards)
+
+        if self.prod_type == PROD_TYPE_PACK:
+            # PACK: out은 grade/size 입력(박스 단위) 기반
+            unit_w = float(self.target_weight_combo.currentText().replace('kg', '')) \
+                if 'kg' in self.target_weight_combo.currentText() else 15.0
+            total_out_qty = sum(sum(g.values()) for g in self.sorting_data.values())
+            total_out_kg = total_out_qty * unit_w
+        else:
+            # PROCESS: out은 "배즙 박스 수" 기반
+            total_out_qty = int(self.juice_qty_spin.value())
+            total_out_kg = total_out_qty * DEFAULT_JUICE_WEIGHT
+
         ratio = (total_out_kg / total_in_kg * 100) if total_in_kg > 0 else 0
-        self.yield_bar.setValue(int(ratio)); self.lbl_gauge.setText(f"⚖️ 실시간 수율 밸런스: {ratio:.1f}% ({int(total_out_kg)}kg / {int(total_in_kg)}kg)")
+        self.yield_bar.setValue(int(ratio))
+        self.lbl_gauge.setText(
+            f"⚖️ 실시간 수율 밸런스: {ratio:.1f}% ({int(total_out_kg)}kg / {int(total_in_kg)}kg)"
+        )
 
     def view_audit_history(self):
             """[신규] 실사 이력 팝업을 실행합니다."""

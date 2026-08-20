@@ -28,6 +28,9 @@ import {
   LABEL_REMAINING,
   LABEL_SHIP_LINE,
   LABEL_SHIP_PAGE,
+  HINT_SHIP_ORDER,
+  HINT_SHIP_PRODUCTION,
+  HINT_SHIP_STOCK,
   MSG_CONFIRM_OK,
   MSG_NO_PREFILL,
   MSG_STOCK_MODE_NEED_ALLOC,
@@ -67,6 +70,12 @@ const contextText = computed(() => {
   if (source.value === 'ORDER') return '주문 출고'
   if (source.value === 'STOCK') return '재고 직접 판매'
   return LABEL_SHIP_PAGE
+})
+const contextHint = computed(() => {
+  if (source.value === 'PRODUCTION') return HINT_SHIP_PRODUCTION
+  if (source.value === 'ORDER') return HINT_SHIP_ORDER
+  if (source.value === 'STOCK') return HINT_SHIP_STOCK
+  return ''
 })
 const showModeToggle = computed(
   () => prefill.allowModeChange && hasOrder.value,
@@ -150,6 +159,7 @@ onMounted(() => {
       <OdsCard>
         <p class="ctx">{{ LABEL_SHIP_PAGE }}</p>
         <h2 class="title">{{ contextText }}</h2>
+        <p v-if="contextHint" class="meta">{{ contextHint }}</p>
         <p v-if="prefill.orderNo" class="meta">
           {{ LABEL_ORDER }} {{ prefill.orderNo }}
           <template v-if="prefill.customerNm"> · {{ prefill.customerNm }}</template>

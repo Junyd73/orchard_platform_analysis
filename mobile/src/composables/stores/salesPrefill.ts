@@ -108,23 +108,32 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   }
 
   function setFromOrder(detail: OrderDetail, line: OrderLine) {
-    const draft = draftFromOrderLine(line)
+    setFromOrderLines(detail, [line])
+  }
+
+  function setFromOrderLines(detail: OrderDetail, orderLines: OrderLine[]) {
+    const drafts = orderLines.map(draftFromOrderLine)
     source.value = 'ORDER'
     lines.value = []
-    shipLines.value = [draft]
+    shipLines.value = drafts
     orderNo.value = detail.order_no
     custmId.value = detail.custm_id
     customerNm.value = detail.customer || detail.custm_id
-    shipMode.value = defaultShipMode(draft.alloc_remaining, true)
+    const allAlloc = drafts.length > 0 && drafts.every((d) => d.alloc_remaining > 1e-9)
+    shipMode.value = defaultShipMode(allAlloc ? 1 : 0, true)
     returnTo.value = 'order-detail'
     allowModeChange.value = true
     lastResult.value = null
   }
 
   function setFromStock(row: StockItem) {
+    setFromStockRows([row])
+  }
+
+  function setFromStockRows(rows: StockItem[]) {
     source.value = 'STOCK'
     lines.value = []
-    shipLines.value = [draftFromStock(row)]
+    shipLines.value = rows.map(draftFromStock)
     shipMode.value = SHIP_MODE_DIRECT
     orderNo.value = null
     custmId.value = null
@@ -180,7 +189,9 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     lastRemaining,
     setFromProduction,
     setFromOrder,
+    setFromOrderLines,
     setFromStock,
+    setFromStockRows,
     consume,
     rememberResult,
     remainingFor,
