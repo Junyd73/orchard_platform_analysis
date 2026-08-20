@@ -1,10 +1,10 @@
-# Stage 6 Ship/Stock UX — Analysis Review Branch
+# Stage 6 Ship/Stock UX ??Analysis Review Branch
 
-검수 전용 브랜치. **analysis `main`은 변경하지 않았습니다.**
+검???�용 브랜�? **analysis `main`?� 변경하지 ?�았?�니??**
 
-## Private 기준
+## Private 기�?
 
-| 항목 | SHA / 브랜치 |
+| ??�� | SHA / 브랜�?|
 |------|----------------|
 | base | `c6e5edb93fa5234b7314ea9135aa48204138461d` (`main`) |
 | feature | `de5341735285075d09579e2248c6fc32b7986692` (sales preview 2B list) |
@@ -13,53 +13,53 @@
 
 ## Review branch 목적
 
-ChatGPT/대표가 Stage 6 P0~P3 실제 소스를 `orchard_platform_analysis`에서 직접 diff 검증.
+ChatGPT/?�?��? Stage 6 P0~P3 ?�제 ?�스�?`orchard_platform_analysis`?�서 직접 diff 검�?
 
-- 영구 mirror whitelist 확대 **아님**
-- Core 3종 + PC `stock_page.py`는 **이번 review branch 한시 포함**
+- ?�구 mirror whitelist ?��? **?�님**
+- Core 3�?+ PC `stock_page.py`??**?�번 review branch ?�시 ?�함**
 
 ## A/B 보완 (2026-08-20)
 
-### A — 주문상세 잔여수량 SSOT
+### A ??주문?�세 ?�여?�량 SSOT
 
-- `core/order_ship_qty.py` — CONFIRMED 판매 누계 공통 helper
-- `core/order_service.py` — `get_order` line에 `confirmed_shipped_qty`, `remaining_order_qty`
-- `core/order_ship_service.py` — helper 위임
-- `server/schemas/order.py` — `OrderLineOut` 필드 추가
-- `mobile/src/views/orders/OrderDetailView.vue` — 서버 `remaining_order_qty` 우선
+- `core/order_ship_qty.py` ??CONFIRMED ?�매 ?�계 공통 helper
+- `core/order_service.py` ??`get_order` line??`confirmed_shipped_qty`, `remaining_order_qty`
+- `core/order_ship_service.py` ??helper ?�임
+- `server/schemas/order.py` ??`OrderLineOut` ?�드 추�?
+- `mobile/src/views/orders/OrderDetailView.vue` ???�버 `remaining_order_qty` ?�선
 
-### B — 다건 STOCK 허용조건
+### B ???�건 STOCK ?�용조건
 
-- `mobile/src/views/sales/shipConfirmModel.ts` — `canUseStockMode`, confirm 직전 검증
-- `mobile/src/views/sales/ShipConfirmView.vue` — UI/validation
-- `mobile/src/composables/stores/salesPrefill.ts` — draft 기본 ship_mode
+- `mobile/src/views/sales/shipConfirmModel.ts` ??`canUseStockMode`, confirm 직전 검�?
+- `mobile/src/views/sales/ShipConfirmView.vue` ??UI/validation
+- `mobile/src/composables/stores/salesPrefill.ts` ??draft 기본 ship_mode
 
-## P0 — 배즙 출고 표시
+## P0 ??배즙 출고 ?�시
 
-- `mobile/src/views/orders/ordersConstants.ts` — `isJuiceItemCd`, `formatOrderLineSpec`
-- natural key 미변경
+- `mobile/src/views/orders/ordersConstants.ts` ??`isJuiceItemCd`, `formatOrderLineSpec`
+- natural key 미�?�?
 
-## P1 — 다건 판매/출고
+## P1 ???�건 ?�매/출고
 
 - `mobile/src/composables/stores/salesPrefill.ts`
 - `mobile/src/views/stock/StockView.vue`
 - `mobile/src/views/orders/OrderDetailView.vue`
-- 단건 유지, 한 confirm = 한 `sales_no`, ship_mode 단일
+- ?�건 ?��?, ??confirm = ??`sales_no`, ship_mode ?�일
 
-## P2 — 경로/안내 문구
+## P2 ??경로/?�내 문구
 
 - `mobile/src/views/sales/ShipConfirmView.vue`
 - `mobile/src/views/sales/shipConfirmModel.ts`
-- 예약접수: 「예약접수 상태입니다.」
-- ST010200 상태머신 미변경
+- ?�약?�수: ?�예?�접???�태?�니????
+- ST010200 ?�태머신 미�?�?
 
-## P3 — 재고조정
+## P3 ???�고조정
 
-### Core (review 한시 포함)
+### Core (review ?�시 ?�함)
 
 - `core/stock_adjust_constants.py`
 - `core/stock_adjust_service.py`
-- `core/order_allocation_service.py` — 이력 `io_type_nm` 사유명
+- `core/order_allocation_service.py` ???�력 `io_type_nm` ?�유�?
 
 ### API (whitelist)
 
@@ -71,21 +71,21 @@ ChatGPT/대표가 Stage 6 P0~P3 실제 소스를 `orchard_platform_analysis`에�
 
 - `mobile/src/views/stock/stockAdjustConstants.ts`
 - `mobile/src/views/stock/StockView.vue`
-- `mobile/src/api/stock.ts` (review 한시 — 통상 mirror 제외)
-- `ui/pages/stock_page.py` — PC 폐기 Core 위임
+- `mobile/src/api/stock.ts` (review ?�시 ???�상 mirror ?�외)
+- `ui/pages/stock_page.py` ??PC ?�기 Core ?�임
 
-### 사유코드 AD01
+### ?�유코드 AD01
 
-| code | 명 | IN/OUT |
+| code | �?| IN/OUT |
 |------|-----|--------|
-| AD010101 | 폐기 | OUT |
-| AD010102 | 파손 | OUT |
+| AD010101 | ?�기 | OUT |
+| AD010102 | ?�손 | OUT |
 | AD010103 | 증정 | OUT |
 | AD010104 | 반품 | IN |
-| AD010105 | 실사차이 | IN/OUT |
-| AD010106 | 기타 | IN/OUT |
+| AD010105 | ?�사차이 | IN/OUT |
+| AD010106 | 기�? | IN/OUT |
 
-## 테스트 (review branch 포함)
+## ?�스??(review branch ?�함)
 
 - `server/tests/test_stock_adjust_service.py`
 - `mobile/src/__tests__/OrderDetailView.spec.ts`
@@ -93,30 +93,30 @@ ChatGPT/대표가 Stage 6 P0~P3 실제 소스를 `orchard_platform_analysis`에�
 - `mobile/src/__tests__/stockView.spec.ts`
 - `mobile/src/__tests__/stockAdjustConstants.spec.ts`
 
-**미포함:** `OrderNewView.spec.ts` — preflight 휴대폰 패턴(테스트 fixture `010-1111-xxxx`) 차단. private에서 별도 확인.
+**미포??** `OrderNewView.spec.ts` ??preflight ?��????�턴(?�스??fixture `010-1111-xxxx`) 차단. private?�서 별도 ?�인.
 
-## 검증 결과 (private feature commit 기준)
+## 검�?결과 (private feature commit 기�?)
 
-| 영역 | 결과 |
+| ?�역 | 결과 |
 |------|------|
 | Python (order ship/service, alloc, adjust, production) | 120 OK |
-| 관련 vitest (OrderDetailView, shipConfirm) | 31 OK |
-| 전체 vitest | 265/267 (AiAnalysisPanel 2건 baseline) |
+| 관??vitest (OrderDetailView, shipConfirm) | 31 OK |
+| ?�체 vitest | 265/267 (AiAnalysisPanel 2�?baseline) |
 | build | OK |
 
 ### AiAnalysisPanel baseline (CASE 1)
 
-main(`c6e5edb`)과 feature(`6f74eb5`) **동일 2건 실패** — Stage 6 무관.
+main(`c6e5edb`)�?feature(`6f74eb5`) **?�일 2�??�패** ??Stage 6 무�?.
 
-1. `AI 오류 코드 메시지` — `요금 제한` 미표시
-2. `확정 실패 시 오류 표시·가이드 미호출` — `확정할 후보를 찾을 수 없습니다` 미표시
+1. `AI ?�류 코드 메시지` ??`?�금 ?�한` 미표??
+2. `?�정 ?�패 ???�류 ?�시·가?�드 미호�? ??`?�정???�보�?찾을 ???�습?�다` 미표??
 
 ## Secret scan
 
-- `scripts/mirror/preflight.py` 통과 (review 포함 파일)
-- API key / password / env / DB 경로 미포함
+- `scripts/mirror/preflight.py` ?�과 (review ?�함 ?�일)
+- API key / password / env / DB 경로 미포??
 
-## Private commit 변경 파일 (27)
+## Private commit 변�??�일 (27)
 
 ```
 core/order_allocation_service.py
@@ -148,54 +148,54 @@ server/tests/test_stock_adjust_service.py
 ui/pages/stock_page.py
 ```
 
-※ analysis mirror 경로 매핑: `features`→`views`, `shared/stores`→`composables/stores`, `server/app/*`→`server/*`
+??analysis mirror 경로 매핑: `features`??views`, `shared/stores`??composables/stores`, `server/app/*`??server/*`
 
-## 보완 2단계 — 판매 미리보기 (2026-08-20)
+## 보완 2?�계 ???�매 미리보기 (2026-08-20)
 
-| 항목 | 값 |
+| ??�� | �?|
 |------|-----|
 | private branch | `cursor/stage6-ship-stock-ux` |
 | private SHA | `7bc54293df34e1bcbfdc5f6f7de4bb4089610ffa` |
-| 범위 | 재고 다건선택 → 판매미리보기 → DIRECT 확정 (1고객·1배송·N품목) |
-| 제외 | 다배송지 / 부분배송 / Stage 7 / main merge |
+| 범위 | ?�고 ?�건?�택 ???�매미리보기 ??DIRECT ?�정 (1고객·1배송·N?�목) |
+| ?�외 | ?�배?��? / 부분배??/ Stage 7 / main merge |
 
-### 핵심 파일
+### ?�심 ?�일
 
-- `mobile/src/views/stock/StockView.vue` — 개별 판매 제거, sticky 판매미리보기, 판매예정 표시
-- `mobile/src/views/sales/SalesPreviewView.vue` — 신규 미리보기 화면
-- `mobile/src/composables/stores/salesPrefill.ts` — draft 병합·유지·삭제
-- `core/order_ship_service.py` — `tot_ship_fee` / `dlvry_tp` / `t_sales_delivery` 저장
-- `server/schemas/shipment.py`, `server/services/order_ship_api_service.py` — 배송 필드 전달
+- `mobile/src/views/stock/StockView.vue` ??개별 ?�매 ?�거, sticky ?�매미리보기, ?�매?�정 ?�시
+- `mobile/src/views/sales/SalesPreviewView.vue` ???�규 미리보기 ?�면
+- `mobile/src/composables/stores/salesPrefill.ts` ??draft 병합·?��?·??��
+- `core/order_ship_service.py` ??`tot_ship_fee` / `dlvry_tp` / `t_sales_delivery` ?�??
+- `server/schemas/shipment.py`, `server/services/order_ship_api_service.py` ??배송 ?�드 ?�달
 
-## 보완 2단계 보완수정 (2026-08-20)
+## 보완 2?�계 보완?�정 (2026-08-20)
 
-| 항목 | 값 |
+| ??�� | �?|
 |------|-----|
 | private SHA | `f6e35c65fcfb62c1e06ed60c28cf0879d37c747d` |
-| 내용 | fixed 판매미리보기 바 · draft→판매예정 · STOCK 헤더 초기화/유지 · 배송 schema 검증 테스트 |
+| ?�용 | fixed ?�매미리보기 �?· draft?�판매예??· STOCK ?�더 초기???��? · 배송 schema 검�??�스??|
 
-## 재고 목록 UX — 조회조건 카드 (2026-08-20)
+## ?�고 목록 UX ??조회조건 카드 (2026-08-20)
 
-| 항목 | 값 |
+| ??�� | �?|
 |------|-----|
 | private branch | `cursor/stage6-ship-stock-ux` |
 | private SHA | `c6a6a0926f387af3dd1269ace306a94dd9096a16` |
-| 내용 | 포장수량→판매수량 · 품종/중량/크기/등급 조회 · 돋보기/새로고침 · 조회조건을 OdsCard로 상품 리스트와 구분 |
+| ?�용 | ?�장?�량?�판매수??· ?�종/중량/?�기/?�급 조회 · ?�보�??�로고침 · 조회조건??OdsCard�??�품 리스?��? 구분 |
 
-### 핵심 파일
+### ?�심 ?�일
 
 - `mobile/src/views/stock/StockView.vue`
 - `mobile/src/__tests__/stockView.spec.ts`
 
-## 보완 2A 최종 — 포장/저장일 사용자 노출 제거 (2026-08-20)
+## 보완 2A 최종 ???�장/?�?�일 ?�용???�출 ?�거 (2026-08-20)
 
-| 항목 | 값 |
+| ??�� | �?|
 |------|-----|
 | private branch | `cursor/stage6-ship-stock-ux` |
 | private SHA | `7e70f51077315271685d970de147843fe6ada2b6` |
-| 내용 | LOT 선택 Sheet 제거 · 상품 조정은 `adjust_by_sale_spec` · OUT FIFO 분할 · IN 기존 최신 source |
+| ?�용 | LOT ?�택 Sheet ?�거 · ?�품 조정?� `adjust_by_sale_spec` · OUT FIFO 분할 · IN 기존 최신 source |
 
-### 핵심 파일
+### ?�심 ?�일
 
 - `mobile/src/views/stock/StockView.vue`
 - `mobile/src/api/stock.ts`
@@ -203,15 +203,15 @@ ui/pages/stock_page.py
 - `server/routers|schemas|services/stock_adjust*`
 - `server/tests/test_stock_adjust_service.py`
 
-## 보완 2B — 판매 미리보기 리스트형 (2026-08-20)
+## 보완 2B ???�매 미리보기 리스?�형 (2026-08-20)
 
-| 항목 | 값 |
+| ??�� | �?|
 |------|-----|
 | private branch | `cursor/stage6-ship-stock-ux` |
-| private SHA | `de5341735285075d09579e2248c6fc32b7986692` |
-| 내용 | 카드형 품목 UI 제거 · divider 리스트 · 판매준비취소 · compact footer · 2A STOCK SSOT 유지 |
+| private SHA | `0f2e14a264b7d2867d827d2e3b111e2e80c30fbd` |
+| ?�용 | 카드???�목 UI ?�거 · divider 리스??· ?�매준비취??· compact footer · 2A STOCK SSOT ?��? |
 
-### 핵심 파일
+### ?�심 ?�일
 
 - `mobile/src/views/sales/SalesPreviewView.vue`
 - `mobile/src/__tests__/salesPreview.spec.ts`
