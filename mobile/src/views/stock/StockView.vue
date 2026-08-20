@@ -499,14 +499,17 @@ const stockDraftBoxSum = computed(() =>
   salesPrefill.source === 'STOCK' ? salesPrefill.stockDraftTotalQty : 0,
 )
 
-/** transform 조상 회피(Teleport). OdsBottomNav와 동일 중앙(max 480) 정렬 */
+/** transform 조상 회피(Teleport). 가로 70%(−30%) · 가운데 정렬 · 셸 max 480 기준 */
+const SALES_FAB_MAX_PX = Math.round(480 * 0.7) // 336
 const salesFabStyle = {
   position: 'fixed',
-  left: '0',
-  right: '0',
-  maxWidth: '480px',
-  marginLeft: 'auto',
-  marginRight: 'auto',
+  left: '50%',
+  right: 'auto',
+  width: '70%',
+  maxWidth: `${SALES_FAB_MAX_PX}px`,
+  transform: 'translateX(-50%)',
+  marginLeft: '0',
+  marginRight: '0',
   bottom:
     'calc(var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px))',
   zIndex: 40,
@@ -564,7 +567,17 @@ const salesFabStyle = {
     </div>
 
     <!-- 재고 목록 (1행 compact) -->
-    <div class="stock-view__list" role="list" data-testid="stock-sale-list">
+    <div
+      v-if="!loading && !loadError && filteredEntries.length > 0"
+      class="stock-view__list"
+      role="list"
+      data-testid="stock-sale-list"
+    >
+      <div class="stock-view__list-head" role="row" data-testid="stock-list-head">
+        <span class="stock-view__head-title">상품</span>
+        <span class="stock-view__head-qty">가용수량</span>
+        <span class="stock-view__head-pack">포장수량</span>
+      </div>
       <div
         v-for="entry in filteredEntries"
         :key="entry.listKey"
@@ -940,6 +953,48 @@ const salesFabStyle = {
   border-radius: var(--ods-radius-card);
   overflow: hidden;
 }
+/* 리스트 본문과 동일 폰트 크기 (body-2) */
+.stock-view__list-head,
+.stock-view__row,
+.stock-view__row-title,
+.stock-view__row-qty,
+.stock-view__row-qty strong,
+.stock-view__cart-action {
+  font-size: var(--ods-font-size-body-2, 14px);
+  line-height: var(--ods-line-height-body-2, 1.4);
+}
+.stock-view__list-head {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--ods-space-6);
+  min-height: 36px;
+  padding: var(--ods-space-6) var(--ods-space-12);
+  border-bottom: 1px solid var(--ods-color-border);
+  background: var(--ods-color-bg-muted, #f7f5f0);
+  color: var(--ods-color-text-secondary);
+  font-weight: 600;
+  cursor: default;
+  user-select: none;
+}
+.stock-view__head-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+.stock-view__head-qty {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: right;
+  min-width: 3.5rem;
+}
+.stock-view__head-pack {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  /* stepper(~98px) + 담기 버튼 영역과 대략 정렬 */
+  min-width: 7.5rem;
+  text-align: center;
+}
 .stock-view__row {
   display: flex;
   flex-wrap: nowrap;
@@ -960,8 +1015,7 @@ const salesFabStyle = {
 .stock-view__row-title {
   flex: 1 1 auto;
   min-width: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ods-color-text);
   white-space: nowrap;
   overflow: hidden;
@@ -969,12 +1023,14 @@ const salesFabStyle = {
 }
 .stock-view__row-qty {
   flex: 0 0 auto;
-  font: var(--ods-font-footnote);
+  min-width: 3.5rem;
+  text-align: right;
+  font-weight: 500;
   color: var(--ods-color-text);
   white-space: nowrap;
 }
 .stock-view__row-qty strong {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--ods-color-primary);
   margin-right: 1px;
 }
@@ -989,6 +1045,8 @@ const salesFabStyle = {
   flex-wrap: nowrap;
   align-items: center;
   gap: var(--ods-space-4);
+  min-width: 7.5rem;
+  justify-content: flex-end;
 }
 .stock-view__qty-stepper {
   display: inline-flex;
@@ -1005,7 +1063,7 @@ const salesFabStyle = {
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-white, #fff);
   color: var(--ods-color-text);
-  font-size: 16px;
+  font-size: var(--ods-font-size-body-2, 14px);
   line-height: 1;
   cursor: pointer;
 }
@@ -1025,9 +1083,9 @@ const salesFabStyle = {
   padding: 0 4px;
   margin: 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--ods-font-size-body-2, 14px);
   line-height: 1.2;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ods-color-text);
   flex-shrink: 0;
   -moz-appearance: textfield;
@@ -1041,7 +1099,8 @@ const salesFabStyle = {
 .stock-view__cart-action {
   min-height: 28px !important;
   padding: 0 var(--ods-space-6) !important;
-  font-size: 12px !important;
+  font-size: var(--ods-font-size-body-2, 14px) !important;
+  font-weight: 500 !important;
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1088,16 +1147,18 @@ const salesFabStyle = {
 .stock-view__batch {
   /* App 탭 캐러셀 transform 밖(body Teleport)에서 viewport 기준 fixed */
   position: fixed;
-  left: 0;
-  right: 0;
+  left: 50%;
+  right: auto;
+  width: 70%;
+  max-width: 336px; /* 480 * 0.7 */
+  transform: translateX(-50%);
   /* OdsBottomNav: min-height 56 + padding 8+8 + safe-area */
   bottom: calc(
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
   );
   z-index: 40; /* OdsBottomNav(50) 아래 — 시각적으로는 nav 위에 배치 */
-  max-width: 480px;
-  margin-left: auto;
-  margin-right: auto;
+  margin-left: 0;
+  margin-right: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1107,7 +1168,8 @@ const salesFabStyle = {
   padding: var(--ods-space-6) max(var(--ods-space-12), env(safe-area-inset-left, 0px))
     var(--ods-space-6) max(var(--ods-space-12), env(safe-area-inset-right, 0px));
   background: var(--ods-color-white, #fff);
-  border-top: 1px solid var(--ods-color-border);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-card);
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
 }
 .stock-view__batch-count {

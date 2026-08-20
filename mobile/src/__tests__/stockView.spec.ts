@@ -141,7 +141,8 @@ describe('StockView', () => {
     expect(listFruitStock).toHaveBeenCalled()
     expect(wrapper.find('[data-testid="stock-sale-row"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('10박스')
-    expect(wrapper.text()).not.toContain('가용')
+    expect(wrapper.find('[data-testid="stock-row-available"]').text()).not.toMatch(/^가용/)
+    expect(wrapper.find('[data-testid="stock-list-head"]').text()).toContain('가용수량')
     expect(wrapper.find('[data-testid="stock-row-add"]').exists()).toBe(true)
     expect(wrapper.find('.stock-view__pick').exists()).toBe(false)
   })
@@ -223,19 +224,26 @@ describe('StockView', () => {
     wrapper.unmount()
   })
 
-  it('UI-T8/T9 미리보기 버튼 compact class + FAB 문구/조건', async () => {
+  it('리스트 상단 항목타이틀 상품/가용수량/포장수량', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    const head = wrapper.find('[data-testid="stock-list-head"]')
+    expect(head.exists()).toBe(true)
+    expect(head.text()).toContain('상품')
+    expect(head.text()).toContain('가용수량')
+    expect(head.text()).toContain('포장수량')
+  })
+
+  it('Floating Bar는 width 70% · 가운데 정렬', async () => {
     const wrapper = mount(StockView, { global: { plugins: [router()] }, attachTo: document.body })
     await flushPromises()
-    expect(document.querySelector('[data-testid="stock-preview-btn"]')).toBeNull()
     await clickAdd(wrapper)
     const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement
-    const btn = document.querySelector('[data-testid="stock-preview-btn"]') as HTMLButtonElement
-    expect(fab?.textContent).toContain('판매예정 1품목')
-    expect(fab?.textContent).toContain('1박스')
-    expect(btn).toBeTruthy()
-    expect(btn.classList.contains('stock-view__preview-btn')).toBe(true)
-    expect(btn.classList.contains('ods-btn')).toBe(true)
-    expect(btn.textContent?.trim()).toBe('판매 미리보기')
+    expect(fab).toBeTruthy()
+    expect(fab.style.width).toBe('70%')
+    expect(fab.style.left).toBe('50%')
+    expect(fab.style.transform).toContain('translateX(-50%)')
+    expect(fab.style.maxWidth).toBe('336px')
     wrapper.unmount()
   })
 
