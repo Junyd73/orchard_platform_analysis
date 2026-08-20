@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import SalesPreviewView from '@/views/sales/SalesPreviewView.vue'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import { stockSaleSpecKey } from '@/views/sales/shipConfirmModel'
 import { DELIVERY_TP_PARCEL, DELIVERY_TP_VISIT } from '@/views/orders/ordersConstants'
 import type { StockItem } from '@/api/stock'
 
@@ -76,7 +77,16 @@ function router() {
   })
 }
 
-describe('SalesPreviewView', () => {
+async function mountPreview() {
+  const r = router()
+  await r.push('/orders/sales-preview')
+  await r.isReady()
+  const wrapper = mount(SalesPreviewView, mountOpts(r))
+  await flushPromises()
+  return { wrapper, r }
+}
+
+describe('SalesPreviewView 2B', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     confirmShipment.mockReset()
@@ -98,182 +108,231 @@ describe('SalesPreviewView', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
-  it('P2~P6 draft 수량/단가/삭제/가용초과', async () => {
+  it('T1~T2 카드형 품목 UI 없음 · divider 리스트', async () => {
     const store = useSalesPrefillStore()
-    store.mergeFromStockRows([stock(), stock({ item_cd: 'FR010202', size_cd: 'SZ01', available_qty: 5 })])
-    expect(store.shipLines).toHaveLength(2)
-    store.updateShipLine(0, { qty: 3, unit_price: 50000 })
+    store.addStockLine(stock(), 2)
+    const { wrapper } = await mountPreview()
+    expect(wrapper.find('[data-testid="sales-preview-lines"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="sales-preview-line"]')).toHaveLength(1)
+    expect(wrapper.find('.ods-card').exists()).toBe(false)
+    expect(wrapper.find('.line').classes().join(' ')).not.toMatch(/card/i)
+    expect(wrapper.text()).toContain('판매 품목 1건')
+    expect(wrapper.text()).not.toContain('2026-08-19')
+    expect(wrapper.text()).not.toContain('포장')
+    expect(wrapper.text()).not.toContain('저장일')
+    wrapper.unmount()
+  })
+
+  it('T3~T4 qty/단가 변경 → Store·소계·총액 즉시 동기', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ available_qty: 10 }), 2)
+    store.updateShipLine(0, { unit_price: 1000 })
+    const { wrapper } = await mountPreview()
+    const qtyInput = wrapper.find('[data-testid="sales-preview-qty"] input')
+    await new DOMWrapper(qtyInput.element).setValue('3')
+    await flushPromises()
     expect(store.shipLines[0].qty).toBe(3)
-    store.updateShipLine(0, { qty: 99 })
-    // available clamp는 UI에서 수행 — store는 값 유지. Preview UI setQty로 검증
+    expect(wrapper.find('[data-testid="sales-preview-subtotal"]').text()).toContain('3,000')
+
+    const priceInput = wrapper.find('[data-testid="sales-preview-price"]')
+    await new DOMWrapper(priceInput.element).setValue('5000')
+    await flushPromises()
+    expect(store.shipLines[0].unit_price).toBe(5000)
+    expect(wrapper.find('[data-testid="sales-preview-subtotal"]').text()).toContain('15,000')
+    expect(wrapper.find('[data-testid="sales-preview-footer"]').text()).toContain('15,000')
+    wrapper.unmount()
+  })
+
+  it('T5 품목 삭제 → Store 제거', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 1)
+    store.addStockLine(stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 5 }), 1)
+    const { wrapper } = await mountPreview()
+    expect(wrapper.findAll('[data-testid="sales-preview-line"]')).toHaveLength(2)
+    await wrapper.findAll('[data-testid="sales-preview-remove"]')[1].trigger('click')
+    await flushPromises()
+    expect(store.shipLines).toHaveLength(1)
+    expect(store.shipLines[0].grade_cd).toBe('GR010100')
+    wrapper.unmount()
+  })
+
+  it('T6 마지막 품목 삭제 → STOCK 세션/header 유지 · 판매진행 disabled', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 2)
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL, shipFee: 4000, rcvName: '홍', rcvTel: '010', rcvAddr: '서울' })
+    const { wrapper } = await mountPreview()
+    await wrapper.find('[data-testid="sales-preview-remove"]').trigger('click')
+    await flushPromises()
+    expect(store.source).toBe('STOCK')
+    expect(store.shipLines).toHaveLength(0)
+    expect(store.custmId).toBe('C1')
+    expect(store.dlvryTp).toBe(DELIVERY_TP_PARCEL)
+    expect(store.shipFee).toBe(4000)
+    expect(wrapper.text()).toContain('판매 품목이 없습니다')
+    expect((wrapper.find('[data-testid="sales-preview-submit"]').element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('T7~T10 +품목추가 왕복 · 수량복원 · 중복 line 없음', async () => {
+    const store = useSalesPrefillStore()
+    const a = stock({ available_qty: 10 })
+    const b = stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 8 })
+    const c = stock({ weight: 7.5, size_cd: 'FR020102', size_nm: '30과', available_qty: 5 })
+    store.addStockLine(a, 3)
+    store.addStockLine(b, 2)
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_VISIT, shipFee: 0 })
+
+    const { wrapper, r } = await mountPreview()
+    store.updateShipLine(0, { qty: 5 })
+    expect(store.shipLines[0].qty).toBe(5)
     store.removeShipLine(1)
     expect(store.shipLines).toHaveLength(1)
 
-    const r = router()
-    await r.push('/orders/sales-preview')
-    await r.isReady()
-    const wrapper = mount(SalesPreviewView, mountOpts(r))
+    await wrapper.find('[data-testid="sales-preview-add"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('판매 미리보기')
-    expect(wrapper.text()).toContain('판매 품목 1건')
-  })
-
-  it('P7 병합 시 기존 draft 유지 · 동일 판매규격 storage_dt 달라도 1 line', () => {
-    const store = useSalesPrefillStore()
-    store.mergeFromStockRows([stock()])
-    store.updateShipLine(0, { qty: 4, unit_price: 1000 })
-    store.mergeFromStockRows([stock(), stock({ storage_dt: '2026-08-20', available_qty: 3 })])
-    expect(store.shipLines).toHaveLength(1)
-    expect(store.shipLines[0].qty).toBe(4)
-    expect(store.shipLines[0].unit_price).toBe(1000)
-    store.mergeFromStockRows([stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 2 })])
-    expect(store.shipLines).toHaveLength(2)
-  })
-
-  it('T11~T15 STOCK 최초 진입 헤더 초기화 / 품목추가 시 유지', () => {
-    const store = useSalesPrefillStore()
-    store.setFromOrderLines(
-      {
-        order_no: 'ORD1',
-        custm_id: 'A1',
-        customer: '고객A',
-        order_dt: '2026-08-01',
-        status_cd: 'ST010100',
-        status_nm: '',
-        tot_order_amt: 0,
-        tot_ship_fee: 0,
-        tot_pay_amt: 0,
-        lines: [],
-      } as never,
-      [{
-        order_detail_id: 'ORD1-01',
-        item_cd: 'FR010100',
-        variety_cd: 'FR010101',
-        grade_cd: 'GR010100',
-        size_cd: 'FR020101',
-        weight: 15,
-        qty: 1,
-        unit_price: 1000,
-        item_amt: 1000,
-        harvest_year: 2026,
-        wh_cd: 'WH01',
-        dlvry_tp: DELIVERY_TP_VISIT,
-        variety_nm: '신고',
-        grade_nm: '특',
-        size_nm: '25과',
-        remaining_order_qty: 1,
-        reserved_unshipped_qty: 0,
-      } as never],
-    )
-    store.setDelivery({
-      dlvryTp: DELIVERY_TP_PARCEL,
-      shipFee: 3000,
-      rcvName: '오염',
-      rcvTel: '010',
-      rcvAddr: '주소',
-      dlvryMsg: '메모',
-    })
-    expect(store.custmId).toBe('A1')
-
-    store.mergeFromStockRows([stock()])
+    expect(r.currentRoute.value.name).toBe('orders')
+    expect(r.currentRoute.value.query.tab).toBe('stock')
     expect(store.source).toBe('STOCK')
-    expect(store.custmId).toBeNull()
-    expect(store.customerNm).toBe('')
-    expect(store.dlvryTp).toBe(DELIVERY_TP_VISIT)
-    expect(store.shipFee).toBe(0)
-    expect(store.rcvName).toBe('')
-    expect(store.rcvAddr).toBe('')
+    expect(store.custmId).toBe('C1')
+    expect(store.shipLines[0].qty).toBe(5)
+    expect(store.hasStockLine(stockSaleSpecKey(a))).toBe(true)
+    expect(store.hasStockLine(stockSaleSpecKey(b))).toBe(false)
 
-    store.setCustomer('B1', '고객B')
-    store.setDelivery({
-      dlvryTp: DELIVERY_TP_PARCEL,
-      shipFee: 4000,
-      rcvName: '받는분',
-      rcvTel: '010-2',
-      rcvAddr: '배송지',
-      dlvryMsg: '문앞',
-    })
-    store.updateShipLine(0, { qty: 3, unit_price: 5000 })
-    store.mergeFromStockRows([stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 4 })])
+    store.addStockLine(c, 1)
     expect(store.shipLines).toHaveLength(2)
-    expect(store.custmId).toBe('B1')
-    expect(store.customerNm).toBe('고객B')
-    expect(store.dlvryTp).toBe(DELIVERY_TP_PARCEL)
-    expect(store.shipFee).toBe(4000)
-    expect(store.rcvName).toBe('받는분')
-    expect(store.shipLines[0].qty).toBe(3)
-    expect(store.shipLines[0].unit_price).toBe(5000)
-
-    store.mergeFromStockRows([stock({ storage_dt: '2026-08-21', available_qty: 4 })])
-    expect(store.shipLines).toHaveLength(2)
-  })
-
-  it('T12 생산 prefill 후 STOCK 시작 시 헤더 초기화', () => {
-    const store = useSalesPrefillStore()
-    store.setFromProduction([
-      {
-        item_cd: 'FR010100',
-        item_nm: '배',
-        variety_cd: 'FR010101',
-        variety_nm: '신고',
-        grade_cd: 'GR010100',
-        grade_nm: '특',
-        size_cd: 'FR020101',
-        size_nm: '25과',
-        weight: 15,
-        harvest_year: 2026,
-        wh_cd: 'WH01',
-        qty: 2,
-      },
+    expect(store.shipLines.map((ln) => stockSaleSpecKey(ln))).toEqual([
+      stockSaleSpecKey(a),
+      stockSaleSpecKey(c),
     ])
-    store.setCustomer('P1', '생산고객')
-    store.mergeFromStockRows([stock()])
+    wrapper.unmount()
+  })
+
+  it('T11 판매 준비 취소 confirm OK → clear + 재고 복귀', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 2)
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ shipFee: 3000, dlvryTp: DELIVERY_TP_PARCEL, rcvName: 'A', rcvTel: '1', rcvAddr: 'B' })
+    const { wrapper, r } = await mountPreview()
+    await wrapper.find('[data-testid="sales-preview-cancel-prep"]').trigger('click')
+    await flushPromises()
+    expect(window.confirm).toHaveBeenCalledWith('진행 중인 판매 준비를 취소하시겠습니까?')
+    expect(store.source).toBeNull()
+    expect(store.shipLines).toHaveLength(0)
     expect(store.custmId).toBeNull()
-    expect(store.customerNm).toBe('')
-    expect(store.dlvryTp).toBe(DELIVERY_TP_VISIT)
+    expect(store.shipFee).toBe(0)
+    expect(r.currentRoute.value.name).toBe('orders')
+    expect(r.currentRoute.value.query.tab).toBe('stock')
+    wrapper.unmount()
   })
 
-  it('P11 택배 선택 시 주소영역 표시', async () => {
+  it('T12 판매 준비 취소 confirm cancel → 데이터 유지', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
     const store = useSalesPrefillStore()
-    store.mergeFromStockRows([stock()])
-    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
-    const r = router()
-    await r.push('/orders/sales-preview')
-    await r.isReady()
-    const wrapper = mount(SalesPreviewView, mountOpts(r))
+    store.addStockLine(stock(), 2)
+    store.setCustomer('C1', '홍길동')
+    const { wrapper } = await mountPreview()
+    await wrapper.find('[data-testid="sales-preview-cancel-prep"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('수령인')
-    expect(wrapper.text()).toContain('수령 주소')
-    store.setDelivery({ dlvryTp: DELIVERY_TP_VISIT })
-    await flushPromises()
-    expect(wrapper.text()).not.toContain('수령 주소')
+    expect(store.shipLines).toHaveLength(1)
+    expect(store.custmId).toBe('C1')
+    expect(store.source).toBe('STOCK')
+    wrapper.unmount()
   })
 
-  it('P14~P16 confirm → API 1회 / 취소 시 미호출', async () => {
+  it('T13~T15 판매 confirm 취소/실패/성공', async () => {
     const store = useSalesPrefillStore()
-    store.mergeFromStockRows([stock()])
+    store.addStockLine(stock(), 2)
     store.setCustomer('C1', '홍길동')
     store.updateShipLine(0, { qty: 2, unit_price: 1000 })
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const r = router()
-    await r.push('/orders/sales-preview')
-    await r.isReady()
-    const wrapper = mount(SalesPreviewView, mountOpts(r))
-    await flushPromises()
-    await wrapper.findAll('button').find((b) => b.text().includes('판매 진행'))!.trigger('click')
+    const { wrapper } = await mountPreview()
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
     await flushPromises()
     expect(confirmShipment).not.toHaveBeenCalled()
+    expect(store.shipLines).toHaveLength(1)
 
     confirmSpy.mockReturnValue(true)
-    await wrapper.findAll('button').find((b) => b.text().includes('판매 진행'))!.trigger('click')
+    confirmShipment.mockRejectedValueOnce(new Error('boom'))
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
     await flushPromises()
-    expect(confirmShipment).toHaveBeenCalledTimes(1)
-    expect(confirmShipment.mock.calls[0][1]).toMatchObject({
+    expect(store.shipLines).toHaveLength(1)
+    expect(store.custmId).toBe('C1')
+
+    confirmShipment.mockResolvedValueOnce({
+      ok: true,
+      sales_no: '20260820-002',
+      sales_status: 'CONFIRMED',
       ship_mode: 'DIRECT',
-      custm_id: 'C1',
-      lines: [expect.objectContaining({ qty: 2, unit_price: 1000 })],
+      order_no: null,
+      details: [],
+      order_status: null,
+      remaining_order_qty: null,
+      remaining_order: [],
     })
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
+    await flushPromises()
+    expect(confirmShipment).toHaveBeenCalled()
     expect(store.shipLines).toHaveLength(0)
+    expect(store.source).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('T16 합계 = Σ(qty×unit_price) + 배송비', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 3)
+    store.addStockLine(stock({ grade_cd: 'GR010200', grade_nm: '상', available_qty: 5 }), 2)
+    store.updateShipLine(0, { unit_price: 50000 })
+    store.updateShipLine(1, { unit_price: 65000 })
+    store.setDelivery({ shipFee: 4000 })
+    store.setCustomer('C1', '홍길동')
+    const { wrapper } = await mountPreview()
+    const foot = wrapper.find('[data-testid="sales-preview-footer"]').text()
+    expect(foot).toContain('2품목 · 5박스')
+    expect(foot).toContain('280,000') // 150000+130000
+    expect(foot).toContain('284,000') // +4000
+    wrapper.unmount()
+  })
+
+  it('T17~T18 overflow 클래스 · storage_dt 미노출', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ storage_dt: '2026-01-01' }), 1)
+    store.addStockLine(
+      stock({ storage_dt: '2026-12-31', grade_cd: 'GR010200', grade_nm: '상', available_qty: 3 }),
+      1,
+    )
+    const { wrapper } = await mountPreview()
+    expect(wrapper.find('.page').classes()).toContain('page')
+    const style = wrapper.find('.page').attributes('style') || ''
+    expect(wrapper.html()).not.toContain('2026-01-01')
+    expect(wrapper.html()).not.toContain('2026-12-31')
+    expect(wrapper.text()).not.toMatch(/LOT|포장일|저장일/)
+    void style
+    wrapper.unmount()
+  })
+
+  it('P11 택배 선택 시 주소영역 표시(회귀)', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 1)
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    const { wrapper } = await mountPreview()
+    expect(wrapper.find('[data-testid="sales-preview-addr"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('수령인')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_VISIT })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sales-preview-addr"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('P7 동일 판매규격 storage_dt 달라도 1 line(회귀)', () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ storage_dt: '2026-08-01', available_qty: 10 }), 4)
+    store.updateShipLine(0, { unit_price: 1000 })
+    store.addStockLine(stock({ storage_dt: '2026-08-20', available_qty: 3 }), 1)
+    expect(store.shipLines).toHaveLength(1)
+    expect(store.shipLines[0].qty).toBe(1)
+    expect(store.shipLines[0].unit_price).toBe(1000)
   })
 })

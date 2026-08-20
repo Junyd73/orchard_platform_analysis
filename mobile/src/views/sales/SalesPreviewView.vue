@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
@@ -9,7 +9,6 @@ import { fetchCommonCodes } from '@/api/commonCodes'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
-import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsFormField from '@/components/ods/OdsFormField.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
@@ -19,11 +18,9 @@ import {
   DELIVERY_TP_VISIT,
   CODE_PARENT_DELIVERY,
   LABEL_CUSTOMER,
-  LABEL_DELIVERY_TP,
   LABEL_RCV_ADDR,
   LABEL_RCV_NAME,
   LABEL_RCV_TEL,
-  LABEL_UNIT_PRICE,
   formatOrderAmt,
   formatOrderLineSpec,
   isParcelDelivery,
@@ -33,6 +30,7 @@ import {
   buildShipConfirmRequest,
   findShipQtyIssue,
   mapShipApiError,
+  stockSaleSpecKey,
 } from '@/views/sales/shipConfirmModel'
 import { todayBizIso } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
@@ -41,11 +39,15 @@ import type { CustomerListItem } from '@/types/order'
 
 const LABEL_PAGE = '판매 미리보기'
 const LABEL_ADD_ITEM = '+ 품목 추가'
-const LABEL_SHIP_FEE = '배송비'
+const LABEL_CANCEL_PREP = '판매 준비 취소'
+const LABEL_SHIP_FEE = '배송'
 const LABEL_GO_SALE = '판매 진행'
+const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
+const LABEL_DLVRY_METHOD = '배송방법'
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
 const MSG_NEED_ADDR = '택배는 받는분·연락처·주소가 필요합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
+const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
 
 const router = useRouter()
 const { farmCd } = storeToRefs(useAppStore())
@@ -84,6 +86,28 @@ const totalQty = computed(() =>
   lines.value.reduce((s, ln) => s + Number(ln.qty), 0),
 )
 const payAmt = computed(() => itemAmt.value + Number(prefill.shipFee || 0))
+const qtyIssue = computed(() => findShipQtyIssue(lines.value))
+const unitHint = computed(() =>
+  lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
+)
+
+const canSubmit = computed(() => {
+  if (busy.value || successMsg.value) return false
+  if (!lines.value.length) return false
+  if (!String(prefill.custmId || '').trim()) return false
+  if (qtyIssue.value) return false
+  if (lines.value.some((ln) => Number(ln.unit_price) < 0)) return false
+  if (showAddress.value) {
+    if (!prefill.rcvName.trim() || !prefill.rcvTel.trim() || !prefill.rcvAddr.trim()) {
+      return false
+    }
+  }
+  return true
+})
+
+function lineKey(ln: (typeof lines.value)[number], idx: number) {
+  return `${stockSaleSpecKey(ln)}#${idx}`
+}
 
 function lineSubtotal(idx: number) {
   const ln = lines.value[idx]
@@ -91,12 +115,18 @@ function lineSubtotal(idx: number) {
   return Number(ln.qty) * Number(ln.unit_price)
 }
 
+function maxQty(idx: number) {
+  const ln = lines.value[idx]
+  if (!ln) return 1
+  if (ln.available_qty != null) return Math.max(1, Math.floor(Number(ln.available_qty)))
+  return Math.max(1, Math.floor(Number(ln.qty) || 1))
+}
+
 function bumpQty(idx: number, delta: number) {
   const ln = lines.value[idx]
   if (!ln) return
   const next = Math.max(1, Math.floor(Number(ln.qty) + delta))
-  const max = ln.available_qty != null ? Number(ln.available_qty) : next
-  prefill.updateShipLine(idx, { qty: Math.min(next, max) })
+  prefill.updateShipLine(idx, { qty: Math.min(next, maxQty(idx)) })
 }
 
 function setQty(idx: number, raw: string) {
@@ -105,13 +135,11 @@ function setQty(idx: number, raw: string) {
     prefill.updateShipLine(idx, { qty: 1 })
     return
   }
-  const ln = lines.value[idx]
-  const max = ln?.available_qty != null ? Number(ln.available_qty) : n
-  prefill.updateShipLine(idx, { qty: Math.min(Math.floor(n), max) })
+  prefill.updateShipLine(idx, { qty: Math.min(Math.floor(n), maxQty(idx)) })
 }
 
 function setPrice(idx: number, raw: string) {
-  const n = Number(raw)
+  const n = Number(String(raw).replace(/,/g, ''))
   prefill.updateShipLine(idx, { unit_price: Number.isFinite(n) && n >= 0 ? n : 0 })
 }
 
@@ -123,10 +151,15 @@ function addMoreItems() {
   void router.push({ name: 'orders', query: { tab: 'stock' } })
 }
 
+function cancelSalePrep() {
+  if (!window.confirm(MSG_CANCEL_PREP)) return
+  prefill.clear()
+  void router.replace({ name: 'orders', query: { tab: 'stock' } })
+}
+
 function validateBeforeConfirm(): string {
   if (!lines.value.length) return MSG_NO_PREFILL
-  const qtyIssue = findShipQtyIssue(lines.value)
-  if (qtyIssue) return qtyIssue
+  if (qtyIssue.value) return qtyIssue.value
   if (!String(prefill.custmId || '').trim()) return MSG_NEED_CUSTOMER
   if (showAddress.value) {
     if (!prefill.rcvName.trim() || !prefill.rcvTel.trim() || !prefill.rcvAddr.trim()) {
@@ -137,14 +170,15 @@ function validateBeforeConfirm(): string {
 }
 
 async function onSubmit() {
-  if (busy.value || successMsg.value) return
-  errorMsg.value = validateBeforeConfirm()
-  if (errorMsg.value) return
+  if (!canSubmit.value) {
+    errorMsg.value = validateBeforeConfirm()
+    return
+  }
+  errorMsg.value = ''
 
-  const unitHint = lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스'
   const confirmText =
     `${prefill.customerNm || prefill.custmId} / ${deliveryLabel(prefill.dlvryTp)}\n` +
-    `${lines.value.length}품목 · 총 ${totalQty.value}${unitHint}\n` +
+    `${lines.value.length}품목 · 총 ${totalQty.value}${unitHint.value}\n` +
     `상품 ${formatOrderAmt(itemAmt.value)}원\n` +
     `배송비 ${formatOrderAmt(prefill.shipFee)}원\n` +
     `최종 ${formatOrderAmt(payAmt.value)}원\n\n` +
@@ -172,7 +206,7 @@ async function onSubmit() {
     )
     successMsg.value =
       `${MSG_SUCCESS}\n${res.sales_no} / ${lines.value.length}품목 / ` +
-      `${totalQty.value}${unitHint} / ${formatOrderAmt(payAmt.value)}원`
+      `${totalQty.value}${unitHint.value} / ${formatOrderAmt(payAmt.value)}원`
     prefill.clear()
   } catch (err) {
     errorMsg.value = mapShipApiError(err)
@@ -188,15 +222,6 @@ function deliveryLabel(cd: string) {
 function goStock() {
   void router.replace({ name: 'orders', query: { tab: 'stock' } })
 }
-
-watch(
-  () => prefill.dlvryTp,
-  (tp) => {
-    if (!isParcelDelivery(tp)) {
-      // 방문/직배는 주소 필수 아님 — 값은 유지
-    }
-  },
-)
 
 onMounted(async () => {
   try {
@@ -218,43 +243,43 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" data-testid="sales-preview-page">
     <main class="content ods-page-content">
       <OdsAppBar :show-back="true" back-fallback="orders" />
 
-      <OdsCard>
-        <h2 class="title">{{ LABEL_PAGE }}</h2>
-        <p class="meta">고객 1명 · 배송방법 1개 · 배송지 1곳</p>
-      </OdsCard>
+      <h2 class="title">{{ LABEL_PAGE }}</h2>
 
       <p v-if="successMsg" class="ok" role="status">{{ successMsg }}</p>
       <p v-if="errorMsg" class="err" role="alert">{{ errorMsg }}</p>
 
       <template v-if="!successMsg">
-        <OdsCard title="고객 / 배송">
-          <div class="grid2">
-            <OdsFormField :label="LABEL_CUSTOMER" required>
-              <OdsSelect v-model="custmId" variant="form">
-                <option value="">고객 선택</option>
-                <option v-for="c in customers" :key="c.custm_id" :value="c.custm_id">
-                  {{ c.custm_nm }} · {{ c.mobile }}
-                </option>
-              </OdsSelect>
-            </OdsFormField>
-            <OdsFormField :label="LABEL_DELIVERY_TP" required>
-              <OdsSelect
-                :model-value="prefill.dlvryTp"
-                variant="form"
-                @update:model-value="prefill.setDelivery({ dlvryTp: $event })"
-              >
-                <option v-for="d in deliveryOptions" :key="d.value" :value="d.value">
-                  {{ d.label }}
-                </option>
-              </OdsSelect>
-            </OdsFormField>
+        <!-- 고객 / 배송 — compact (2C 전 1고객·1배송 유지) -->
+        <section class="header-block" aria-label="고객 배송" data-testid="sales-preview-header">
+          <div class="header-row">
+            <span class="header-row__lbl">{{ LABEL_CUSTOMER }}</span>
+            <OdsSelect v-model="custmId" variant="form" class="header-row__ctrl" aria-label="고객 선택">
+              <option value="">고객 선택</option>
+              <option v-for="c in customers" :key="c.custm_id" :value="c.custm_id">
+                {{ c.custm_nm }} · {{ c.mobile }}
+              </option>
+            </OdsSelect>
+          </div>
+          <div class="header-row">
+            <span class="header-row__lbl">{{ LABEL_DLVRY_METHOD }}</span>
+            <OdsSelect
+              class="header-row__ctrl"
+              :model-value="prefill.dlvryTp"
+              variant="form"
+              aria-label="배송방법"
+              @update:model-value="prefill.setDelivery({ dlvryTp: $event })"
+            >
+              <option v-for="d in deliveryOptions" :key="d.value" :value="d.value">
+                {{ d.label }}
+              </option>
+            </OdsSelect>
           </div>
 
-          <div v-if="showAddress" class="addr">
+          <div v-if="showAddress" class="addr" data-testid="sales-preview-addr">
             <OdsFormField :label="LABEL_RCV_NAME" required>
               <OdsInput
                 :model-value="prefill.rcvName"
@@ -288,116 +313,412 @@ onMounted(async () => {
               />
             </OdsFormField>
           </div>
-        </OdsCard>
+        </section>
 
-        <OdsCard :title="`판매 품목 ${lines.length}건`">
-          <p v-if="!lines.length" class="err">{{ MSG_NO_PREFILL }}</p>
-          <div v-for="(ln, idx) in lines" :key="idx" class="line">
-            <p class="line__title">{{ formatOrderLineSpec(ln) }}</p>
-            <div class="line__row">
-              <div class="qty">
-                <button type="button" class="qty__btn" @click="bumpQty(idx, -1)">-</button>
-                <OdsInput
-                  :model-value="String(ln.qty)"
-                  type="number"
-                  min="1"
-                  step="1"
-                  variant="form"
-                  bare
-                  class="qty__input"
-                  @update:model-value="setQty(idx, $event)"
-                />
-                <button type="button" class="qty__btn" @click="bumpQty(idx, 1)">+</button>
-              </div>
-              <OdsFormField :label="LABEL_UNIT_PRICE">
-                <OdsInput
-                  :model-value="String(ln.unit_price)"
-                  type="number"
-                  min="0"
-                  step="1"
-                  variant="form"
-                  bare
-                  @update:model-value="setPrice(idx, $event)"
-                />
-              </OdsFormField>
-            </div>
-            <div class="line__foot">
-              <span>소계 {{ formatOrderAmt(lineSubtotal(idx)) }}원</span>
-              <button type="button" class="link" @click="removeLine(idx)">삭제</button>
-            </div>
-          </div>
-          <OdsButton type="button" variant="secondary" @click="addMoreItems">
-            {{ LABEL_ADD_ITEM }}
-          </OdsButton>
-        </OdsCard>
+        <!-- 판매 품목 리스트 (divider, 카드 없음) -->
+        <section class="lines" aria-label="판매 품목" data-testid="sales-preview-lines">
+          <p class="lines__head">판매 품목 {{ lines.length }}건</p>
 
-        <div class="footer">
-          <p class="footer__sum">
-            {{ lines.length }}품목 · 총 {{ totalQty }}
+          <p v-if="!lines.length" class="lines__empty" data-testid="sales-preview-empty">
+            {{ LABEL_EMPTY_LINES }}
           </p>
-          <div class="footer__row">
-            <span>상품금액</span>
-            <strong>{{ formatOrderAmt(itemAmt) }}원</strong>
+
+          <ul v-else class="lines__list">
+            <li
+              v-for="(ln, idx) in lines"
+              :key="lineKey(ln, idx)"
+              class="line"
+              data-testid="sales-preview-line"
+            >
+              <div class="line__r1">
+                <span class="line__title">{{ formatOrderLineSpec(ln) }}</span>
+                <button
+                  type="button"
+                  class="line__remove"
+                  data-testid="sales-preview-remove"
+                  :aria-label="`${formatOrderLineSpec(ln)} 삭제`"
+                  @click="removeLine(idx)"
+                >
+                  ×
+                </button>
+              </div>
+              <div class="line__r2">
+                <div class="qty" data-testid="sales-preview-qty">
+                  <button
+                    type="button"
+                    class="qty__btn"
+                    :disabled="Number(ln.qty) <= 1"
+                    aria-label="수량 감소"
+                    @click="bumpQty(idx, -1)"
+                  >
+                    −
+                  </button>
+                  <OdsInput
+                    :model-value="String(ln.qty)"
+                    type="number"
+                    min="1"
+                    :max="maxQty(idx)"
+                    step="1"
+                    inputmode="numeric"
+                    variant="form"
+                    bare
+                    class="qty__input"
+                    aria-label="판매 수량"
+                    @update:model-value="setQty(idx, $event)"
+                  />
+                  <button
+                    type="button"
+                    class="qty__btn"
+                    :disabled="Number(ln.qty) >= maxQty(idx)"
+                    aria-label="수량 증가"
+                    @click="bumpQty(idx, 1)"
+                  >
+                    +
+                  </button>
+                </div>
+                <label class="price">
+                  <span class="price__lbl">단가</span>
+                  <OdsInput
+                    :model-value="String(ln.unit_price)"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                    variant="form"
+                    bare
+                    class="price__input"
+                    data-testid="sales-preview-price"
+                    aria-label="단가"
+                    @update:model-value="setPrice(idx, $event)"
+                  />
+                </label>
+                <span class="line__sub" data-testid="sales-preview-subtotal">
+                  {{ formatOrderAmt(lineSubtotal(idx)) }}원
+                </span>
+              </div>
+            </li>
+          </ul>
+
+          <div class="lines__actions">
+            <OdsButton
+              type="button"
+              variant="secondary"
+              :block="false"
+              data-testid="sales-preview-add"
+              @click="addMoreItems"
+            >
+              {{ LABEL_ADD_ITEM }}
+            </OdsButton>
+            <OdsButton
+              type="button"
+              variant="secondary"
+              :block="false"
+              data-testid="sales-preview-cancel-prep"
+              @click="cancelSalePrep"
+            >
+              {{ LABEL_CANCEL_PREP }}
+            </OdsButton>
           </div>
-          <div class="footer__row">
-            <span>{{ LABEL_SHIP_FEE }}</span>
-            <OdsInput
-              :model-value="String(prefill.shipFee)"
-              type="number"
-              min="0"
-              step="1"
-              variant="form"
-              bare
-              class="fee"
-              @update:model-value="prefill.setDelivery({ shipFee: Number($event) || 0 })"
-            />
+        </section>
+
+        <!-- 하단 compact summary -->
+        <div class="footer" data-testid="sales-preview-footer" role="region" aria-label="합계">
+          <div class="footer__meta">
+            <p class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</p>
+            <p class="footer__amt">
+              상품 {{ formatOrderAmt(itemAmt) }}원 · {{ LABEL_SHIP_FEE }}
+              <OdsInput
+                :model-value="String(prefill.shipFee)"
+                type="number"
+                min="0"
+                step="1"
+                inputmode="numeric"
+                variant="form"
+                bare
+                class="footer__fee"
+                aria-label="배송비"
+                @update:model-value="prefill.setDelivery({ shipFee: Number($event) || 0 })"
+              />
+              원
+            </p>
+            <p class="footer__total">
+              총 <strong>{{ formatOrderAmt(payAmt) }}원</strong>
+            </p>
           </div>
-          <div class="footer__row footer__row--total">
-            <span>결제예정금액</span>
-            <strong>{{ formatOrderAmt(payAmt) }}원</strong>
-          </div>
-          <OdsButton type="button" :disabled="busy || !lines.length" @click="onSubmit">
+          <OdsButton
+            type="button"
+            class="footer__go"
+            data-testid="sales-preview-submit"
+            :disabled="!canSubmit"
+            @click="onSubmit"
+          >
             {{ busy ? '처리 중…' : LABEL_GO_SALE }}
           </OdsButton>
         </div>
       </template>
 
-      <OdsButton v-else type="button" @click="goStock">재고로 돌아가기</OdsButton>
+      <OdsButton v-else type="button" data-testid="sales-preview-back-stock" @click="goStock">
+        재고로 돌아가기
+      </OdsButton>
     </main>
     <OdsBottomNav />
   </div>
 </template>
 
 <style scoped>
-.page { min-height: 100%; background: var(--ods-color-bg, #FDFBF7); }
-.content { display: flex; flex-direction: column; gap: var(--ods-space-12); padding-bottom: 120px; }
-.title { margin: 0; font: var(--ods-font-title-3); }
-.meta { margin: var(--ods-space-4) 0 0; font: var(--ods-font-footnote); color: var(--ods-color-text-secondary); }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ods-space-8); }
-.addr { display: flex; flex-direction: column; gap: var(--ods-space-8); margin-top: var(--ods-space-8); }
-.line { padding: var(--ods-space-8) 0; border-bottom: 1px solid var(--ods-color-border); }
-.line__title { margin: 0 0 var(--ods-space-8); font: var(--ods-font-body-2); font-weight: 700; }
-.line__row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ods-space-8); align-items: end; }
-.line__foot { display: flex; justify-content: space-between; margin-top: var(--ods-space-8); font: var(--ods-font-body-2); }
-.qty { display: flex; align-items: center; gap: var(--ods-space-4); }
-.qty__btn { width: 32px; height: 32px; border: 1px solid var(--ods-color-border); border-radius: var(--ods-radius-button); background: #fff; }
-.qty__input { width: 64px; text-align: center; }
-.link { border: none; background: transparent; color: var(--ods-color-danger); font: var(--ods-font-footnote); }
-.footer {
-  position: sticky; bottom: 56px; z-index: 5;
-  background: var(--ods-color-white, #fff);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-card);
-  padding: var(--ods-space-12);
-  display: flex; flex-direction: column; gap: var(--ods-space-8);
+.page {
+  min-height: 100%;
+  background: var(--ods-color-bg, #FDFBF7);
+  overflow-x: hidden;
 }
-.footer__sum { margin: 0; font-weight: 700; }
-.footer__row { display: flex; justify-content: space-between; align-items: center; font: var(--ods-font-body-2); }
-.footer__row--total { font-size: 16px; }
-.fee { width: 120px; text-align: right; }
-.err { color: var(--ods-color-danger); white-space: pre-line; }
-.ok { color: #2F855A; white-space: pre-line; background: #E6F4EA; padding: var(--ods-space-8); border-radius: var(--ods-radius-card); }
-@media (max-width: 430px) {
-  .grid2, .line__row { grid-template-columns: 1fr; }
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  max-width: 100%;
+  min-width: 0;
+}
+.title {
+  margin: 0;
+  font: var(--ods-font-title-3);
+}
+
+.header-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-8) 0;
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.header-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--ods-space-8);
+  align-items: center;
+}
+.header-row__lbl {
+  font: var(--ods-font-footnote, 12px);
+  color: var(--ods-color-text-secondary);
+  font-weight: 600;
+}
+.header-row__ctrl {
+  min-width: 0;
+  width: 100%;
+}
+.addr {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+
+.lines__head {
+  margin: 0 0 var(--ods-space-8);
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+}
+.lines__empty {
+  margin: 0;
+  padding: var(--ods-space-16) 0;
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text-secondary);
+  text-align: center;
+}
+.lines__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.line {
+  padding: var(--ods-space-10) 0;
+  border-bottom: 1px solid var(--ods-color-border);
+  min-width: 0;
+}
+.line__r1 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: var(--ods-space-4);
+  align-items: start;
+  margin-bottom: var(--ods-space-6);
+}
+.line__title {
+  font: var(--ods-font-footnote, 12px);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.line__remove {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-text-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.line__r2 {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--ods-space-6);
+  align-items: center;
+}
+.qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.qty__btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white, #fff);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.qty__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.qty :deep(input.ods-input),
+.qty :deep(.qty__input.ods-input) {
+  width: 40px;
+  min-width: 40px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 2px;
+  text-align: center;
+  font-size: var(--ods-font-size-footnote, 12px);
+}
+.price {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.price__lbl {
+  flex-shrink: 0;
+  font: var(--ods-font-footnote, 12px);
+  color: var(--ods-color-text-secondary);
+}
+.price :deep(input.ods-input),
+.price :deep(.price__input.ods-input) {
+  width: 100%;
+  min-width: 0;
+  max-width: 96px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+  text-align: right;
+  font-size: var(--ods-font-size-footnote, 12px);
+}
+.line__sub {
+  justify-self: end;
+  font: var(--ods-font-footnote, 12px);
+  font-weight: 700;
+  color: var(--ods-color-text);
+  white-space: nowrap;
+}
+
+.lines__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ods-space-8);
+  margin-top: var(--ods-space-12);
+}
+
+.footer {
+  position: sticky;
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--ods-space-8);
+  align-items: center;
+  margin: 0 calc(-1 * var(--ods-space-16, 16px));
+  padding: var(--ods-space-10) var(--ods-space-16);
+  background: var(--ods-color-bg-muted, #f5f2ec);
+  border-top: 1px solid var(--ods-color-border);
+  box-shadow: none;
+  border-radius: 0;
+}
+.footer__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.footer__count,
+.footer__amt {
+  margin: 0;
+  font: var(--ods-font-footnote, 12px);
+  color: var(--ods-color-text-secondary);
+}
+.footer__total {
+  margin: 0;
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+}
+.footer__total strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--ods-color-primary);
+}
+.footer__fee {
+  display: inline-block;
+  width: 64px;
+  vertical-align: middle;
+}
+.footer :deep(.footer__fee.ods-input),
+.footer :deep(input.footer__fee) {
+  width: 64px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 4px;
+  text-align: right;
+  font-size: var(--ods-font-size-footnote, 12px);
+}
+.footer__go {
+  flex-shrink: 0;
+  min-width: 96px;
+}
+
+.err {
+  color: var(--ods-color-danger);
+  white-space: pre-line;
+  font: var(--ods-font-body-2);
+}
+.ok {
+  color: #2f855a;
+  white-space: pre-line;
+  background: #e6f4ea;
+  padding: var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  font: var(--ods-font-body-2);
+}
+
+@media (max-width: 390px) {
+  .line__r2 {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+  .line__sub {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+  .footer {
+    grid-template-columns: 1fr;
+  }
+  .footer__go {
+    width: 100%;
+  }
 }
 </style>

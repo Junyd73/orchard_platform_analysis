@@ -7,8 +7,8 @@
 | 항목 | SHA / 브랜치 |
 |------|----------------|
 | base | `c6e5edb93fa5234b7314ea9135aa48204138461d` (`main`) |
-| feature | `7e70f51077315271685d970de147843fe6ada2b6` (hide storage_dt UX) |
-| prior feature | `c6a6a0926f387af3dd1269ace306a94dd9096a16` |
+| feature | `de5341735285075d09579e2248c6fc32b7986692` (sales preview 2B list) |
+| prior feature | `7e70f51077315271685d970de147843fe6ada2b6` |
 | branch | `cursor/stage6-ship-stock-ux` |
 
 ## Review branch 목적
@@ -202,3 +202,16 @@ ui/pages/stock_page.py
 - `core/stock_adjust_service.py`
 - `server/routers|schemas|services/stock_adjust*`
 - `server/tests/test_stock_adjust_service.py`
+
+## 보완 2B — 판매 미리보기 리스트형 (2026-08-20)
+
+| 항목 | 값 |
+|------|-----|
+| private branch | `cursor/stage6-ship-stock-ux` |
+| private SHA | `de5341735285075d09579e2248c6fc32b7986692` |
+| 내용 | 카드형 품목 UI 제거 · divider 리스트 · 판매준비취소 · compact footer · 2A STOCK SSOT 유지 |
+
+### 핵심 파일
+
+- `mobile/src/views/sales/SalesPreviewView.vue`
+- `mobile/src/__tests__/salesPreview.spec.ts`
