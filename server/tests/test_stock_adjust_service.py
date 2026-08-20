@@ -194,12 +194,58 @@ class StockAdjustServiceTests(unittest.TestCase):
         self.assertIn("파손", log["remark"])
         self.assertNotIn("AD010102", log["remark"])
 
+    def test_t11b_count_diff_includes_memo_in_remark(self) -> None:
+        self.svc.adjust(
+            _payload(io_type=IO_TYPE_IN, qty=2, reason_cd=REASON_COUNT_DIFF, memo="메모텍스트"),
+            user_id="U1",
+        )
+        log = self.conn.execute(
+            "SELECT ref_id, remark FROM t_stock_log"
+        ).fetchone()
+        self.assertEqual(log["ref_id"], REASON_COUNT_DIFF)
+        self.assertIn("실사차이", log["remark"])
+        self.assertIn("메모텍스트", log["remark"])
+        self.assertIn(" · ", log["remark"])
+
+    def test_t14_count_diff_out_respects_reserved(self) -> None:
+        # 현재 avail = in(10) - out(0) - reserved(3) = 7
+        # 허용 범위 내 감소: OUT 4 (final avail = 3)
+        self.svc.adjust(
+            _payload(io_type=IO_TYPE_OUT, qty=4, reason_cd=REASON_COUNT_DIFF),
+            user_id="U1",
+        )
+        row = self.conn.execute(
+            "SELECT out_qty, reserved_qty FROM t_stock_master"
+        ).fetchone()
+        self.assertEqual(row["out_qty"], 4)
+        self.assertEqual(row["reserved_qty"], 3)
+
+        # 침범 감소: OUT 8 (needed qty > avail 7) -> 실패, reserved 유지
+        with self.assertRaises(StockAdjustError) as ctx:
+            self.svc.adjust(
+                _payload(io_type=IO_TYPE_OUT, qty=8, reason_cd=REASON_COUNT_DIFF),
+                user_id="U1",
+            )
+        self.assertEqual(ctx.exception.code, "STOCK_UNAVAILABLE")
+        reserved = self.conn.execute(
+            "SELECT reserved_qty FROM t_stock_master"
+        ).fetchone()["reserved_qty"]
+        self.assertEqual(reserved, 3)
+
     def test_t12_pc_dispose_still_uses_core(self) -> None:
         src = (_REPO / "ui" / "pages" / "stock_page.py").read_text(encoding="utf-8")
         self.assertIn("StockAdjustService", src)
         self.assertIn("REASON_DISPOSE", src)
         self.assertIn("dispose_raw_material", src)
         self.assertTrue(reason_allows_io(REASON_DISPOSE, IO_TYPE_OUT))
+
+    def test_t15_pc_audit_history_query_compatible(self) -> None:
+        src = (_REPO / "ui" / "pages" / "stock_page.py").read_text(encoding="utf-8")
+        self.assertIn("l.io_type = 'AUDIT'", src)
+        self.assertIn("l.ref_type", src)
+        self.assertIn("l.ref_id", src)
+        self.assertIn("REF_TYPE_ADJUST", src)
+        self.assertIn("REASON_COUNT_DIFF", src)
 
     def test_reason_allows_io_map(self) -> None:
         self.assertTrue(reason_allows_io(REASON_DISPOSE, IO_TYPE_OUT))

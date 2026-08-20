@@ -27,7 +27,13 @@ from core.stock_constants import (
     RAW_CONTAINER_WEIGHT_KG,
 )
 
-from core.stock_adjust_constants import IO_TYPE_OUT, REASON_DISPOSE
+from core.stock_adjust_constants import (
+    IO_TYPE_IN,
+    IO_TYPE_OUT,
+    REF_TYPE_ADJUST,
+    REASON_COUNT_DIFF,
+    REASON_DISPOSE,
+)
 from core.stock_adjust_service import StockAdjustError, StockAdjustIn, StockAdjustService
 # 1. 커스텀 레이아웃: FlowLayout (자동 줄바꿈 최적화)
 # =================================================================
@@ -215,10 +221,14 @@ class AuditHistoryDialog(QDialog):
             LEFT JOIN m_common_code v ON l.variety_cd = v.code_cd
             LEFT JOIN m_common_code g ON l.grade_cd = g.code_cd
             LEFT JOIN m_common_code s ON l.size_cd = s.code_cd
-            WHERE l.farm_cd = ? AND l.io_type = 'AUDIT'
+            WHERE l.farm_cd = ?
+              AND (
+                l.io_type = 'AUDIT'
+                OR (l.ref_type = ? AND l.ref_id = ?)
+              )
             ORDER BY l.reg_dt DESC
         """
-        rows = self.db.fetch_all(sql, (self.farm_cd,))
+        rows = self.db.fetch_all(sql, (self.farm_cd, REF_TYPE_ADJUST, REASON_COUNT_DIFF))
         self.table.setRowCount(len(rows))
         
         for r, row in enumerate(rows):
@@ -799,30 +809,57 @@ class StockPage(QWidget):
     def audit_product_stock(self):
         """[📍 수정] 재고 실사 시 기존 중량(weight) 정보를 로그에 보존합니다."""
         if not self.selected_cards: return
-        reason, ok = QInputDialog.getText(self, "재고 실사", "사유를 입력하세요:")
-        if not ok or not reason.strip(): return
-        
-        queries = []
-        for c in self.selected_cards:
-            r = c.data; audit_qty = int(c.work_qty); in_qty = int(r.get('in_qty', 0))
-            # 📍 기존 중량값 확보
-            orig_weight = float(r.get('weight', 0))
-            
-            if audit_qty > in_qty: new_in, new_out = audit_qty, 0
-            else: new_in, new_out = in_qty, in_qty - audit_qty
-            
-            sql_master = "UPDATE t_stock_master SET in_qty = ?, out_qty = ?, mod_dt = '" + now_ops_str() + "', mod_id = ? WHERE farm_cd=? AND storage_dt=? AND wh_cd=? AND item_cd=? AND size_cd=? AND variety_cd=? AND grade_cd=?"
-            queries.append((sql_master, (new_in, new_out, self.user_id, self.farm_cd, r['storage_dt'], r['wh_cd'], r['item_cd'], r['size_cd'], r['variety_cd'], r.get('grade_cd','NONE'))))
-            
-            # 📍 [핵심]: 로그에 기존 중량(orig_weight) 포함
-            sql_log = """
-                INSERT INTO t_stock_log (farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, weight, io_type, qty, remark, reg_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'AUDIT', ?, ?, ?)
-            """
-            queries.append((sql_log, (self.farm_cd, r['item_cd'], r['variety_cd'], r.get('harvest_year'), r.get('grade_cd','NONE'), r['size_cd'], orig_weight, audit_qty, f"실사: {reason}", self.user_id)))
+        memo, ok = QInputDialog.getText(self, "재고 실사", "사유를 입력하세요:")
+        if not ok or not memo.strip():
+            return
 
-        if self.db.execute_transaction(queries):
-            QMessageBox.information(self, "성공", "실사 및 중량 로그 동기화 완료."); self.clear_all_refresh()
+        svc = StockAdjustService(self.db.conn)
+        memo = memo.strip()
+        eps = 1e-9
+        adjusted_any = False
+
+        for c in self.selected_cards:
+            r = c.data
+            audit_qty = float(c.work_qty)
+            in_qty = float(r.get("in_qty", 0))
+            out_qty = float(r.get("out_qty", 0))
+            reserved_qty = float(r.get("reserved_qty", 0))
+            current_available = in_qty - out_qty - reserved_qty
+            diff = audit_qty - current_available
+
+            # 차이 0이면 조정 로그를 만들지 않고 종료
+            if abs(diff) <= eps:
+                continue
+
+            adjusted_any = True
+            io_type = IO_TYPE_IN if diff > 0 else IO_TYPE_OUT
+            qty = abs(diff)
+
+            svc.adjust(
+                StockAdjustIn(
+                    farm_cd=self.farm_cd,
+                    wh_cd=str(r.get("wh_cd") or DEFAULT_WH_CD),
+                    item_cd=str(r.get("item_cd") or ""),
+                    variety_cd=str(r.get("variety_cd") or ""),
+                    grade_cd=str(r.get("grade_cd") or "NONE"),
+                    size_cd=str(r.get("size_cd") or ""),
+                    weight=float(r.get("weight") or 0),
+                    harvest_year=int(r.get("harvest_year") or today_ops().year),
+                    storage_dt=str(r.get("storage_dt") or "")[:10],
+                    io_type=io_type,
+                    qty=qty,
+                    reason_cd=REASON_COUNT_DIFF,
+                    memo=memo,
+                ),
+                user_id=self.user_id,
+            )
+
+        if not adjusted_any:
+            QMessageBox.information(self, "안내", "재고 차이가 없습니다.")
+            return
+
+        QMessageBox.information(self, "성공", "실사 완료(재고 차이 조정).")
+        self.clear_all_refresh()
 
     def save_production_log(self):
         """Stage P 생산확정 — core.ProductionService SSOT."""

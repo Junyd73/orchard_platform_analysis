@@ -48,6 +48,9 @@ class StockAdjustIn:
     io_type: str
     qty: float
     reason_cd: str
+    # PC(실사) 등에서 사용자 메모를 remark에 보존하기 위한 optional 필드.
+    # DB 컬럼 추가 없이 t_stock_log.remark 텍스트로만 반영합니다.
+    memo: str = ""
 
 
 def ensure_adjust_reason_codes(conn: sqlite3.Connection, farm_cd: str) -> None:
@@ -133,6 +136,10 @@ class StockAdjustService:
                     (qty, now_dt, uid, seq),
                 )
             remark = f"{MSG_REMARK_PREFIX} {reason_nm}"
+            memo = str(getattr(payload, "memo", "") or "").strip()
+            if memo:
+                # 예: "재고조정 실사차이 · 사용자메모"
+                remark = f"{remark} · {memo}"
             cur.execute(
                 """
                 INSERT INTO t_stock_log (

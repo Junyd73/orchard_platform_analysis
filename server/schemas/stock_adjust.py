@@ -20,6 +20,8 @@ class StockAdjustRequest(BaseModel):
     io_type: str = Field(..., min_length=2)
     qty: float = Field(..., gt=0)
     reason_cd: str = Field(..., min_length=1)
+    # 선택: 실사/조정 메모를 remark에 반영 (DB 컬럼 추가 없이 텍스트만 사용)
+    memo: str = ""
 
 
 class StockAdjustResponse(BaseModel):

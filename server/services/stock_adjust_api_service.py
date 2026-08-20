@@ -41,6 +41,7 @@ class StockAdjustApiService:
             io_type=body.io_type,
             qty=body.qty,
             reason_cd=body.reason_cd,
+            memo=getattr(body, "memo", "") or "",
         )
         with get_sqlite_write_connection(self.db_path) as conn:
             try:
