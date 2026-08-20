@@ -69,6 +69,18 @@ def _schema_sql() -> str:
         );
         INSERT INTO m_customer (custm_id, farm_cd, custm_nm, mobile, use_yn)
         VALUES ('{CUST}', '{FARM}', '테스트', '010-0000-0000', 'Y');
+        CREATE TABLE m_common_code (
+            farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT, use_yn TEXT DEFAULT 'Y'
+        );
+        INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
+            ('{FARM}', 'ST010100', '예약접수', 'ST01'),
+            ('{FARM}', 'ST010200', '주문확정', 'ST01'),
+            ('{FARM}', 'ST010300', '배송준비', 'ST01'),
+            ('{FARM}', 'ST010400', '배송완료', 'ST01'),
+            ('{FARM}', 'FR010101', '신고', 'FR010100'),
+            ('{FARM}', '{GRADE}', '특', 'GR01'),
+            ('{FARM}', '{SIZE}', '15kg', 'FR020100'),
+            ('{FARM}', 'LO010100', '방문', 'LO01');
         CREATE TABLE t_order_master (
             order_no TEXT PRIMARY KEY, farm_cd TEXT, order_dt TEXT, custm_id TEXT,
             status_cd TEXT, stock_status TEXT,
@@ -509,6 +521,16 @@ class OrderShipServiceTests(unittest.TestCase):
         out = _ship(self.conn, mode=SHIP_MODE_DIRECT, qty=6, order_no=order_no, det=det)
         self.assertAlmostEqual(float(out["remaining_order"][0]["confirmed_shipped_qty"]), 6)
         self.assertAlmostEqual(float(out["remaining_order"][0]["remaining_order_qty"]), 4)
+
+    def test_a1_get_order_remaining_after_partial_ship(self) -> None:
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=20)
+        order_no = _order(self.conn, 10)
+        det = f"{order_no}-01"
+        _ship(self.conn, mode=SHIP_MODE_DIRECT, qty=6, order_no=order_no, det=det)
+        detail = OrderService(self.conn).get_order(FARM, order_no)
+        line = detail["lines"][0]
+        self.assertAlmostEqual(float(line["confirmed_shipped_qty"]), 6)
+        self.assertAlmostEqual(float(line["remaining_order_qty"]), 4)
 
     def test_t_ship_ssot_03_allocated_kept(self) -> None:
         _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)

@@ -34,10 +34,13 @@ import {
   MSG_CONFIRM_OK,
   MSG_NO_PREFILL,
   MSG_STOCK_MODE_NEED_ALLOC,
+  MSG_STOCK_MODE_PARTIAL_ALLOC,
   SHIP_MODE_DIRECT,
   SHIP_MODE_STOCK,
   buildShipConfirmRequest,
+  canUseStockMode,
   findShipQtyIssue,
+  findStockModeIssue,
   mapShipApiError,
   orderStatusLabel,
   type ShipDraftLine,
@@ -63,7 +66,15 @@ const custmId = ref('')
 const source = computed(() => prefill.source)
 const hasOrder = computed(() => Boolean(prefill.orderNo))
 const canPickStockMode = computed(
-  () => hasOrder.value && lines.value.some((ln) => ln.alloc_remaining > 1e-9),
+  () => hasOrder.value && canUseStockMode(lines.value),
+)
+const stockModeHint = computed(() => {
+  if (!hasOrder.value || canPickStockMode.value) return ''
+  const anyAlloc = lines.value.some((ln) => ln.alloc_remaining > 1e-9)
+  return anyAlloc ? MSG_STOCK_MODE_PARTIAL_ALLOC : MSG_STOCK_MODE_NEED_ALLOC
+})
+const stockModeBlocked = computed(
+  () => shipMode.value === SHIP_MODE_STOCK && !canPickStockMode.value,
 )
 const contextText = computed(() => {
   if (source.value === 'PRODUCTION') return '생산 직후 판매'
@@ -112,9 +123,9 @@ async function onConfirm() {
     errorMsg.value = MSG_STOCK_MODE_NEED_ALLOC
     return
   }
-  if (shipMode.value === SHIP_MODE_STOCK && !canPickStockMode.value) {
-    errorMsg.value = MSG_STOCK_MODE_NEED_ALLOC
-    return
+  if (shipMode.value === SHIP_MODE_STOCK) {
+    errorMsg.value = findStockModeIssue(lines.value)
+    if (errorMsg.value) return
   }
   busy.value = true
   errorMsg.value = ''
@@ -219,7 +230,8 @@ onMounted(() => {
             </option>
           </OdsSelect>
         </OdsFormField>
-        <p v-if="!canPickStockMode" class="hint">{{ MSG_STOCK_MODE_NEED_ALLOC }}</p>
+        <p v-if="stockModeHint" class="hint">{{ stockModeHint }}</p>
+        <p v-if="stockModeBlocked" class="err" role="alert">{{ MSG_STOCK_MODE_PARTIAL_ALLOC }}</p>
       </OdsCard>
       <OdsCard v-else-if="!done && lines.length && source === 'STOCK'">
         <p class="meta">{{ LABEL_MODE }} · {{ LABEL_MODE_DIRECT }}</p>

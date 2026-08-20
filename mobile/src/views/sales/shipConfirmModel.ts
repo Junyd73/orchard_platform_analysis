@@ -26,7 +26,9 @@ export const MSG_QTY_INVALID = '판매수량은 0보다 커야 합니다.'
 export const MSG_QTY_OVER_REMAINING = '주문 잔여수량보다 출고수량이 많습니다.'
 export const MSG_CONFIRM_OK = '판매가 확정되었습니다.'
 export const MSG_STOCK_MODE_NEED_ALLOC = '배정된 재고가 없어 일반재고로 출고합니다.'
+export const MSG_STOCK_MODE_PARTIAL_ALLOC = '선택한 상품 중 배정재고가 부족한 항목이 있습니다.'
 export const MSG_STOCK_MODE_NEED_ORDER = '배정재고 출고는 주문이 필요합니다.'
+export const QTY_EPS = 1e-9
 
 export const ORDER_STATUS_PREP = 'ST010300'
 export const ORDER_STATUS_DELIVERED = 'ST010400'
@@ -50,6 +52,21 @@ export type ShipDraftLine = {
   grade_nm?: string
   size_nm?: string
   item_nm?: string
+}
+
+export function canUseStockMode(lines: ShipDraftLine[]): boolean {
+  if (!lines.length) return false
+  return lines.every((ln) => Number(ln.alloc_remaining) + QTY_EPS >= Number(ln.qty))
+}
+
+export function findStockModeIssue(lines: ShipDraftLine[]): string {
+  if (!lines.length) return ''
+  for (const ln of lines) {
+    if (Number(ln.alloc_remaining) + QTY_EPS < Number(ln.qty)) {
+      return MSG_STOCK_MODE_PARTIAL_ALLOC
+    }
+  }
+  return ''
 }
 
 export function defaultShipMode(allocRemaining: number, hasOrder: boolean): ShipMode {

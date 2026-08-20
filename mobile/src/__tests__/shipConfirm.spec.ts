@@ -12,7 +12,11 @@ import {
   SHIP_MODE_DIRECT,
   SHIP_MODE_STOCK,
   buildShipConfirmRequest,
+  canUseStockMode,
   defaultShipMode,
+  findShipQtyIssue,
+  findStockModeIssue,
+  MSG_STOCK_MODE_PARTIAL_ALLOC,
 } from '@/views/sales/shipConfirmModel'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import type { OrderDetail, OrderLine } from '@/types/order'
@@ -46,6 +50,8 @@ const LINE: OrderLine = {
   grade_nm: '특',
   size_nm: '25과',
   reserved_unshipped_qty: 6,
+  confirmed_shipped_qty: 4,
+  remaining_order_qty: 6,
   deliveries: [],
 }
 
@@ -495,6 +501,65 @@ describe('shipConfirmModel / ShipConfirmView', () => {
     expect(wrapper.text()).toContain('주문 출고')
     expect(wrapper.text()).not.toContain('주문확정 버튼')
     expect(wrapper.text()).not.toContain('주문확정 단계는')
+    wrapper.unmount()
+  })
+
+  it('B1-B3/B5-B6: STOCK 가능 여부 — 전 line 배정>=출고수량', () => {
+    const mk = (alloc: number, qty: number) => ({
+      order_detail_id: 'X',
+      item_cd: 'FR010100',
+      variety_cd: 'FR010101',
+      grade_cd: 'GR010100',
+      size_cd: 'FR020102',
+      weight: 15,
+      harvest_year: 2026,
+      wh_cd: 'WH01',
+      qty,
+      unit_price: 1000,
+      remaining_qty: qty,
+      alloc_remaining: alloc,
+    })
+    expect(canUseStockMode([mk(5, 5), mk(3, 3)])).toBe(true)
+    expect(canUseStockMode([mk(5, 5), mk(0, 3)])).toBe(false)
+    expect(canUseStockMode([mk(5, 5), mk(2, 3)])).toBe(false)
+    expect(canUseStockMode([mk(5, 5)])).toBe(true)
+    expect(canUseStockMode([mk(5, 3)])).toBe(true)
+    expect(canUseStockMode([mk(5, 6)])).toBe(false)
+  })
+
+  it('B7: STOCK 선택 후 수량 증가 시 confirm API 차단', async () => {
+    const store = useSalesPrefillStore()
+    store.setFromOrder(ORDER, { ...LINE, reserved_unshipped_qty: 6 })
+    store.shipMode = SHIP_MODE_STOCK
+    const { wrapper } = await mountShip()
+    const qty = wrapper.find('input[type="number"]')
+    await qty.setValue('7')
+    await wrapper.findAll('button').find((b) => b.text().includes(LABEL_CONFIRM_SHIP))?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(MSG_STOCK_MODE_PARTIAL_ALLOC)
+    expect(confirmShipment).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('B8: DIRECT는 배정 없어도 confirm 가능', async () => {
+    const store = useSalesPrefillStore()
+    store.setFromOrder(ORDER, { ...LINE, reserved_unshipped_qty: 0 })
+    expect(store.shipMode).toBe(SHIP_MODE_DIRECT)
+    confirmShipment.mockResolvedValue({
+      ok: true,
+      sales_no: '20260819-01',
+      sales_status: 'CONFIRMED',
+      ship_mode: 'DIRECT',
+      order_no: 'ORD1',
+      details: [],
+      order_status: null,
+      remaining_order_qty: null,
+      remaining_order: [],
+    })
+    const { wrapper } = await mountShip()
+    await wrapper.findAll('button').find((b) => b.text().includes(LABEL_CONFIRM_SHIP))?.trigger('click')
+    await flushPromises()
+    expect(confirmShipment).toHaveBeenCalled()
     wrapper.unmount()
   })
 })

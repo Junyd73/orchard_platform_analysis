@@ -5,6 +5,7 @@ import type { ProductionPrefillLine } from '@/api/production'
 import type { StockItem } from '@/api/stock'
 import {
   SHIP_MODE_DIRECT,
+  canUseStockMode,
   defaultShipMode,
   type ShipDraftLine,
   type ShipEntrySource,
@@ -39,7 +40,7 @@ function draftFromProduction(ln: ProductionPrefillLine): ShipDraftLine {
 
 function draftFromOrderLine(line: OrderLine): ShipDraftLine {
   const alloc = Number(line.reserved_unshipped_qty ?? 0)
-  const remaining = Number(line.qty)
+  const remaining = Number(line.remaining_order_qty ?? line.qty)
   return {
     order_detail_id: line.order_detail_id,
     item_cd: line.item_cd,
@@ -119,8 +120,8 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     orderNo.value = detail.order_no
     custmId.value = detail.custm_id
     customerNm.value = detail.customer || detail.custm_id
-    const allAlloc = drafts.length > 0 && drafts.every((d) => d.alloc_remaining > 1e-9)
-    shipMode.value = defaultShipMode(allAlloc ? 1 : 0, true)
+    const allStock = canUseStockMode(drafts)
+    shipMode.value = defaultShipMode(allStock ? 1 : 0, true)
     returnTo.value = 'order-detail'
     allowModeChange.value = true
     lastResult.value = null

@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { cancelOrder, fetchOrder } from '@/api/orders'
 import OrderDetailView from '@/views/orders/OrderDetailView.vue'
+import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import {
   LABEL_CANCEL_ORDER,
   LABEL_CLOSE,
@@ -211,6 +212,48 @@ describe('OrderDetailView', () => {
     two.lines = [base, { ...base, order_detail_id: 'ORD20260817-001-02' }]
     const { wrapper } = await mountDetail('ST010100', '예약접수', two)
     expect(wrapper.text()).toContain(LABEL_SHIP_BATCH)
+    wrapper.unmount()
+  })
+
+  it('A2/A6: remainingQty는 서버 remaining_order_qty SSOT', async () => {
+    const body = detail('ST010100', '예약접수')
+    body.lines[0].qty = 10
+    body.lines[0].confirmed_shipped_qty = 6
+    body.lines[0].remaining_order_qty = 4
+    const { wrapper } = await mountDetail('ST010100', '예약접수', body)
+    expect(wrapper.text()).toContain('잔여 4')
+    expect(wrapper.text()).toContain('출고 6')
+    wrapper.unmount()
+  })
+
+  it('A3: prefill.clear 후 재조회해도 서버 잔여 유지', async () => {
+    const body = detail('ST010100', '예약접수')
+    body.lines[0].confirmed_shipped_qty = 6
+    body.lines[0].remaining_order_qty = 4
+    const { wrapper } = await mountDetail('ST010100', '예약접수', body)
+    useSalesPrefillStore().clear()
+    await flushPromises()
+    expect(wrapper.text()).toContain('잔여 4')
+    wrapper.unmount()
+  })
+
+  it('A5: remaining 0 line은 출고 선택 대상 제외', async () => {
+    const body = detail('ST010100', '예약접수')
+    body.lines[0].confirmed_shipped_qty = 0
+    body.lines[0].remaining_order_qty = 10
+    const { wrapper } = await mountDetail('ST010100', '예약접수', body)
+    expect(wrapper.text()).toContain('잔여 10')
+    wrapper.unmount()
+  })
+
+  it('A5: remaining 0 line은 출고 버튼 없음', async () => {
+    const body = detail('ST010100', '예약접수')
+    body.lines[0].confirmed_shipped_qty = 10
+    body.lines[0].remaining_order_qty = 0
+    const { wrapper } = await mountDetail('ST010100', '예약접수', body)
+    const shipBtn = wrapper.findAll('button').find((b) => b.text().trim() === LABEL_SHIP)
+    expect(shipBtn).toBeUndefined()
+    expect(wrapper.text()).not.toContain(LABEL_SHIP_BATCH)
     wrapper.unmount()
   })
 })

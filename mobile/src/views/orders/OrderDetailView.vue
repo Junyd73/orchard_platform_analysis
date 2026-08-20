@@ -76,7 +76,24 @@ const totalAmt = computed(() =>
   formatOrderAmt(detail.value?.tot_order_amt || detail.value?.total_amt || 0),
 )
 
+function remainingQty(line: OrderLine): number {
+  if (line.remaining_order_qty != null && !Number.isNaN(Number(line.remaining_order_qty))) {
+    return Number(line.remaining_order_qty)
+  }
+  const row = salesPrefill.remainingFor(line.order_detail_id)
+  if (row) return Number(row.remaining_order_qty)
+  return Number(line.qty)
+}
+
 function remainingText(line: OrderLine): string {
+  const shipped =
+    line.confirmed_shipped_qty != null && !Number.isNaN(Number(line.confirmed_shipped_qty))
+      ? Number(line.confirmed_shipped_qty)
+      : null
+  const rem = remainingQty(line)
+  if (shipped != null && (shipped > 1e-9 || rem > 1e-9)) {
+    return `출고 ${formatOrderAmt(shipped)} / 잔여 ${formatOrderAmt(rem)}`
+  }
   const row = salesPrefill.remainingFor(line.order_detail_id)
   if (!row) return ''
   return `출고 ${formatOrderAmt(row.confirmed_shipped_qty)} / 잔여 ${formatOrderAmt(row.remaining_order_qty)}`
@@ -90,12 +107,6 @@ const nextStepHint = computed(() => {
   return ''
 })
 const selectedIds = ref<string[]>([])
-
-function remainingQty(line: OrderLine): number {
-  const row = salesPrefill.remainingFor(line.order_detail_id)
-  if (row) return Number(row.remaining_order_qty)
-  return Number(line.qty)
-}
 
 function shipableLines(): OrderLine[] {
   return (detail.value?.lines || []).filter((ln) => remainingQty(ln) > 1e-9)
@@ -250,7 +261,7 @@ watch(orderNo, () => {
           <p v-if="remainingText(line)" class="meta">{{ remainingText(line) }}</p>
           <p class="meta">배송 {{ formatOrderLineShip(line) }}</p>
           <OdsButton
-            v-if="canShip"
+            v-if="canShip && remainingQty(line) > 0"
             type="button"
             variant="secondary"
             :block="false"

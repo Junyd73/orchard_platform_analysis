@@ -7,7 +7,8 @@
 | 항목 | SHA / 브랜치 |
 |------|----------------|
 | base | `c6e5edb93fa5234b7314ea9135aa48204138461d` (`main`) |
-| feature | `6f74eb5628fedb12759ef1d5954b6d007841154a` |
+| feature | `a8bd39a3edb8feaf502c234c3ae181315028dc5d` (fix: remainder + STOCK consistency) |
+| prior feature | `6f74eb5628fedb12759ef1d5954b6d007841154a` |
 | branch | `cursor/stage6-ship-stock-ux` |
 
 ## Review branch 목적
@@ -16,6 +17,22 @@ ChatGPT/대표가 Stage 6 P0~P3 실제 소스를 `orchard_platform_analysis`에�
 
 - 영구 mirror whitelist 확대 **아님**
 - Core 3종 + PC `stock_page.py`는 **이번 review branch 한시 포함**
+
+## A/B 보완 (2026-08-20)
+
+### A — 주문상세 잔여수량 SSOT
+
+- `core/order_ship_qty.py` — CONFIRMED 판매 누계 공통 helper
+- `core/order_service.py` — `get_order` line에 `confirmed_shipped_qty`, `remaining_order_qty`
+- `core/order_ship_service.py` — helper 위임
+- `server/schemas/order.py` — `OrderLineOut` 필드 추가
+- `mobile/src/views/orders/OrderDetailView.vue` — 서버 `remaining_order_qty` 우선
+
+### B — 다건 STOCK 허용조건
+
+- `mobile/src/views/sales/shipConfirmModel.ts` — `canUseStockMode`, confirm 직전 검증
+- `mobile/src/views/sales/ShipConfirmView.vue` — UI/validation
+- `mobile/src/composables/stores/salesPrefill.ts` — draft 기본 ship_mode
 
 ## P0 — 배즙 출고 표시
 
@@ -82,9 +99,9 @@ ChatGPT/대표가 Stage 6 P0~P3 실제 소스를 `orchard_platform_analysis`에�
 
 | 영역 | 결과 |
 |------|------|
-| Python (adjust/ship/alloc/production) | 64 OK |
-| 관련 vitest | 56 OK |
-| 전체 vitest | 258/260 (AiAnalysisPanel 2건 baseline) |
+| Python (order ship/service, alloc, adjust, production) | 120 OK |
+| 관련 vitest (OrderDetailView, shipConfirm) | 31 OK |
+| 전체 vitest | 265/267 (AiAnalysisPanel 2건 baseline) |
 | build | OK |
 
 ### AiAnalysisPanel baseline (CASE 1)
