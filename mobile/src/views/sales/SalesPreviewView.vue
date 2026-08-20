@@ -9,6 +9,7 @@ import { fetchCommonCodes } from '@/api/commonCodes'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
+import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsFormField from '@/components/ods/OdsFormField.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
@@ -54,7 +55,8 @@ const LABEL_TOTAL = '총액'
 const LABEL_GO_SALE = '판매 진행'
 const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
-const LABEL_VIEW_DEST = '배송지 편집'
+const LABEL_VIEW_DEST = '배송지 편집 ›'
+const LABEL_LINES = '판매 품목'
 const LABEL_DEST_SHEET = '배송지 배분'
 const LABEL_ADD_DEST = '+ 배송지 추가'
 const LABEL_DEST_DONE = '완료'
@@ -440,30 +442,33 @@ onMounted(async () => {
       <p v-if="errorMsg" class="err" role="alert">{{ errorMsg }}</p>
 
       <template v-if="!successMsg">
-        <!-- A. 상단 정보 -->
-        <section class="section section--header" aria-label="고객 배송" data-testid="sales-preview-header">
-          <div class="header-row">
-            <span class="header-row__lbl">{{ LABEL_CUSTOMER }}</span>
-            <OdsSelect v-model="custmId" variant="form" class="header-row__ctrl" aria-label="고객 선택">
-              <option value="">고객 선택</option>
-              <option v-for="c in customers" :key="c.custm_id" :value="c.custm_id">
-                {{ c.custm_nm }} · {{ c.mobile }}
-              </option>
-            </OdsSelect>
-          </div>
-          <div class="header-row">
-            <span class="header-row__lbl">{{ LABEL_DLVRY_METHOD }}</span>
-            <OdsSelect
-              class="header-row__ctrl"
-              :model-value="prefill.dlvryTp"
-              variant="form"
-              aria-label="배송방법"
-              @update:model-value="prefill.setDelivery({ dlvryTp: $event })"
-            >
-              <option v-for="d in deliveryOptions" :key="d.value" :value="d.value">
-                {{ d.label }}
-              </option>
-            </OdsSelect>
+        <!-- A. 상단 정보 — 포장/생산 compact card 계열 -->
+        <OdsCard
+          class="preview-card preview-card--compact"
+          aria-label="고객 배송"
+          data-testid="sales-preview-header"
+        >
+          <div class="header-fields">
+            <OdsFormField :label="LABEL_CUSTOMER">
+              <OdsSelect v-model="custmId" variant="form" aria-label="고객 선택">
+                <option value="">고객 선택</option>
+                <option v-for="c in customers" :key="c.custm_id" :value="c.custm_id">
+                  {{ c.custm_nm }} · {{ c.mobile }}
+                </option>
+              </OdsSelect>
+            </OdsFormField>
+            <OdsFormField :label="LABEL_DLVRY_METHOD">
+              <OdsSelect
+                :model-value="prefill.dlvryTp"
+                variant="form"
+                aria-label="배송방법"
+                @update:model-value="prefill.setDelivery({ dlvryTp: $event })"
+              >
+                <option v-for="d in deliveryOptions" :key="d.value" :value="d.value">
+                  {{ d.label }}
+                </option>
+              </OdsSelect>
+            </OdsFormField>
           </div>
           <p
             v-if="isParcel && parcelHeaderHint"
@@ -476,11 +481,18 @@ onMounted(async () => {
           >
             {{ parcelHeaderHint }}
           </p>
-        </section>
+        </OdsCard>
 
-        <!-- B. 판매 품목 -->
-        <section class="section section--lines" aria-label="판매 품목" data-testid="sales-preview-lines">
-          <h3 class="section__title">판매 품목 {{ lines.length }}건</h3>
+        <!-- B. 판매 품목 — 재고 compact list 계열 (품목별 카드 반복 없음) -->
+        <OdsCard
+          class="preview-card preview-card--lines"
+          aria-label="판매 품목"
+          data-testid="sales-preview-lines"
+        >
+          <div class="lines__head">
+            <h3 class="lines__title">{{ LABEL_LINES }}</h3>
+            <span class="lines__count">{{ lines.length }}건</span>
+          </div>
 
           <p v-if="!lines.length" class="lines__empty" data-testid="sales-preview-empty">
             {{ LABEL_EMPTY_LINES }}
@@ -599,11 +611,11 @@ onMounted(async () => {
               {{ LABEL_CANCEL_PREP }}
             </OdsButton>
           </div>
-        </section>
+        </OdsCard>
 
-        <!-- D. sticky summary -->
+        <!-- D. sticky summary — 재고 판매예정 bar 계열 + 전체폭 CTA -->
         <div class="footer" data-testid="sales-preview-footer" role="region" aria-label="합계">
-          <div class="footer__meta">
+          <div class="footer__panel">
             <p class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</p>
             <p class="footer__row">
               <span class="footer__lbl">{{ LABEL_ITEM_AMT }}</span>
@@ -633,6 +645,7 @@ onMounted(async () => {
                 </template>
               </span>
             </p>
+            <div class="footer__divider" aria-hidden="true" />
             <p class="footer__total">
               <span class="footer__lbl">{{ LABEL_TOTAL }}</span>
               <strong>{{ formatOrderAmt(payAmt) }}원</strong>
@@ -778,23 +791,26 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+
 .page {
   /* OdsBottomNav: min-height 56 + pad 8+8 + safe-area (SalesPreview 전용, Nav 미수정) */
   --sales-preview-nav-h: calc(
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 8.5rem;
+  --sales-preview-footer-h: 16.5rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
+  --preview-qty-visual: 26px;
+  --preview-qty-touch: 36px;
   min-height: 100%;
   width: 100%;
-  background: var(--ods-color-bg);
+  background: var(--ods-color-bg-muted, #f5f5f5);
   overflow-x: hidden;
   box-sizing: border-box;
 }
 .content {
-  gap: var(--ods-page-content-gap, var(--ods-space-16));
+  gap: var(--ods-space-12);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin-inline: auto;
@@ -810,46 +826,36 @@ onMounted(async () => {
   color: var(--ods-color-text);
 }
 
-.section {
+/* 포장/생산 OdsCard 계열 */
+.preview-card {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-12);
   min-width: 0;
 }
-.section--header {
-  gap: var(--ods-form-field-gap, 18px);
-  padding-bottom: var(--ods-space-16);
-  border-bottom: 1px solid var(--ods-color-border);
+.preview-card--compact {
+  padding: var(--ods-space-12);
 }
-.section__title {
-  margin: 0;
-  font: var(--ods-font-headline);
-  color: var(--ods-color-text);
+.preview-card--lines {
+  padding: 0;
+  overflow: hidden;
 }
-.header-row {
-  display: grid;
-  grid-template-columns: 4.25rem minmax(0, 1fr);
-  gap: var(--ods-space-8);
-  align-items: center;
-}
-.header-row__lbl {
-  font: var(--ods-font-form-label);
-  color: var(--ods-color-text-label);
-}
-.header-row__ctrl {
+.header-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
   min-width: 0;
-  width: 100%;
 }
 .header-hint {
   margin: 0;
   padding: var(--ods-space-8) var(--ods-space-12);
-  border-radius: var(--ods-radius-button, 8px);
+  border-radius: var(--ods-radius-button);
   font: var(--ods-font-form-help);
   background: var(--ods-color-bg-muted);
   color: var(--ods-color-text-secondary);
 }
 .header-hint--ok {
-  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+  background: var(--ods-color-primary-subtle, #f0f7f4);
   color: var(--ods-color-primary);
 }
 .header-hint--warn {
@@ -857,9 +863,28 @@ onMounted(async () => {
   color: var(--ods-color-gray-900);
 }
 
+.lines__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12) var(--ods-space-16) var(--ods-space-8);
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.lines__title {
+  margin: 0;
+  font: var(--ods-font-form-label);
+  color: var(--ods-color-text);
+}
+.lines__count {
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+  white-space: nowrap;
+}
 .lines__empty {
   margin: 0;
-  padding: var(--ods-space-24) 0;
+  padding: var(--ods-space-24) var(--ods-space-16);
   font: var(--ods-font-body-2);
   color: var(--ods-color-text-secondary);
   text-align: center;
@@ -868,9 +893,10 @@ onMounted(async () => {
   list-style: none;
   margin: 0;
   padding: 0;
+  background: var(--ods-color-white);
 }
 .line {
-  padding: var(--ods-space-12) 0;
+  padding: var(--ods-space-10) var(--ods-space-16);
   border-bottom: 1px solid var(--ods-color-border);
   min-width: 0;
 }
@@ -879,13 +905,15 @@ onMounted(async () => {
 }
 .line__r1 {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(0, 1fr) var(--preview-qty-touch);
   gap: var(--ods-space-8);
   align-items: center;
-  margin-bottom: var(--ods-space-8);
+  margin-bottom: var(--ods-space-6);
 }
 .line__title {
-  font: var(--ods-font-headline);
+  font-size: var(--ods-font-size-footnote, 12px);
+  line-height: 1.35;
+  font-weight: 700;
   color: var(--ods-color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -893,12 +921,12 @@ onMounted(async () => {
   min-width: 0;
 }
 .line__remove {
-  width: 32px;
-  height: 32px;
+  width: var(--preview-qty-touch);
+  height: var(--preview-qty-touch);
   padding: 0;
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button, 8px);
-  background: var(--ods-color-white);
+  border: none;
+  border-radius: var(--ods-radius-button);
+  background: transparent;
   color: var(--ods-color-text-secondary);
   font-size: 18px;
   line-height: 1;
@@ -917,20 +945,38 @@ onMounted(async () => {
 .qty {
   display: inline-flex;
   align-items: center;
-  gap: var(--ods-space-4);
+  gap: 2px;
   flex: 0 0 auto;
 }
 .qty__btn {
-  width: 32px;
-  height: 32px;
+  position: relative;
+  isolation: isolate;
+  width: var(--preview-qty-touch);
+  height: var(--preview-qty-touch);
+  min-width: var(--preview-qty-touch);
   padding: 0;
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button, 8px);
-  background: var(--ods-color-white);
-  font-size: 16px;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-text);
+  font-size: var(--ods-font-size-footnote, 12px);
   line-height: 1;
   cursor: pointer;
-  color: var(--ods-color-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qty__btn::after {
+  content: '';
+  box-sizing: border-box;
+  width: var(--preview-qty-visual);
+  height: var(--preview-qty-visual);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  z-index: -1;
 }
 .qty__btn:disabled {
   opacity: 0.4;
@@ -938,14 +984,22 @@ onMounted(async () => {
 }
 .qty :deep(input.ods-input),
 .qty :deep(.qty__input.ods-input) {
-  width: 40px;
-  min-width: 40px;
-  max-width: 40px;
-  height: 32px;
-  min-height: 32px;
-  padding: 0 2px;
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+  height: var(--preview-qty-visual);
+  min-height: var(--preview-qty-visual);
+  padding: 0 1px;
   text-align: center;
-  font: var(--ods-font-form-value);
+  font-size: var(--ods-font-size-footnote, 12px);
+  line-height: 1.35;
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+}
+.qty :deep(input.ods-input::-webkit-outer-spin-button),
+.qty :deep(input.ods-input::-webkit-inner-spin-button) {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .price {
   display: inline-flex;
@@ -956,24 +1010,26 @@ onMounted(async () => {
 }
 .price__lbl {
   flex-shrink: 0;
-  font: var(--ods-font-caption);
+  font-size: var(--ods-font-size-footnote, 12px);
   color: var(--ods-color-text-secondary);
 }
 .price :deep(input.ods-input),
 .price :deep(.price__input.ods-input) {
   width: 100%;
   min-width: 56px;
-  max-width: 96px;
-  height: 32px;
-  min-height: 32px;
+  max-width: 88px;
+  height: var(--preview-qty-visual);
+  min-height: var(--preview-qty-visual);
   padding: 0 var(--ods-space-4);
   text-align: right;
-  font: var(--ods-font-form-value);
+  font-size: var(--ods-font-size-footnote, 12px);
+  border-radius: var(--ods-radius-button);
 }
 .line__sub {
   flex: 0 0 auto;
   margin-left: auto;
-  font: var(--ods-font-headline);
+  font-size: var(--ods-font-size-footnote, 12px);
+  font-weight: 700;
   color: var(--ods-color-text);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -984,23 +1040,11 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  margin-top: var(--ods-space-8);
-  padding: var(--ods-space-8) var(--ods-space-12);
-  border-radius: var(--ods-radius-button, 8px);
+  margin-top: var(--ods-space-6);
   min-width: 0;
-  background: var(--ods-color-bg-muted);
-}
-.line__r3--ok {
-  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
-}
-.line__r3--warn {
-  background: color-mix(in srgb, var(--ods-color-caution) 16%, white);
-}
-.line__r3--danger {
-  background: color-mix(in srgb, var(--ods-color-danger) 12%, white);
 }
 .line__dest-status {
-  font: var(--ods-font-caption);
+  font-size: var(--ods-font-size-footnote, 12px);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
   min-width: 0;
@@ -1011,6 +1055,9 @@ onMounted(async () => {
 .line__r3--ok .line__dest-status {
   color: var(--ods-color-primary);
 }
+.line__r3--warn .line__dest-status {
+  color: var(--ods-color-caution);
+}
 .line__r3--danger .line__dest-status {
   color: var(--ods-color-danger);
 }
@@ -1019,10 +1066,10 @@ onMounted(async () => {
   border: none;
   background: transparent;
   color: var(--ods-color-primary);
-  font: var(--ods-font-caption);
+  font-size: var(--ods-font-size-footnote, 12px);
   font-weight: 700;
   cursor: pointer;
-  padding: 0;
+  padding: var(--ods-space-4) 0;
   white-space: nowrap;
 }
 
@@ -1030,40 +1077,44 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ods-space-8);
-  margin-top: var(--ods-space-4);
-  padding-top: var(--ods-space-12);
+  padding: var(--ods-space-12) var(--ods-space-16) var(--ods-space-16);
   border-top: 1px solid var(--ods-color-border);
 }
 
+/* 재고 판매예정 floating 계열 + 전체폭 primary CTA */
 .footer {
   position: fixed;
   left: 0;
   right: 0;
   bottom: var(--sales-preview-nav-h);
   z-index: 40;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--ods-space-12);
-  align-items: end;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-12) var(--ods-page-padding-x, var(--ods-space-16));
-  background: var(--ods-color-bg);
+  padding: var(--ods-space-10) var(--ods-page-padding-x, var(--ods-space-16));
+  background: var(--ods-color-bg-muted, #f5f5f5);
   border-top: 1px solid var(--ods-color-border);
-  box-shadow: 0 -4px 16px rgba(33, 33, 33, 0.06);
 }
-.footer__meta {
-  min-width: 0;
+.footer__panel {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-4);
+  min-width: 0;
+  padding: var(--ods-space-12) var(--ods-space-16);
+  background: var(--ods-color-primary-subtle, #e8f5ee);
+  border: 1px solid var(--ods-color-secondary, #66bb6a);
+  border-radius: var(--ods-radius-card);
+  box-shadow: 0 2px 10px rgba(46, 125, 50, 0.12);
 }
 .footer__count {
-  margin: 0;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
+  margin: 0 0 var(--ods-space-4);
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text);
 }
 .footer__row {
   margin: 0;
@@ -1086,17 +1137,19 @@ onMounted(async () => {
   align-items: center;
   gap: var(--ods-space-4);
 }
+.footer__divider {
+  height: 1px;
+  margin: var(--ods-space-6) 0;
+  background: color-mix(in srgb, var(--ods-color-secondary, #66bb6a) 45%, white);
+}
 .footer__total {
-  margin: var(--ods-space-4) 0 0;
+  margin: 0;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  font: var(--ods-font-body-1);
-  color: var(--ods-color-text);
-}
-.footer__total .footer__lbl {
   font: var(--ods-font-headline);
+  color: var(--ods-color-text);
 }
 .footer__total strong {
   font: var(--ods-font-title-2);
@@ -1116,11 +1169,12 @@ onMounted(async () => {
   padding: 0 var(--ods-space-4);
   text-align: right;
   font: var(--ods-font-form-value);
+  background: var(--ods-color-white);
 }
 .footer__go {
+  width: 100%;
+  min-height: 48px;
   flex-shrink: 0;
-  min-width: 108px;
-  align-self: stretch;
 }
 
 .err {
@@ -1131,9 +1185,9 @@ onMounted(async () => {
 .ok {
   color: var(--ods-color-primary);
   white-space: pre-line;
-  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+  background: var(--ods-color-primary-subtle, #f0f7f4);
   padding: var(--ods-space-8) var(--ods-space-12);
-  border-radius: var(--ods-radius-button, 8px);
+  border-radius: var(--ods-radius-button);
   font: var(--ods-font-body-2);
 }
 
@@ -1141,43 +1195,13 @@ onMounted(async () => {
   .line__r2 {
     gap: var(--ods-space-4);
   }
-  .qty__btn {
-    width: 28px;
-    height: 28px;
-  }
-  .qty :deep(input.ods-input),
-  .qty :deep(.qty__input.ods-input) {
-    width: 36px;
-    min-width: 36px;
-    max-width: 36px;
-    height: 28px;
-    min-height: 28px;
-  }
   .price :deep(input.ods-input),
   .price :deep(.price__input.ods-input) {
-    max-width: 80px;
+    max-width: 76px;
     min-width: 48px;
-    height: 28px;
-    min-height: 28px;
-  }
-  .footer__go {
-    min-width: 96px;
   }
 }
 
-@media (max-width: 390px) {
-  .page {
-    --sales-preview-footer-h: 12.5rem;
-  }
-  .footer {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-  .footer__go {
-    width: 100%;
-    min-height: 48px;
-  }
-}
 .dest-overlay {
   position: fixed;
   inset: 0;

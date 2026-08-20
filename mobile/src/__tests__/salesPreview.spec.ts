@@ -122,15 +122,18 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
-  it('T1~T2 카드형 품목 UI 없음 · divider 리스트', async () => {
+  it('T1~T2 품목별 카드 반복 없음 · divider 리스트 · 섹션 card 허용', async () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock(), 2)
     const { wrapper } = await mountPreview()
     expect(wrapper.find('[data-testid="sales-preview-lines"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="sales-preview-line"]')).toHaveLength(1)
-    expect(wrapper.find('.ods-card').exists()).toBe(false)
+    // 섹션용 OdsCard는 허용, 품목 li에 card 클래스 반복 금지
+    expect(wrapper.find('[data-testid="sales-preview-header"]').classes().join(' ')).toMatch(/preview-card/)
+    expect(wrapper.find('[data-testid="sales-preview-lines"]').classes().join(' ')).toMatch(/preview-card/)
     expect(wrapper.find('.line').classes().join(' ')).not.toMatch(/card/i)
-    expect(wrapper.text()).toContain('판매 품목 1건')
+    expect(wrapper.text()).toContain('판매 품목')
+    expect(wrapper.text()).toContain('1건')
     expect(wrapper.text()).not.toContain('2026-08-19')
     expect(wrapper.text()).not.toContain('포장')
     expect(wrapper.text()).not.toContain('저장일')
