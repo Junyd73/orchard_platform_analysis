@@ -151,7 +151,22 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     setFromStockRows([row])
   }
 
-  /** 재고 선택으로 draft를 교체(기존 동작). */
+  /** 재고 직접판매 헤더(고객·배송) 초기화 — 최초 STOCK 진입용 */
+  function resetStockSaleHeader() {
+    custmId.value = null
+    customerNm.value = ''
+    resetDelivery()
+  }
+
+  /**
+   * 신규 STOCK 판매 시작 여부.
+   * 이미 STOCK + shipLines 가 있으면 품목추가(헤더 유지), 그 외는 최초 진입.
+   */
+  function isContinuingStockSale(): boolean {
+    return source.value === 'STOCK' && shipLines.value.length > 0
+  }
+
+  /** 재고 선택으로 draft를 교체(기존 동작). 항상 신규 판매 시작으로 취급. */
   function setFromStockRows(rows: StockItem[]) {
     source.value = 'STOCK'
     lines.value = []
@@ -161,13 +176,16 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     returnTo.value = 'stock'
     allowModeChange.value = false
     lastResult.value = null
+    resetStockSaleHeader()
   }
 
   /**
    * 판매미리보기용 병합: 동일 stock 중복 line 금지, 기존 qty/단가 유지.
    * 신규만 추가한다.
+   * 최초 STOCK 진입 시 고객/배송 초기화, 품목추가 병합 시 헤더 유지.
    */
   function mergeFromStockRows(rows: StockItem[]) {
+    const keepHeader = isContinuingStockSale()
     source.value = 'STOCK'
     lines.value = []
     shipMode.value = SHIP_MODE_DIRECT
@@ -175,6 +193,11 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     returnTo.value = 'stock'
     allowModeChange.value = false
     lastResult.value = null
+    if (!keepHeader) {
+      resetStockSaleHeader()
+      // 주문/생산 draft 잔여 line 제거 — 신규 재고판매만 시작
+      shipLines.value = []
+    }
 
     const next = [...shipLines.value]
     const seen = new Set(next.map((ln) => stockDraftKey(ln)))

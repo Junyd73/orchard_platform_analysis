@@ -188,13 +188,47 @@ describe('StockView', () => {
     expect(itemCds).toEqual(['FR010200', 'FR010201', 'FR010202'])
   })
 
-  it('상품 카드 판매 경로는 제거하고 미리보기 통합', async () => {
+  it('T5~T7 판매예정 문구 + 선택0에서도 미리보기 활성', async () => {
     const r = router()
     await r.push('/orders')
     await r.isReady()
     const wrapper = mount(StockView, { global: { plugins: [r] } })
     await flushPromises()
-    expect(wrapper.find('.stock-view__sell').exists()).toBe(false)
+    expect(wrapper.find('.stock-view__batch').exists()).toBe(false)
+
+    const store = useSalesPrefillStore()
+    store.mergeFromStockRows([
+      {
+        farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
+        variety_cd: 'FR010101', variety_nm: '신고',
+        grade_cd: 'GR010100', grade_nm: '특',
+        size_cd: 'FR020101', size_nm: '25과',
+        weight: 15, harvest_year: 2026, storage_dt: '2026-08-19',
+        in_qty: 10, out_qty: 0, real_qty: 10, reserved_qty: 0, available_qty: 10,
+      },
+    ])
+    await flushPromises()
+    expect(wrapper.find('.stock-view__batch').exists()).toBe(true)
+    expect(wrapper.text()).toContain('선택 0건')
+    expect(wrapper.text()).toContain('판매예정 1건')
+    expect(wrapper.text()).not.toMatch(/\bdraft\b/i)
+    expect(wrapper.find('.stock-view').classes()).toContain('stock-view--with-batch')
+    expect(wrapper.find('.stock-view__batch').classes()).toContain('stock-view__batch')
+
+    await wrapper.get('.stock-view__batch button').trigger('click')
+    await flushPromises()
+    expect(r.currentRoute.value.name).toBe('sales-preview')
+    wrapper.unmount()
+  })
+
+  it('T1 선택 1건 → fixed action bar 표시', async () => {
+    const wrapper = mount(StockView, { global: { plugins: [router()] } })
+    await flushPromises()
+    await wrapper.find('.stock-view__pick input').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('선택 1건')
+    expect(wrapper.find('.stock-view__batch').exists()).toBe(true)
+    expect(wrapper.find('.stock-view').classes()).toContain('stock-view--with-batch')
   })
 
   it('선택 다건은 판매 미리보기 draft에 병합한다', async () => {

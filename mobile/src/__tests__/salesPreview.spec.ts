@@ -128,6 +128,109 @@ describe('SalesPreviewView', () => {
     expect(store.shipLines[0].unit_price).toBe(1000)
   })
 
+  it('T11~T15 STOCK 최초 진입 헤더 초기화 / 품목추가 시 유지', () => {
+    const store = useSalesPrefillStore()
+    store.setFromOrderLines(
+      {
+        order_no: 'ORD1',
+        custm_id: 'A1',
+        customer: '고객A',
+        order_dt: '2026-08-01',
+        status_cd: 'ST010100',
+        status_nm: '',
+        tot_order_amt: 0,
+        tot_ship_fee: 0,
+        tot_pay_amt: 0,
+        lines: [],
+      } as never,
+      [{
+        order_detail_id: 'ORD1-01',
+        item_cd: 'FR010100',
+        variety_cd: 'FR010101',
+        grade_cd: 'GR010100',
+        size_cd: 'FR020101',
+        weight: 15,
+        qty: 1,
+        unit_price: 1000,
+        item_amt: 1000,
+        harvest_year: 2026,
+        wh_cd: 'WH01',
+        dlvry_tp: DELIVERY_TP_VISIT,
+        variety_nm: '신고',
+        grade_nm: '특',
+        size_nm: '25과',
+        remaining_order_qty: 1,
+        reserved_unshipped_qty: 0,
+      } as never],
+    )
+    store.setDelivery({
+      dlvryTp: DELIVERY_TP_PARCEL,
+      shipFee: 3000,
+      rcvName: '오염',
+      rcvTel: '010',
+      rcvAddr: '주소',
+      dlvryMsg: '메모',
+    })
+    expect(store.custmId).toBe('A1')
+
+    store.mergeFromStockRows([stock()])
+    expect(store.source).toBe('STOCK')
+    expect(store.custmId).toBeNull()
+    expect(store.customerNm).toBe('')
+    expect(store.dlvryTp).toBe(DELIVERY_TP_VISIT)
+    expect(store.shipFee).toBe(0)
+    expect(store.rcvName).toBe('')
+    expect(store.rcvAddr).toBe('')
+
+    store.setCustomer('B1', '고객B')
+    store.setDelivery({
+      dlvryTp: DELIVERY_TP_PARCEL,
+      shipFee: 4000,
+      rcvName: '받는분',
+      rcvTel: '010-2',
+      rcvAddr: '배송지',
+      dlvryMsg: '문앞',
+    })
+    store.updateShipLine(0, { qty: 3, unit_price: 5000 })
+    store.mergeFromStockRows([stock({ storage_dt: '2026-08-21', available_qty: 4 })])
+    expect(store.shipLines).toHaveLength(2)
+    expect(store.custmId).toBe('B1')
+    expect(store.customerNm).toBe('고객B')
+    expect(store.dlvryTp).toBe(DELIVERY_TP_PARCEL)
+    expect(store.shipFee).toBe(4000)
+    expect(store.rcvName).toBe('받는분')
+    expect(store.shipLines[0].qty).toBe(3)
+    expect(store.shipLines[0].unit_price).toBe(5000)
+
+    store.mergeFromStockRows([stock()])
+    expect(store.shipLines).toHaveLength(2)
+  })
+
+  it('T12 생산 prefill 후 STOCK 시작 시 헤더 초기화', () => {
+    const store = useSalesPrefillStore()
+    store.setFromProduction([
+      {
+        item_cd: 'FR010100',
+        item_nm: '배',
+        variety_cd: 'FR010101',
+        variety_nm: '신고',
+        grade_cd: 'GR010100',
+        grade_nm: '특',
+        size_cd: 'FR020101',
+        size_nm: '25과',
+        weight: 15,
+        harvest_year: 2026,
+        wh_cd: 'WH01',
+        qty: 2,
+      },
+    ])
+    store.setCustomer('P1', '생산고객')
+    store.mergeFromStockRows([stock()])
+    expect(store.custmId).toBeNull()
+    expect(store.customerNm).toBe('')
+    expect(store.dlvryTp).toBe(DELIVERY_TP_VISIT)
+  })
+
   it('P11 택배 선택 시 주소영역 표시', async () => {
     const store = useSalesPrefillStore()
     store.mergeFromStockRows([stock()])

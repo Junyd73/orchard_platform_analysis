@@ -166,3 +166,10 @@ ui/pages/stock_page.py
 - `mobile/src/composables/stores/salesPrefill.ts` — draft 병합·유지·삭제
 - `core/order_ship_service.py` — `tot_ship_fee` / `dlvry_tp` / `t_sales_delivery` 저장
 - `server/schemas/shipment.py`, `server/services/order_ship_api_service.py` — 배송 필드 전달
+
+## 보완 2단계 보완수정 (2026-08-20)
+
+| 항목 | 값 |
+|------|-----|
+| private SHA | `f6e35c65fcfb62c1e06ed60c28cf0879d37c747d` |
+| 내용 | fixed 판매미리보기 바 · draft→판매예정 · STOCK 헤더 초기화/유지 · 배송 schema 검증 테스트 |

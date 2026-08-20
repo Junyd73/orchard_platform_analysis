@@ -406,10 +406,17 @@ function formatRegDt(dt: string) {
   if (!dt) return ''
   return dt.slice(5, 10).replace('-', '/')
 }
+
+const showSalesActionBar = computed(
+  () => selectedKeys.value.length > 0 || salesPrefill.shipLines.length > 0,
+)
 </script>
 
 <template>
-  <div class="stock-view">
+  <div
+    class="stock-view"
+    :class="{ 'stock-view--with-batch': showSalesActionBar }"
+  >
     <p v-if="pageSuccess" class="stock-view__page-ok">{{ pageSuccess }}</p>
 
     <!-- Level 2: 원물 / 상품 / 배즙 탭 -->
@@ -497,13 +504,13 @@ function formatRegDt(dt: string) {
       </div>
     </div>
     <div
-      v-if="selectedKeys.length || salesPrefill.shipLines.length"
+      v-if="showSalesActionBar"
       class="stock-view__batch"
     >
       <span class="stock-view__batch-count">
         선택 {{ selectedKeys.length }}건
         <template v-if="salesPrefill.shipLines.length">
-          · draft {{ salesPrefill.shipLines.length }}건
+          · 판매예정 {{ salesPrefill.shipLines.length }}건
         </template>
       </span>
       <OdsButton type="button" :block="false" @click="openSalesPreview">
@@ -616,12 +623,21 @@ function formatRegDt(dt: string) {
 <style scoped>
 /* ── 전체 컨테이너 ────────────────────────────────────────────────── */
 .stock-view {
+  --stock-bottom-nav-h: calc(
+    var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
+  );
+  --stock-batch-bar-h: 56px;
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-12);
   padding: var(--ods-space-12) var(--ods-space-16);
   min-height: 100%;
   background: var(--ods-color-bg, #FDFBF7);
+}
+.stock-view--with-batch {
+  padding-bottom: calc(
+    var(--stock-bottom-nav-h) + var(--stock-batch-bar-h) + var(--ods-space-16)
+  );
 }
 .stock-view__page-ok {
   margin: 0;
@@ -779,27 +795,40 @@ function formatRegDt(dt: string) {
   height: 1px;
 }
 .stock-view__draft-badge {
-  font: var(--ods-font-footnote);
-  color: var(--ods-color-primary);
+  font: var(--ods-font-caption, var(--ods-font-footnote));
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--ods-color-text-secondary);
   white-space: nowrap;
 }
 .stock-view__batch {
-  position: sticky;
-  bottom: var(--ods-space-8);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--stock-bottom-nav-h);
+  z-index: 40;
+  max-width: 480px;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  padding: var(--ods-space-8) var(--ods-space-12);
+  min-height: var(--stock-batch-bar-h);
+  box-sizing: border-box;
+  padding: var(--ods-space-8) max(var(--ods-space-12), env(safe-area-inset-left, 0px))
+    var(--ods-space-8) max(var(--ods-space-12), env(safe-area-inset-right, 0px));
   background: var(--ods-color-white, #fff);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-card);
+  border-top: 1px solid var(--ods-color-border);
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
 }
 .stock-view__batch-count {
   font: var(--ods-font-body-2);
   font-weight: 600;
   color: var(--ods-color-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── 이력 bottom sheet ────────────────────────────────────────────── */
