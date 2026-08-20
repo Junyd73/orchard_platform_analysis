@@ -263,13 +263,22 @@ function isSellable(row: StockItem): boolean {
   return row.item_cd !== ITEM_RAW && row.available_qty > 0
 }
 
-function toggleSelect(row: StockItem) {
+function isRowSelected(row: StockItem): boolean {
+  return selectedKeys.value.includes(rowKey(row))
+}
+
+/** checkbox 네이티브 checked와 selectedKeys를 한 방향으로 동기화 (이중 토글 방지) */
+function onPickChange(row: StockItem, ev: Event) {
+  const input = ev.target as HTMLInputElement | null
+  if (!input) return
   const k = rowKey(row)
-  if (selectedKeys.value.includes(k)) {
+  const on = selectedKeys.value.includes(k)
+  if (input.checked === on) return
+  if (input.checked) {
+    selectedKeys.value = [...selectedKeys.value, k]
+  } else {
     selectedKeys.value = selectedKeys.value.filter((x) => x !== k)
-    return
   }
-  selectedKeys.value = [...selectedKeys.value, k]
 }
 
 function sellSelected() {
@@ -411,14 +420,14 @@ const showSalesActionBar = computed(
   () => selectedKeys.value.length > 0 || salesPrefill.shipLines.length > 0,
 )
 
-/** transform 조상 회피(Teleport) + 인라인 fixed로 viewport 고정을 보장 */
+/** transform 조상 회피(Teleport). OdsBottomNav와 동일 중앙(max 480) 정렬 */
 const salesFabStyle = {
   position: 'fixed',
   left: '0',
   right: '0',
-  width: '100%',
   maxWidth: '480px',
-  margin: '0 auto',
+  marginLeft: 'auto',
+  marginRight: 'auto',
   bottom:
     'calc(var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px))',
   zIndex: 40,
@@ -482,7 +491,7 @@ const salesFabStyle = {
         :key="`${row.item_cd}_${row.variety_cd}_${row.grade_cd}_${row.size_cd}_${row.weight}_${row.storage_dt}`"
         class="stock-view__row"
         :class="{
-          'stock-view__row--selected': selectedKeys.includes(rowKey(row)),
+          'stock-view__row--selected': isRowSelected(row),
           'stock-view__row--zero': row.available_qty <= 0,
         }"
         role="listitem"
@@ -495,9 +504,10 @@ const salesFabStyle = {
         >
           <input
             type="checkbox"
-            :checked="selectedKeys.includes(rowKey(row))"
+            :checked="isRowSelected(row)"
             :aria-label="`${cardTitle(row)} 선택`"
-            @click.prevent.stop="toggleSelect(row)"
+            @click.stop
+            @change="onPickChange(row, $event)"
           >
         </label>
         <span v-else class="stock-view__pick-spacer" aria-hidden="true" />
@@ -808,8 +818,13 @@ const salesFabStyle = {
 .stock-view__pick input {
   width: 16px;
   height: 16px;
+  margin: 0;
+  flex-shrink: 0;
   accent-color: var(--ods-color-primary);
   cursor: pointer;
+  /* WebKit: controlled+prevent 시 체크 표시 누락 방지 */
+  appearance: auto;
+  -webkit-appearance: checkbox;
 }
 .stock-view__pick-spacer {
   width: 20px;
@@ -832,9 +847,9 @@ const salesFabStyle = {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
   );
   z-index: 40; /* OdsBottomNav(50) 아래 — 시각적으로는 nav 위에 배치 */
-  width: 100%;
   max-width: 480px;
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;

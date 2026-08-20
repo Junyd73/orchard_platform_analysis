@@ -49,8 +49,12 @@ async function openSheet() {
   return wrapper
 }
 
-function salesFab(): HTMLElement | null {
-  return document.querySelector('[data-testid="stock-sales-fab"]')
+async function checkPick(wrapper: ReturnType<typeof mount>, index = 0, on = true) {
+  const input = wrapper.findAll('.stock-view__pick input')[index]
+  expect(input.exists()).toBe(true)
+  await input.setValue(on)
+  await flushPromises()
+  return input
 }
 
 async function clickSalesFab() {
@@ -133,7 +137,7 @@ describe('StockView', () => {
   it('T8 체크 클릭은 선택만 하고 조정 시트를 열지 않음', async () => {
     const wrapper = mount(StockView, { global: { plugins: [router()], attachTo: document.body } })
     await flushPromises()
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     expect(document.querySelector('.stock-log-sheet')).toBeNull()
     expect(wrapper.find('.stock-view__row--selected').exists()).toBe(true)
@@ -146,7 +150,7 @@ describe('StockView', () => {
     await r.isReady()
     const wrapper = mount(StockView, { global: { plugins: [r] }, attachTo: document.body })
     await flushPromises()
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     await clickSalesFab()
     expect(r.currentRoute.value.name).toBe('sales-preview')
@@ -200,6 +204,40 @@ describe('StockView', () => {
     expect(itemCds).toEqual(['FR010200', 'FR010201', 'FR010202'])
   })
 
+  it('T8 checkbox checked/unchecked 가 selectedKeys·행 UI와 동기화', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const input = await checkPick(wrapper, 0, true)
+    expect((input.element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('.stock-view__row--selected').exists()).toBe(true)
+    expect(document.querySelector('[data-testid="stock-sales-fab"]')).toBeTruthy()
+
+    await checkPick(wrapper, 0, false)
+    expect((input.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('.stock-view__row--selected').exists()).toBe(false)
+    expect(document.querySelector('[data-testid="stock-sales-fab"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('T8b checkbox 클릭은 이중 토글 없이 1회만 반영', async () => {
+    const wrapper = mount(StockView, {
+      global: { plugins: [router()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const input = await checkPick(wrapper, 0, true)
+    expect((input.element as HTMLInputElement).checked).toBe(true)
+    expect(useSalesPrefillStore().shipLines.length).toBe(0)
+    expect(wrapper.findAll('.stock-view__row--selected')).toHaveLength(1)
+    await checkPick(wrapper, 0, true) // 이미 on → 유지
+    expect((input.element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.findAll('.stock-view__row--selected')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('T1 선택 0건 → Floating Bar 숨김', async () => {
     const wrapper = mount(StockView, {
       global: { plugins: [router()] },
@@ -217,7 +255,7 @@ describe('StockView', () => {
       attachTo: document.body,
     })
     await flushPromises()
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
     expect(fab).toBeTruthy()
@@ -267,7 +305,7 @@ describe('StockView', () => {
         in_qty: 5, out_qty: 0, real_qty: 5, reserved_qty: 0, available_qty: 5,
       },
     ])
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
     expect(fab?.textContent).toContain('선택 1건')
@@ -281,7 +319,7 @@ describe('StockView', () => {
       attachTo: document.body,
     })
     await flushPromises()
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     const fab = document.querySelector('[data-testid="stock-sales-fab"]') as HTMLElement | null
     expect(fab).toBeTruthy()
@@ -301,7 +339,7 @@ describe('StockView', () => {
       attachTo: document.body,
     })
     await flushPromises()
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     await clickSalesFab()
     expect(r.currentRoute.value.name).toBe('sales-preview')
@@ -315,7 +353,7 @@ describe('StockView', () => {
     })
     await flushPromises()
     expect(wrapper.find('.stock-view').classes()).not.toContain('stock-view--with-batch')
-    await wrapper.find('.stock-view__pick input').trigger('click')
+    await checkPick(wrapper, 0, true)
     await flushPromises()
     expect(wrapper.find('.stock-view').classes()).toContain('stock-view--with-batch')
     wrapper.unmount()
@@ -347,8 +385,8 @@ describe('StockView', () => {
     await flushPromises()
     const boxes = wrapper.findAll('.stock-view__pick input')
     expect(boxes).toHaveLength(2)
-    await boxes[0].trigger('click')
-    await boxes[1].trigger('click')
+    await checkPick(wrapper, 0, true)
+    await checkPick(wrapper, 1, true)
     await flushPromises()
     await clickSalesFab()
     const store = useSalesPrefillStore()
