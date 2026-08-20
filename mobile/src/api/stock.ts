@@ -103,12 +103,37 @@ export type StockAdjustPayload = {
   reason_cd: string
 }
 
+/** 판매규격 집계 조정 — storage_dt 없음 */
+export type StockAdjustBySpecPayload = {
+  wh_cd: string
+  item_cd: string
+  variety_cd: string
+  grade_cd: string
+  size_cd: string
+  weight: number
+  harvest_year: number
+  io_type: 'IN' | 'OUT'
+  qty: number
+  reason_cd: string
+}
+
 export async function adjustStock(
   farmCd: string,
   payload: StockAdjustPayload,
 ): Promise<{ ok: boolean; qty: number; io_type: string }> {
   return apiPostJson(
     `/farms/${encodeURIComponent(farmCd)}/fruit-stock/adjust`,
+    payload,
+    { headers: apiUserHeaders() },
+  )
+}
+
+export async function adjustStockBySpec(
+  farmCd: string,
+  payload: StockAdjustBySpecPayload,
+): Promise<{ ok: boolean; qty: number; io_type: string }> {
+  return apiPostJson(
+    `/farms/${encodeURIComponent(farmCd)}/fruit-stock/adjust-by-spec`,
     payload,
     { headers: apiUserHeaders() },
   )

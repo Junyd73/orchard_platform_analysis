@@ -7,8 +7,8 @@
 | 항목 | SHA / 브랜치 |
 |------|----------------|
 | base | `c6e5edb93fa5234b7314ea9135aa48204138461d` (`main`) |
-| feature | `c6a6a0926f387af3dd1269ace306a94dd9096a16` (query card + filters) |
-| prior feature | `7bc54293df34e1bcbfdc5f6f7de4bb4089610ffa` |
+| feature | `7e70f51077315271685d970de147843fe6ada2b6` (hide storage_dt UX) |
+| prior feature | `c6a6a0926f387af3dd1269ace306a94dd9096a16` |
 | branch | `cursor/stage6-ship-stock-ux` |
 
 ## Review branch 목적
@@ -186,3 +186,19 @@ ui/pages/stock_page.py
 
 - `mobile/src/views/stock/StockView.vue`
 - `mobile/src/__tests__/stockView.spec.ts`
+
+## 보완 2A 최종 — 포장/저장일 사용자 노출 제거 (2026-08-20)
+
+| 항목 | 값 |
+|------|-----|
+| private branch | `cursor/stage6-ship-stock-ux` |
+| private SHA | `7e70f51077315271685d970de147843fe6ada2b6` |
+| 내용 | LOT 선택 Sheet 제거 · 상품 조정은 `adjust_by_sale_spec` · OUT FIFO 분할 · IN 기존 최신 source |
+
+### 핵심 파일
+
+- `mobile/src/views/stock/StockView.vue`
+- `mobile/src/api/stock.ts`
+- `core/stock_adjust_service.py`
+- `server/routers|schemas|services/stock_adjust*`
+- `server/tests/test_stock_adjust_service.py`

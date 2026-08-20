@@ -24,6 +24,24 @@ class StockAdjustRequest(BaseModel):
     memo: str = ""
 
 
+class StockAdjustBySpecRequest(BaseModel):
+    """판매규격 단위 조정 — storage_dt 사용자 입력 없음."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wh_cd: str = Field(..., min_length=1)
+    item_cd: str = Field(..., min_length=1)
+    variety_cd: str = Field(..., min_length=1)
+    grade_cd: str = Field(..., min_length=1)
+    size_cd: str = Field(..., min_length=1)
+    weight: float
+    harvest_year: int
+    io_type: str = Field(..., min_length=2)
+    qty: float = Field(..., gt=0)
+    reason_cd: str = Field(..., min_length=1)
+    memo: str = ""
+
+
 class StockAdjustResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

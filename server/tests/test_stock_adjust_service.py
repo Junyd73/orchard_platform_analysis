@@ -261,6 +261,112 @@ class StockAdjustServiceTests(unittest.TestCase):
         self.assertTrue(reason_allows_io(REASON_RETURN, IO_TYPE_IN))
         self.assertFalse(reason_allows_io(REASON_RETURN, IO_TYPE_OUT))
 
+    def test_by_spec_out_splits_fifo_oldest_first(self) -> None:
+        from core.stock_adjust_service import StockAdjustBySpecIn
+
+        self.conn.execute(
+            """
+            INSERT INTO t_stock_master (
+                farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight,
+                harvest_year, storage_dt, in_qty, out_qty, reserved_qty, reg_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (FARM, "WH01", "FR010100", "FR010101", "GR010100", "FR020101", 15,
+             2026, "2026-08-20", 15, 0, 0, "T"),
+        )
+        self.conn.commit()
+        # 기존 row: 2026-08-01 avail=7 (in10-out0-res3)
+        out = self.svc.adjust_by_sale_spec(
+            StockAdjustBySpecIn(
+                farm_cd=FARM,
+                wh_cd="WH01",
+                item_cd="FR010100",
+                variety_cd="FR010101",
+                grade_cd="GR010100",
+                size_cd="FR020101",
+                weight=15,
+                harvest_year=2026,
+                io_type=IO_TYPE_OUT,
+                qty=10,
+                reason_cd=REASON_DISPOSE,
+            ),
+            user_id="U1",
+        )
+        self.assertTrue(out["ok"])
+        rows = self.conn.execute(
+            """
+            SELECT storage_dt, out_qty, reserved_qty FROM t_stock_master
+            WHERE farm_cd=? AND item_cd='FR010100'
+            ORDER BY storage_dt ASC
+            """,
+            (FARM,),
+        ).fetchall()
+        self.assertEqual(float(rows[0]["out_qty"]), 7.0)  # oldest fully drained available
+        self.assertEqual(float(rows[0]["reserved_qty"]), 3.0)  # reserved untouched
+        self.assertEqual(float(rows[1]["out_qty"]), 3.0)  # remainder on newer
+
+    def test_by_spec_out_rejects_over_total_available(self) -> None:
+        from core.stock_adjust_service import StockAdjustBySpecIn, StockAdjustError
+
+        with self.assertRaises(StockAdjustError) as ctx:
+            self.svc.adjust_by_sale_spec(
+                StockAdjustBySpecIn(
+                    farm_cd=FARM,
+                    wh_cd="WH01",
+                    item_cd="FR010100",
+                    variety_cd="FR010101",
+                    grade_cd="GR010100",
+                    size_cd="FR020101",
+                    weight=15,
+                    harvest_year=2026,
+                    io_type=IO_TYPE_OUT,
+                    qty=8,
+                    reason_cd=REASON_DISPOSE,
+                ),
+                user_id="U1",
+            )
+        self.assertEqual(ctx.exception.code, "STOCK_UNAVAILABLE")
+
+    def test_by_spec_in_targets_newest_existing_lot(self) -> None:
+        from core.stock_adjust_service import StockAdjustBySpecIn
+
+        self.conn.execute(
+            """
+            INSERT INTO t_stock_master (
+                farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight,
+                harvest_year, storage_dt, in_qty, out_qty, reserved_qty, reg_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (FARM, "WH01", "FR010100", "FR010101", "GR010100", "FR020101", 15,
+             2026, "2026-08-20", 5, 0, 0, "T"),
+        )
+        self.conn.commit()
+        self.svc.adjust_by_sale_spec(
+            StockAdjustBySpecIn(
+                farm_cd=FARM,
+                wh_cd="WH01",
+                item_cd="FR010100",
+                variety_cd="FR010101",
+                grade_cd="GR010100",
+                size_cd="FR020101",
+                weight=15,
+                harvest_year=2026,
+                io_type=IO_TYPE_IN,
+                qty=4,
+                reason_cd=REASON_RETURN,
+            ),
+            user_id="U1",
+        )
+        rows = {
+            str(r["storage_dt"]): float(r["in_qty"])
+            for r in self.conn.execute(
+                "SELECT storage_dt, in_qty FROM t_stock_master WHERE farm_cd=?",
+                (FARM,),
+            ).fetchall()
+        }
+        self.assertEqual(rows["2026-08-01"], 10.0)
+        self.assertEqual(rows["2026-08-20"], 9.0)
+
 
 if __name__ == "__main__":
     unittest.main()

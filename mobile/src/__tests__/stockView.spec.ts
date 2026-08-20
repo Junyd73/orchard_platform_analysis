@@ -16,12 +16,14 @@ import type { StockItem } from '@/api/stock'
 const listFruitStock = vi.fn()
 const listStockLogs = vi.fn()
 const adjustStock = vi.fn()
+const adjustStockBySpec = vi.fn()
 const fetchCommonCodes = vi.fn()
 
 vi.mock('@/api/stock', () => ({
   listFruitStock: (...args: unknown[]) => listFruitStock(...args),
   listStockLogs: (...args: unknown[]) => listStockLogs(...args),
   adjustStock: (...args: unknown[]) => adjustStock(...args),
+  adjustStockBySpec: (...args: unknown[]) => adjustStockBySpec(...args),
 }))
 
 vi.mock('@/api/commonCodes', () => ({
@@ -132,12 +134,14 @@ describe('StockView', () => {
     listFruitStock.mockReset()
     listStockLogs.mockReset()
     adjustStock.mockReset()
+    adjustStockBySpec.mockReset()
     fetchCommonCodes.mockReset()
     vi.restoreAllMocks()
     listFruitStock.mockResolvedValue([stockRow()])
     listStockLogs.mockResolvedValue([])
     fetchCommonCodes.mockResolvedValue([])
     adjustStock.mockResolvedValue({ ok: true, qty: 1, io_type: 'OUT' })
+    adjustStockBySpec.mockResolvedValue({ ok: true, qty: 1, io_type: 'OUT' })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -565,7 +569,7 @@ describe('StockView', () => {
     expect(itemCds).toEqual(['FR010200', 'FR010201', 'FR010202'])
   })
 
-  it('T8 동일 판매규격 + 서로 다른 storage_dt → 집계 1행', async () => {
+  it('T1~T2 동일 판매규격 + 서로 다른 storage_dt → 집계 1행 · 합산 가용', async () => {
     listFruitStock.mockResolvedValue([
       stockRow({ storage_dt: '2026-08-01', available_qty: 10, real_qty: 10 }),
       stockRow({ storage_dt: '2026-08-20', available_qty: 15, real_qty: 15 }),
@@ -574,11 +578,27 @@ describe('StockView', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-testid="stock-sale-row"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="stock-row-available"]').text()).toContain('25박스')
+    expect(wrapper.text()).not.toContain('2026-08-01')
+    expect(wrapper.text()).not.toContain('2026-08-20')
+    expect(wrapper.text()).not.toContain('포장')
+    expect(wrapper.text()).not.toContain('저장일')
+    wrapper.unmount()
+  })
+
+  it('T5~T6 복수 source 클릭 시 날짜선택 Sheet 없음 · 조정 시트 직행', async () => {
+    listFruitStock.mockResolvedValue([
+      stockRow({ storage_dt: '2026-08-01', available_qty: 10, real_qty: 10 }),
+      stockRow({ storage_dt: '2026-08-20', available_qty: 15, real_qty: 15 }),
+    ])
+    const wrapper = mount(StockView, { global: { plugins: [router()], attachTo: document.body } })
+    await flushPromises()
     await wrapper.find('[data-testid="stock-sale-row"]').trigger('click')
     await flushPromises()
-    expect(document.querySelector('[data-testid="stock-adjust-pick"]')).toBeTruthy()
-    expect(document.querySelector('.stock-log-sheet')?.textContent).toContain('2026-08-01')
-    expect(document.querySelector('.stock-log-sheet')?.textContent).toContain('2026-08-20')
+    expect(document.querySelector('[data-testid="stock-adjust-pick"]')).toBeNull()
+    expect(document.body.textContent || '').not.toContain('포장/저장일별')
+    expect(document.body.textContent || '').not.toContain('조정할 재고 선택')
+    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
+    expect(document.querySelector('.stock-log-sheet')?.textContent || '').not.toContain('2026-08-01')
     wrapper.unmount()
   })
 
@@ -586,6 +606,25 @@ describe('StockView', () => {
     const wrapper = await openSheet()
     expect(document.querySelector('[data-testid="stock-adjust-pick"]')).toBeNull()
     expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('T8 상품 재고조정은 adjust-by-spec(storage_dt 미전송)', async () => {
+    const wrapper = await openSheet()
+    await setQty('2')
+    dirButtons().dec?.click()
+    await flushPromises()
+    expect(adjustStock).not.toHaveBeenCalled()
+    expect(adjustStockBySpec).toHaveBeenCalledWith(
+      'OR001',
+      expect.objectContaining({
+        item_cd: 'FR010100',
+        qty: 2,
+        io_type: 'OUT',
+      }),
+    )
+    const payload = adjustStockBySpec.mock.calls[0][1] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('storage_dt')
     wrapper.unmount()
   })
 
@@ -609,6 +648,7 @@ describe('StockView', () => {
     await flushPromises()
     expect(confirmSpy).not.toHaveBeenCalled()
     expect(adjustStock).not.toHaveBeenCalled()
+    expect(adjustStockBySpec).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -703,7 +743,7 @@ describe('StockView', () => {
   })
 
   it('T14 실패 시 sheet 유지', async () => {
-    adjustStock.mockRejectedValueOnce(new Error('boom'))
+    adjustStockBySpec.mockRejectedValueOnce(new Error('boom'))
     const wrapper = await openSheet()
     await setQty('2')
     dirButtons().dec?.click()

@@ -3,7 +3,7 @@ import { computed, inject, ref, unref, watch, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { listFruitStock, listStockLogs, adjustStock } from '@/api/stock'
+import { listFruitStock, listStockLogs, adjustStock, adjustStockBySpec } from '@/api/stock'
 import type { StockItem, StockLog } from '@/api/stock'
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { ApiClientError } from '@/api/client'
@@ -68,8 +68,8 @@ const appliedGrade = ref(FILTER_ALL)
 
 // 이력 모달
 const logTarget    = ref<StockItem | null>(null)
-/** 동일 판매규격에 storage_dt가 여러 개일 때 조정 대상 선택 */
-const adjustPickSources = ref<StockItem[] | null>(null)
+/** 조정 중인 목록 엔트리(집계 row + sources). 날짜 LOT 선택 UI 없음. */
+const adjustEntry  = ref<StockListEntry | null>(null)
 const logs         = ref<StockLog[]>([])
 const logsLoading  = ref(false)
 const logsError    = ref('')
@@ -283,10 +283,10 @@ async function loadAdjustReasons() {
   }
 }
 
-async function openAdjustSheet(item: StockItem) {
+async function openAdjustSheet(entry: StockListEntry) {
   // 조정 시트 진입 시에는 이력 API(listStockLogs)를 자동 호출하지 않습니다.
-  adjustPickSources.value = null
-  logTarget.value = item
+  adjustEntry.value = entry
+  logTarget.value = entry.row
   logs.value = []
   logsError.value = ''
   logsLoading.value = false
@@ -303,25 +303,9 @@ async function openAdjustSheet(item: StockItem) {
   syncDirectionForReason()
 }
 
-/**
- * 행 클릭 → 재고조정.
- * source 1건이면 바로 시트, 복수 storage_dt면 사용자 선택(자동 LOT 선택 금지).
- */
+/** 행 클릭 → 재고조정 (날짜/LOT 선택 단계 없음) */
 function onListRowClick(entry: StockListEntry) {
-  if (entry.sources.length <= 1) {
-    void openAdjustSheet(entry.sources[0] || entry.row)
-    return
-  }
-  adjustPickSources.value = entry.sources
-}
-
-function closeAdjustPick() {
-  adjustPickSources.value = null
-}
-
-function pickAdjustSource(item: StockItem) {
-  adjustPickSources.value = null
-  void openAdjustSheet(item)
+  void openAdjustSheet(entry)
 }
 
 async function openHistoryLogs() {
@@ -337,6 +321,7 @@ async function openHistoryLogs() {
   logs.value = []
   try {
     const item = logTarget.value
+    // storage_dt 필터 없음 — 규격 단위 이력 (t_stock_log에 storage_dt 컬럼 없음)
     logs.value = await listStockLogs(farmCd.value, {
       item_cd: item.item_cd,
       variety_cd: item.variety_cd,
@@ -344,7 +329,6 @@ async function openHistoryLogs() {
       size_cd: item.size_cd,
       weight: item.weight,
       harvest_year: item.harvest_year,
-      storage_dt: item.storage_dt,
     })
   } catch {
     logsError.value = '이력을 불러오지 못했습니다.'
@@ -443,7 +427,8 @@ function openSalesPreview() {
 
 async function requestAdjust(ioType: 'IN' | 'OUT') {
   const row = logTarget.value
-  if (!row || adjustBusy.value) return
+  const entry = adjustEntry.value
+  if (!row || !entry || adjustBusy.value) return
 
   adjustDirection.value = ioType
   adjustError.value = ''
@@ -475,31 +460,39 @@ async function requestAdjust(ioType: 'IN' | 'OUT') {
 
   adjustBusy.value = true
   try {
-    await adjustStock(farmCd.value, {
-      wh_cd: row.wh_cd,
-      item_cd: row.item_cd,
-      variety_cd: row.variety_cd,
-      grade_cd: row.grade_cd,
-      size_cd: row.size_cd,
-      weight: row.weight,
-      harvest_year: row.harvest_year,
-      storage_dt: row.storage_dt,
-      io_type: ioType,
-      qty,
-      reason_cd: adjustReason.value,
-    })
+    const isRaw = row.item_cd === ITEM_RAW
+    if (isRaw) {
+      const src = entry.sources[0] || row
+      await adjustStock(farmCd.value, {
+        wh_cd: src.wh_cd,
+        item_cd: src.item_cd,
+        variety_cd: src.variety_cd,
+        grade_cd: src.grade_cd,
+        size_cd: src.size_cd,
+        weight: src.weight,
+        harvest_year: src.harvest_year,
+        storage_dt: src.storage_dt,
+        io_type: ioType,
+        qty,
+        reason_cd: adjustReason.value,
+      })
+    } else {
+      await adjustStockBySpec(farmCd.value, {
+        wh_cd: row.wh_cd,
+        item_cd: row.item_cd,
+        variety_cd: row.variety_cd,
+        grade_cd: row.grade_cd,
+        size_cd: row.size_cd,
+        weight: row.weight,
+        harvest_year: row.harvest_year,
+        io_type: ioType,
+        qty,
+        reason_cd: adjustReason.value,
+      })
+    }
     await load()
-    const fresh = rows.value.find(
-      (r) =>
-        r.item_cd === row.item_cd &&
-        r.variety_cd === row.variety_cd &&
-        r.grade_cd === row.grade_cd &&
-        r.size_cd === row.size_cd &&
-        r.weight === row.weight &&
-        r.harvest_year === row.harvest_year &&
-        r.wh_cd === row.wh_cd &&
-        r.storage_dt === row.storage_dt,
-    )
+    const freshEntry = filteredEntries.value.find((e) => e.listKey === entry.listKey)
+    const fresh = freshEntry?.row
     const currentQty = fresh ? fresh.real_qty : after
     const title = fresh ? cardTitle(fresh) : cardTitle(row)
     pageSuccess.value =
@@ -514,7 +507,7 @@ async function requestAdjust(ioType: 'IN' | 'OUT') {
 
 function closeLog() {
   logTarget.value = null
-  adjustPickSources.value = null
+  adjustEntry.value = null
   historyOpen.value = false
   historyLoaded.value = false
   logs.value = []
@@ -870,41 +863,6 @@ const salesFabStyle = {
         >
           판매 미리보기
         </OdsButton>
-      </div>
-    </Teleport>
-
-    <!-- 동일규격 복수 storage_dt → 조정 대상 선택 (자동 LOT 선택 없음) -->
-    <Teleport to="body">
-      <div
-        v-if="adjustPickSources"
-        class="stock-log-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-label="재고 조정 대상 선택"
-        data-testid="stock-adjust-pick"
-        @click.self="closeAdjustPick"
-      >
-        <div class="stock-log-sheet">
-          <div class="stock-log-sheet__header">
-            <span class="stock-log-sheet__title">조정할 재고 선택</span>
-            <button type="button" class="stock-log-sheet__close" aria-label="닫기" @click="closeAdjustPick">✕</button>
-          </div>
-          <p class="stock-log-sheet__msg">포장/저장일별로 재고를 선택해 주세요.</p>
-          <ul class="stock-adjust-pick-list">
-            <li v-for="src in adjustPickSources" :key="`${src.storage_dt}_${src.wh_cd}`">
-              <button
-                type="button"
-                class="stock-adjust-pick-btn"
-                @click="pickAdjustSource(src)"
-              >
-                <span>{{ src.storage_dt || '일자 없음' }}</span>
-                <span>
-                  <strong>{{ src.available_qty }}</strong>{{ stockUnit(src.item_cd) }}
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
       </div>
     </Teleport>
 
@@ -1352,33 +1310,6 @@ const salesFabStyle = {
 }
 .stock-view__icon-btn--remove {
   color: var(--ods-color-danger, #c53030);
-}
-.stock-adjust-pick-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
-}
-.stock-adjust-pick-btn {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--ods-space-8);
-  min-height: 44px;
-  padding: var(--ods-space-8) var(--ods-space-12);
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-white, #fff);
-  font: var(--ods-font-body-2);
-  color: var(--ods-color-text);
-  cursor: pointer;
-  text-align: left;
-}
-.stock-adjust-pick-btn strong {
-  color: var(--ods-color-primary);
 }
 .stock-view__batch {
   /* App 탭 캐러셀 transform 밖(body Teleport)에서 viewport 기준 fixed */

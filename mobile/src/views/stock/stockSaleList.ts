@@ -31,7 +31,7 @@ export function aggregateSaleStockSources(sources: StockItem[]): StockItem {
 
 /**
  * 상품/배즙: 판매규격(storage_dt 제외)으로 집계.
- * 원물: storage_dt별 개별 행 유지(조정 대상 명확).
+ * 원물: storage_dt별 개별 행 유지(생산 원료 LOT 추적 — 화면에는 일자 미표시).
  */
 export function buildStockListEntries(rows: StockItem[], opts: { raw: boolean }): StockListEntry[] {
   if (opts.raw) {
