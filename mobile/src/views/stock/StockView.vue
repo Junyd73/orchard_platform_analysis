@@ -826,6 +826,7 @@ function formatRegDt(dt: string) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: var(--ods-space-8);
 }
 .stock-log-sheet__title {
   font: var(--ods-font-heading-5, var(--ods-font-title-3, var(--ods-font-body-1)));
@@ -892,7 +893,8 @@ function formatRegDt(dt: string) {
 }
 .stock-log-adjust {
   border-top: 1px solid var(--ods-color-border);
-  padding-top: var(--ods-space-10);
+  padding-top: var(--ods-space-16);
+  margin-top: var(--ods-space-4);
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-8);
