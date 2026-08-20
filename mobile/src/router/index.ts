@@ -137,6 +137,11 @@ const router = createRouter({
       name: 'ship-confirm',
       component: () => import('@/views/sales/ShipConfirmView.vue'),
     },
+    {
+      path: '/orders/sales-preview',
+      name: 'sales-preview',
+      component: () => import('@/views/sales/SalesPreviewView.vue'),
+    },
     { path: '/orders/new', name: 'order-new', component: OrderNewView },
     {
       path: '/orders/:orderNo/edit',

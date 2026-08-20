@@ -3,14 +3,14 @@ import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import StockView from '@/features/stock/StockView.vue'
-import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
+import StockView from '@/views/stock/StockView.vue'
+import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import {
   REASON_COUNT_DIFF,
   REASON_DISPOSE,
   REASON_OTHER,
   REASON_RETURN,
-} from '@/features/stock/stockAdjustConstants'
+} from '@/views/stock/stockAdjustConstants'
 
 const listFruitStock = vi.fn()
 const listStockLogs = vi.fn()
@@ -33,6 +33,7 @@ function router() {
     routes: [
       { path: '/orders', name: 'orders', component: { template: '<div />' } },
       { path: '/orders/ship', name: 'ship-confirm', component: { template: '<div />' } },
+      { path: '/orders/sales-preview', name: 'sales-preview', component: { template: '<div />' } },
     ],
   })
 }
@@ -104,7 +105,7 @@ describe('StockView', () => {
     expect(wrapper.text()).not.toMatch(/가용(?!\d)/)
   })
 
-  it('T1~T4 목록 1행 구조: 체크/상품정보/가용수량/판매', async () => {
+  it('T1~T4 목록 1행 구조: 체크/상품정보/가용수량 (개별 판매 없음)', async () => {
     const wrapper = mount(StockView, { global: { plugins: [router()] } })
     await flushPromises()
     const row = wrapper.find('.stock-view__row')
@@ -112,9 +113,8 @@ describe('StockView', () => {
     expect(row.find('.stock-view__pick input').exists()).toBe(true)
     expect(row.find('.stock-view__row-title').text()).toContain('신고 · 15kg · 25과 · 특')
     expect(row.find('.stock-view__row-qty').text()).toContain('10박스')
-    expect(row.find('.stock-view__sell').exists()).toBe(true)
+    expect(row.find('.stock-view__sell').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('현재 10')
-    expect(wrapper.find('.stock-view__qty-lbl').exists()).toBe(false)
   })
 
   it('T8 체크 클릭은 선택만 하고 조정 시트를 열지 않음', async () => {
@@ -127,17 +127,20 @@ describe('StockView', () => {
     wrapper.unmount()
   })
 
-  it('T9 판매 클릭은 판매 진입만 하고 조정 시트를 열지 않음', async () => {
+  it('P1 선택 후 판매 미리보기 진입', async () => {
     const r = router()
     await r.push('/orders')
     await r.isReady()
-    const wrapper = mount(StockView, { global: { plugins: [r], attachTo: document.body } })
+    const wrapper = mount(StockView, { global: { plugins: [r] } })
     await flushPromises()
-    await wrapper.find('.stock-view__sell').trigger('click')
+    await wrapper.find('.stock-view__pick input').trigger('click')
     await flushPromises()
-    expect(document.querySelector('.stock-log-sheet')).toBeNull()
+    await wrapper.get('.stock-view__batch button').trigger('click')
+    await flushPromises()
+    expect(r.currentRoute.value.name).toBe('sales-preview')
     const store = useSalesPrefillStore()
     expect(store.shipLines).toHaveLength(1)
+    expect(store.shipLines[0].qty).toBe(1)
     wrapper.unmount()
   })
 
@@ -147,7 +150,7 @@ describe('StockView', () => {
     wrapper.unmount()
   })
 
-  it('T12 소진 재고는 판매/선택 불가', async () => {
+  it('T12 소진 재고는 선택 불가', async () => {
     listFruitStock.mockResolvedValue([
       {
         farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
@@ -160,7 +163,6 @@ describe('StockView', () => {
     ])
     const wrapper = mount(StockView, { global: { plugins: [router()] } })
     await flushPromises()
-    expect(wrapper.find('.stock-view__sell').exists()).toBe(false)
     expect(wrapper.find('.stock-view__pick input').exists()).toBe(false)
     expect(wrapper.text()).toContain('0박스')
   })
@@ -186,21 +188,16 @@ describe('StockView', () => {
     expect(itemCds).toEqual(['FR010200', 'FR010201', 'FR010202'])
   })
 
-  it('상품 카드 판매는 규격만 넘기고 stock_seq 없음', async () => {
+  it('상품 카드 판매 경로는 제거하고 미리보기 통합', async () => {
     const r = router()
     await r.push('/orders')
     await r.isReady()
     const wrapper = mount(StockView, { global: { plugins: [r] } })
     await flushPromises()
-    const store = useSalesPrefillStore()
-    await wrapper.find('.stock-view__sell').trigger('click')
-    expect(store.shipLines[0].variety_cd).toBe('FR010101')
-    expect(JSON.stringify(store.shipLines[0])).not.toContain('stock_seq')
-    expect(store.shipMode).toBe('DIRECT')
-    expect(store.orderNo).toBeNull()
+    expect(wrapper.find('.stock-view__sell').exists()).toBe(false)
   })
 
-  it('선택 판매는 여러 재고를 한 번에 담는다', async () => {
+  it('선택 다건은 판매 미리보기 draft에 병합한다', async () => {
     listFruitStock.mockResolvedValue([
       {
         farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
@@ -211,11 +208,11 @@ describe('StockView', () => {
         in_qty: 10, out_qty: 0, real_qty: 10, reserved_qty: 0, available_qty: 10,
       },
       {
-        farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010202', item_nm: '순배즙',
+        farm_cd: 'OR001', wh_cd: 'WH01', item_cd: 'FR010100', item_nm: '배 상품',
         variety_cd: 'FR010101', variety_nm: '신고',
-        grade_cd: 'NONE', grade_nm: '',
-        size_cd: 'SZ010100', size_nm: '5kg',
-        weight: 30, harvest_year: 2026, storage_dt: '2026-08-19',
+        grade_cd: 'GR010200', grade_nm: '상',
+        size_cd: 'FR020102', size_nm: '30과',
+        weight: 15, harvest_year: 2026, storage_dt: '2026-08-19',
         in_qty: 5, out_qty: 0, real_qty: 5, reserved_qty: 0, available_qty: 5,
       },
     ])
@@ -225,13 +222,17 @@ describe('StockView', () => {
     const wrapper = mount(StockView, { global: { plugins: [r] } })
     await flushPromises()
     const boxes = wrapper.findAll('.stock-view__pick input')
+    expect(boxes).toHaveLength(2)
     await boxes[0].trigger('click')
     await boxes[1].trigger('click')
     await flushPromises()
     await wrapper.get('.stock-view__batch button').trigger('click')
+    await flushPromises()
     const store = useSalesPrefillStore()
     expect(store.shipLines).toHaveLength(2)
-    expect(store.shipLines[1].item_cd).toBe('FR010202')
+    expect(store.shipLines.map((l) => l.grade_cd).sort()).toEqual(['GR010100', 'GR010200'])
+    expect(r.currentRoute.value.name).toBe('sales-preview')
+    wrapper.unmount()
   })
 
   it('조정 시트: 헤더 단순화 + summary 제거 + 수량 min=1', async () => {

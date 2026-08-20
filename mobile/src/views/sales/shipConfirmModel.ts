@@ -44,6 +44,8 @@ export type ShipDraftLine = {
   weight: number
   harvest_year: number
   wh_cd: string
+  storage_dt?: string
+  available_qty?: number
   qty: number
   unit_price: number
   remaining_qty: number | null
@@ -52,6 +54,23 @@ export type ShipDraftLine = {
   grade_nm?: string
   size_nm?: string
   item_nm?: string
+}
+
+/** 재고 draft 중복 판별 키 (storage_dt 포함) */
+export function stockDraftKey(ln: Pick<
+  ShipDraftLine,
+  'item_cd' | 'variety_cd' | 'grade_cd' | 'size_cd' | 'weight' | 'harvest_year' | 'wh_cd' | 'storage_dt'
+>): string {
+  return [
+    ln.item_cd,
+    ln.variety_cd,
+    ln.grade_cd,
+    ln.size_cd,
+    String(ln.weight),
+    String(ln.harvest_year),
+    ln.storage_dt || '',
+    ln.wh_cd,
+  ].join('|')
 }
 
 export function canUseStockMode(lines: ShipDraftLine[]): boolean {
@@ -84,6 +103,13 @@ export function buildShipConfirmRequest(input: {
   orderNo: string | null
   custmId: string | null
   lines: ShipDraftLine[]
+  rmk?: string
+  dlvryTp?: string
+  shipFee?: number
+  rcvName?: string
+  rcvTel?: string
+  rcvAddr?: string
+  dlvryMsg?: string
 }): ShipConfirmRequest {
   const lines: ShipConfirmLine[] = input.lines.map((ln) => ({
     qty: Number(ln.qty),
@@ -102,6 +128,13 @@ export function buildShipConfirmRequest(input: {
     sales_dt: input.salesDt,
     order_no: input.orderNo,
     custm_id: input.custmId,
+    rmk: input.rmk || '',
+    dlvry_tp: input.dlvryTp || '',
+    ship_fee: Number(input.shipFee) || 0,
+    rcv_name: input.rcvName || '',
+    rcv_tel: input.rcvTel || '',
+    rcv_addr: input.rcvAddr || '',
+    dlvry_msg: input.dlvryMsg || '',
     lines,
   }
 }
@@ -111,6 +144,12 @@ export function findShipQtyIssue(lines: ShipDraftLine[]): string {
     if (!(Number(ln.qty) > 0)) return MSG_QTY_INVALID
     if (ln.remaining_qty != null && Number(ln.qty) > Number(ln.remaining_qty) + 1e-9) {
       return MSG_QTY_OVER_REMAINING
+    }
+    if (
+      ln.available_qty != null
+      && Number(ln.qty) > Number(ln.available_qty) + 1e-9
+    ) {
+      return '가용재고보다 많이 판매할 수 없습니다.'
     }
   }
   return ''

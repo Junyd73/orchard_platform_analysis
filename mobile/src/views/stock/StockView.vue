@@ -10,15 +10,15 @@ import { ApiClientError } from '@/api/client'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
-import { useAppStore } from '@/shared/stores/app'
-import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
+import { useAppStore } from '@/composables/stores/app'
+import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import {
   ADJUST_REASON_OPTIONS,
   PARENT_ADJUST_REASON,
   REASON_DISPOSE,
   reasonAllowsIn,
   reasonAllowsOut,
-} from '@/features/stock/stockAdjustConstants'
+} from '@/views/stock/stockAdjustConstants'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
 const ITEM_PRODUCT = 'FR010100'
@@ -277,15 +277,19 @@ function sellSelected() {
     (r) => isSellable(r) && selectedKeys.value.includes(rowKey(r)),
   )
   if (!rows.length) return
-  salesPrefill.setFromStockRows(rows)
+  salesPrefill.mergeFromStockRows(rows)
   selectedKeys.value = []
-  void router.push({ name: 'ship-confirm' })
+  void router.push({ name: 'sales-preview' })
 }
 
-function sellProduct(row: StockItem) {
-  if (!isSellable(row)) return
-  salesPrefill.setFromStock(row)
-  void router.push({ name: 'ship-confirm' })
+function openSalesPreview() {
+  if (selectedKeys.value.length) {
+    sellSelected()
+    return
+  }
+  if (salesPrefill.shipLines.length) {
+    void router.push({ name: 'sales-preview' })
+  }
 }
 
 async function requestAdjust(ioType: 'IN' | 'OUT') {
@@ -486,22 +490,25 @@ function formatRegDt(dt: string) {
         >
           <strong>{{ row.available_qty }}</strong>{{ stockUnit(row.item_cd) }}
         </span>
-
-        <OdsButton
-          v-if="isSellable(row)"
-          type="button"
-          variant="secondary"
-          :block="false"
-          class="stock-view__sell"
-          @click.stop="sellProduct(row)"
-        >
-          판매
-        </OdsButton>
-        <span v-else class="stock-view__sell-spacer" aria-hidden="true" />
+        <span
+          v-if="salesPrefill.hasDraftKey(rowKey(row))"
+          class="stock-view__draft-badge"
+        >판매예정</span>
       </div>
     </div>
-    <div v-if="selectedKeys.length" class="stock-view__batch">
-      <OdsButton type="button" @click="sellSelected">선택 {{ selectedKeys.length }}건 판매</OdsButton>
+    <div
+      v-if="selectedKeys.length || salesPrefill.shipLines.length"
+      class="stock-view__batch"
+    >
+      <span class="stock-view__batch-count">
+        선택 {{ selectedKeys.length }}건
+        <template v-if="salesPrefill.shipLines.length">
+          · draft {{ salesPrefill.shipLines.length }}건
+        </template>
+      </span>
+      <OdsButton type="button" :block="false" @click="openSalesPreview">
+        판매 미리보기
+      </OdsButton>
     </div>
 
     <!-- 재고 이력 bottom sheet -->
@@ -767,23 +774,32 @@ function formatRegDt(dt: string) {
   accent-color: var(--ods-color-primary);
   cursor: pointer;
 }
-.stock-view__pick-spacer,
-.stock-view__sell-spacer {
+.stock-view__pick-spacer {
   width: 20px;
   height: 1px;
 }
-.stock-view__sell-spacer {
-  width: 52px;
-}
-.stock-view__sell {
-  margin-top: 0;
-  min-height: 32px;
-  padding: var(--ods-space-4) var(--ods-space-8);
+.stock-view__draft-badge {
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-primary);
   white-space: nowrap;
 }
 .stock-view__batch {
   position: sticky;
   bottom: var(--ods-space-8);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-8) var(--ods-space-12);
+  background: var(--ods-color-white, #fff);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-card);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+}
+.stock-view__batch-count {
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text);
 }
 
 /* ── 이력 bottom sheet ────────────────────────────────────────────── */

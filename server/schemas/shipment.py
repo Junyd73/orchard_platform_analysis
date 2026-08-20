@@ -31,6 +31,12 @@ class ShipConfirmRequest(BaseModel):
     order_no: str | None = None
     custm_id: str | None = None
     rmk: str = ""
+    dlvry_tp: str = ""
+    ship_fee: float = Field(0.0, ge=0)
+    rcv_name: str = ""
+    rcv_tel: str = ""
+    rcv_addr: str = ""
+    dlvry_msg: str = ""
     lines: list[ShipLineRequest] = Field(min_length=1)
 
 

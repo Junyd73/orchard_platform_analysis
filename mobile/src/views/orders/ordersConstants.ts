@@ -177,6 +177,8 @@ export const ITEM_MID_SUFFIX = '00'
 
 export const DELIVERY_TP_VISIT = 'LO010100'
 export const DELIVERY_TP_PARCEL = 'LO010200'
+export const DELIVERY_TP_CARGO = 'LO010300'
+export const DELIVERY_TP_DIRECT = 'LO010400'
 export const DEFAULT_WAREHOUSE_CD = 'WH01'
 
 const WEIGHT_NUM_RE = /(\d+(?:\.\d+)?)/

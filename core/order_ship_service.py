@@ -82,6 +82,12 @@ class ShipConfirmIn:
     custm_id: str | None = None
     user_id: str = "SYSTEM"
     rmk: str = ""
+    dlvry_tp: str = ""
+    ship_fee: float = 0.0
+    rcv_name: str = ""
+    rcv_tel: str = ""
+    rcv_addr: str = ""
+    dlvry_msg: str = ""
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -222,6 +228,9 @@ class OrderShipService:
 
         sales_no = generate_sales_no(cur, farm, sales_dt)
         tot_item = sum(_as_float(s["qty"]) * _as_float(s["unit_price"]) for s in splits)
+        ship_fee = max(0.0, _as_float(getattr(payload, "ship_fee", 0) or 0))
+        tot_sales = tot_item + ship_fee
+        dlvry_tp = str(getattr(payload, "dlvry_tp", "") or "").strip()
         self._insert_sales_master(
             cur,
             farm=farm,
@@ -230,6 +239,8 @@ class OrderShipService:
             order_no=order_no,
             custm_id=custm_id,
             tot_item=tot_item,
+            tot_ship_fee=ship_fee,
+            tot_sales=tot_sales,
             rmk=str(payload.rmk or ""),
             user_id=user_id,
             now_dt=now_dt,
@@ -238,12 +249,30 @@ class OrderShipService:
         stock_effects: list[dict[str, Any]] = []
         for idx, sp in enumerate(splits, start=1):
             det_no = f"{sales_no}-S{idx:0{SALES_DETAIL_SEQ_LEN}d}"
+            # 1판매=1배송비: 첫 detail에만 ship_fee 부여
+            line_ship_fee = ship_fee if idx == 1 else 0.0
             self._insert_sales_detail(
-                cur, farm=farm, sales_no=sales_no, det_no=det_no, split=sp,
-                user_id=user_id, now_dt=now_dt,
+                cur,
+                farm=farm,
+                sales_no=sales_no,
+                det_no=det_no,
+                split=sp,
+                dlvry_tp=dlvry_tp,
+                ship_fee=line_ship_fee,
+                user_id=user_id,
+                now_dt=now_dt,
             )
             self._insert_stock_log(
                 cur, farm=farm, det_no=det_no, split=sp, user_id=user_id, now_dt=now_dt,
+            )
+            self._insert_sales_delivery(
+                cur,
+                farm=farm,
+                sales_no=sales_no,
+                det_no=det_no,
+                qty=_as_float(sp["qty"]),
+                payload=payload,
+                user_id=user_id,
             )
             detail_rows.append(
                 {
@@ -655,21 +684,26 @@ class OrderShipService:
         order_no: str | None,
         custm_id: str | None,
         tot_item: float,
+        tot_ship_fee: float = 0.0,
+        tot_sales: float | None = None,
         rmk: str,
         user_id: str,
         now_dt: str,
     ) -> None:
+        sales_amt = tot_item if tot_sales is None else float(tot_sales)
+        unpaid = sales_amt
         cur.execute(
             """
             INSERT INTO t_sales_master (
                 sales_no, farm_cd, sales_dt, sales_tp, custm_id,
                 tot_sales_amt, tot_ship_fee, tot_item_amt, tot_paid_amt, tot_unpaid_amt,
                 status_cd, rmk, reg_id, reg_dt, order_no, sales_status, sales_source
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, '10', ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '10', ?, ?, ?, ?, ?, ?)
             """,
             (
                 sales_no, farm, sales_dt, "NORMAL", custm_id,
-                tot_item, tot_item, tot_item, rmk, user_id, now_dt,
+                sales_amt, float(tot_ship_fee or 0), tot_item, unpaid,
+                rmk, user_id, now_dt,
                 order_no, SALES_STATUS_CONFIRMED, SALES_SOURCE_ORDER,
             ),
         )
@@ -682,6 +716,8 @@ class OrderShipService:
         sales_no: str,
         det_no: str,
         split: dict[str, Any],
+        dlvry_tp: str = "",
+        ship_fee: float = 0.0,
         user_id: str,
         now_dt: str,
     ) -> None:
@@ -691,6 +727,28 @@ class OrderShipService:
         seq = split.get("stock_seq")
         if seq is None:
             raise ShipError(MSG_SCHEMA_PRECONDITION, code="SCHEMA_PRECONDITION")
+        has_dlvry = _column_exists(cur, "t_sales_detail", "dlvry_tp")
+        has_ship_fee = _column_exists(cur, "t_sales_detail", "ship_fee")
+        if has_dlvry and has_ship_fee:
+            cur.execute(
+                """
+                INSERT INTO t_sales_detail (
+                    sale_detail_no, sales_no, farm_cd, item_cd, variety_cd,
+                    grade_cd, size_cd, qty, unit_price, tot_item_amt,
+                    ship_fee, tot_sale_amt, order_detail_id, wh_cd, stock_seq,
+                    dlvry_tp, reg_id, reg_dt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    det_no, sales_no, farm, split["item_cd"], split["variety_cd"],
+                    split["grade_cd"], split["size_cd"], qty, price, amt,
+                    float(ship_fee or 0), amt + float(ship_fee or 0),
+                    split.get("order_detail_id"), split["wh_cd"], int(seq),
+                    str(dlvry_tp or "") or None,
+                    user_id, now_dt,
+                ),
+            )
+            return
         cur.execute(
             """
             INSERT INTO t_sales_detail (
@@ -704,6 +762,40 @@ class OrderShipService:
                 split["grade_cd"], split["size_cd"], qty, price, amt, amt,
                 split.get("order_detail_id"), split["wh_cd"], int(seq),
                 user_id, now_dt,
+            ),
+        )
+
+    def _insert_sales_delivery(
+        self,
+        cur: sqlite3.Cursor,
+        *,
+        farm: str,
+        sales_no: str,
+        det_no: str,
+        qty: float,
+        payload: ShipConfirmIn,
+        user_id: str,
+    ) -> None:
+        if not _table_exists(cur, "t_sales_delivery"):
+            return
+        rcv_name = str(getattr(payload, "rcv_name", "") or "").strip()
+        rcv_tel = str(getattr(payload, "rcv_tel", "") or "").strip()
+        rcv_addr = str(getattr(payload, "rcv_addr", "") or "").strip()
+        dlvry_msg = str(getattr(payload, "dlvry_msg", "") or "").strip()
+        if not (rcv_name or rcv_tel or rcv_addr or dlvry_msg):
+            return
+        dlvry_no = f"{det_no}-D001"
+        cur.execute(
+            """
+            INSERT INTO t_sales_delivery (
+                dlvry_no, sale_detail_no, sales_no, farm_cd,
+                rcv_name, rcv_tel, rcv_addr, dlvry_qty, dlvry_msg, reg_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dlvry_no, det_no, sales_no, farm,
+                rcv_name or None, rcv_tel or None, rcv_addr or None,
+                qty, dlvry_msg or None, user_id,
             ),
         )
 

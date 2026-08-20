@@ -38,6 +38,12 @@ def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfir
         custm_id=body.custm_id,
         user_id=user_id,
         rmk=body.rmk,
+        dlvry_tp=getattr(body, "dlvry_tp", "") or "",
+        ship_fee=float(getattr(body, "ship_fee", 0) or 0),
+        rcv_name=getattr(body, "rcv_name", "") or "",
+        rcv_tel=getattr(body, "rcv_tel", "") or "",
+        rcv_addr=getattr(body, "rcv_addr", "") or "",
+        dlvry_msg=getattr(body, "dlvry_msg", "") or "",
         lines=[
             ShipLineIn(
                 qty=ln.qty,

@@ -21,6 +21,12 @@ export type ShipConfirmRequest = {
   order_no?: string | null
   custm_id?: string | null
   rmk?: string
+  dlvry_tp?: string
+  ship_fee?: number
+  rcv_name?: string
+  rcv_tel?: string
+  rcv_addr?: string
+  dlvry_msg?: string
   lines: ShipConfirmLine[]
 }
 

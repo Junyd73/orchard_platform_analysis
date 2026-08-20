@@ -7,8 +7,8 @@
 | 항목 | SHA / 브랜치 |
 |------|----------------|
 | base | `c6e5edb93fa5234b7314ea9135aa48204138461d` (`main`) |
-| feature | `a8bd39a3edb8feaf502c234c3ae181315028dc5d` (fix: remainder + STOCK consistency) |
-| prior feature | `6f74eb5628fedb12759ef1d5954b6d007841154a` |
+| feature | `7bc54293df34e1bcbfdc5f6f7de4bb4089610ffa` (feat: sales preview workflow) |
+| prior feature | `a8bd39a3edb8feaf502c234c3ae181315028dc5d` |
 | branch | `cursor/stage6-ship-stock-ux` |
 
 ## Review branch 목적
@@ -149,3 +149,20 @@ ui/pages/stock_page.py
 ```
 
 ※ analysis mirror 경로 매핑: `features`→`views`, `shared/stores`→`composables/stores`, `server/app/*`→`server/*`
+
+## 보완 2단계 — 판매 미리보기 (2026-08-20)
+
+| 항목 | 값 |
+|------|-----|
+| private branch | `cursor/stage6-ship-stock-ux` |
+| private SHA | `7bc54293df34e1bcbfdc5f6f7de4bb4089610ffa` |
+| 범위 | 재고 다건선택 → 판매미리보기 → DIRECT 확정 (1고객·1배송·N품목) |
+| 제외 | 다배송지 / 부분배송 / Stage 7 / main merge |
+
+### 핵심 파일
+
+- `mobile/src/views/stock/StockView.vue` — 개별 판매 제거, sticky 판매미리보기, 판매예정 표시
+- `mobile/src/views/sales/SalesPreviewView.vue` — 신규 미리보기 화면
+- `mobile/src/composables/stores/salesPrefill.ts` — draft 병합·유지·삭제
+- `core/order_ship_service.py` — `tot_ship_fee` / `dlvry_tp` / `t_sales_delivery` 저장
+- `server/schemas/shipment.py`, `server/services/order_ship_api_service.py` — 배송 필드 전달
