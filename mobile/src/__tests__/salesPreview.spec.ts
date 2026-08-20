@@ -108,6 +108,20 @@ describe('SalesPreviewView 2B', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
+  it('T1~T2 모바일 프레임 class · footer fixed 구조', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 1)
+    const { wrapper } = await mountPreview()
+    expect(wrapper.find('[data-testid="sales-preview-page"]').classes()).toContain('sales-preview-frame')
+    const frame = wrapper.find('[data-testid="sales-preview-frame"]')
+    expect(frame.classes()).toContain('ods-page-content')
+    expect(frame.classes()).toContain('content')
+    const footer = wrapper.find('[data-testid="sales-preview-footer"]')
+    expect(footer.exists()).toBe(true)
+    expect(footer.classes()).toContain('footer')
+    wrapper.unmount()
+  })
+
   it('T1~T2 카드형 품목 UI 없음 · divider 리스트', async () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock(), 2)

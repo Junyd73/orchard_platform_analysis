@@ -258,8 +258,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page" data-testid="sales-preview-page">
-    <main class="content ods-page-content">
+  <div class="page sales-preview-frame" data-testid="sales-preview-page">
+    <main class="content ods-page-content" data-testid="sales-preview-frame">
       <OdsAppBar :show-back="true" back-fallback="orders" />
 
       <h2 class="title">{{ LABEL_PAGE }}</h2>
@@ -483,17 +483,31 @@ onMounted(async () => {
 
 <style scoped>
 .page {
+  /* OdsBottomNav: min-height 56 + pad 8+8 + safe-area (SalesPreview 전용, Nav 미수정) */
+  --sales-preview-nav-h: calc(
+    var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
+      + env(safe-area-inset-bottom, 0px)
+  );
+  --sales-preview-footer-h: 4.75rem;
+  --sales-preview-footer-gap: var(--ods-space-8);
+  --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   min-height: 100%;
+  width: 100%;
   background: var(--ods-color-bg, #FDFBF7);
   overflow-x: hidden;
+  box-sizing: border-box;
 }
 .content {
-  display: flex;
-  flex-direction: column;
+  /* .ods-page-content: max-width 480 + 중앙 정렬 — 덮어쓰지 않음 */
   gap: var(--ods-space-12);
-  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
-  max-width: 100%;
+  width: 100%;
+  max-width: var(--sales-preview-frame-max);
+  margin-inline: auto;
+  box-sizing: border-box;
   min-width: 0;
+  padding-bottom: calc(
+    var(--sales-preview-nav-h) + var(--sales-preview-footer-h) + var(--sales-preview-footer-gap)
+  );
 }
 .title {
   margin: 0;
@@ -657,15 +671,20 @@ onMounted(async () => {
 }
 
 .footer {
-  position: sticky;
-  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-  z-index: 5;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--sales-preview-nav-h);
+  z-index: 40;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--ods-space-8);
   align-items: center;
-  margin: 0 calc(-1 * var(--ods-space-16, 16px));
-  padding: var(--ods-space-10) var(--ods-space-16);
+  width: 100%;
+  max-width: var(--sales-preview-frame-max);
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: var(--ods-space-10) var(--ods-page-padding-x, var(--ods-space-16));
   background: var(--ods-color-bg-muted, #f5f2ec);
   border-top: 1px solid var(--ods-color-border);
   box-shadow: none;
