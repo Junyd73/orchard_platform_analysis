@@ -101,21 +101,24 @@ function syncDirectionForReason() {
 const previewWarnOut = computed(() => {
   if (!logTarget.value) return false
   if (adjustDirection.value !== 'OUT') return false
-  if (!(adjustQtyNum.value > 0)) return false
+  if (!(adjustQtyNum.value >= 1)) return false
   return adjustQtyNum.value > logTarget.value.available_qty + 1e-9
 })
+
+const hasValidAdjustQty = computed(() => Number.isFinite(adjustQtyNum.value) && adjustQtyNum.value >= 1)
 
 const previewAfterQty = computed(() => {
   if (!logTarget.value) return 0
   const curr = Number(logTarget.value.real_qty || 0)
-  const qty = Math.max(0, Number.isFinite(adjustQtyNum.value) ? adjustQtyNum.value : 0)
+  const qty = hasValidAdjustQty.value ? adjustQtyNum.value : 0
   return adjustDirection.value === 'IN' ? curr + qty : curr - qty
 })
 
 const previewText = computed(() => {
   if (!logTarget.value) return ''
+  if (!hasValidAdjustQty.value) return '조정 수량은 1 이상 입력해 주세요.'
   const unit = stockUnit(logTarget.value.item_cd)
-  const qty = Number.isFinite(adjustQtyNum.value) ? adjustQtyNum.value : 0
+  const qty = adjustQtyNum.value
   const warn = previewWarnOut.value ? '\n(가용재고 초과)' : ''
   return `${adjustReasonLabel.value} · ${qty}${unit} ${adjustDirNm.value}\n현재 ${logTarget.value.real_qty}${unit} → 조정 후 ${previewAfterQty.value}${unit}${warn}`
 })
@@ -295,8 +298,8 @@ async function requestAdjust(ioType: 'IN' | 'OUT') {
   pageSuccess.value = ''
 
   const qty = adjustQtyNum.value
-  if (!Number.isFinite(qty) || !(qty > 0)) {
-    adjustError.value = '수량을 입력해 주세요.'
+  if (!Number.isFinite(qty) || qty < 1) {
+    adjustError.value = '조정 수량은 1 이상 입력해 주세요.'
     return
   }
 
@@ -521,12 +524,8 @@ function formatRegDt(dt: string) {
       >
         <div class="stock-log-sheet">
           <div class="stock-log-sheet__header">
-            <span class="stock-log-sheet__title">{{ cardTitle(logTarget) }} · 재고 조정</span>
+            <span class="stock-log-sheet__title">{{ cardTitle(logTarget) }}</span>
             <button type="button" class="stock-log-sheet__close" aria-label="닫기" @click="closeLog">✕</button>
-          </div>
-          <!-- 현재고 요약(조정 시트는 실행 중심) -->
-          <div v-if="logTarget" class="stock-log-sheet__summary">
-            <span>현재 {{ logTarget.real_qty }} · 배정 {{ logTarget.reserved_qty }} · 가용 {{ logTarget.available_qty }}</span>
           </div>
 
           <div v-if="logTarget" class="stock-log-adjust">
@@ -541,7 +540,7 @@ function formatRegDt(dt: string) {
               </div>
               <div class="stock-log-adjust__field stock-log-adjust__field--qty">
                 <p class="stock-log-adjust__lbl">조정 수량</p>
-                <OdsInput v-model="adjustQty" type="number" variant="form" bare />
+                <OdsInput v-model="adjustQty" type="number" min="1" step="1" inputmode="numeric" variant="form" bare />
               </div>
             </div>
 
@@ -825,9 +824,11 @@ function formatRegDt(dt: string) {
   align-items: center;
 }
 .stock-log-sheet__title {
-  font: var(--ods-font-body-1);
-  font-weight: 600;
+  font: var(--ods-font-heading-5, var(--ods-font-title-3, var(--ods-font-body-1)));
+  font-weight: 700;
   color: var(--ods-color-text);
+  text-align: left;
+  flex: 1;
 }
 .stock-log-sheet__close {
   padding: var(--ods-space-4);
@@ -845,13 +846,6 @@ function formatRegDt(dt: string) {
 }
 .stock-log-sheet__msg--err {
   color: var(--ods-color-danger);
-}
-.stock-log-sheet__summary {
-  border-top: 1px solid var(--ods-color-border);
-  padding-top: var(--ods-space-8);
-  font: var(--ods-font-footnote);
-  color: var(--ods-color-text-secondary);
-  text-align: right;
 }
 
 /* ── 이력 행 ──────────────────────────────────────────────────────── */
@@ -893,7 +887,7 @@ function formatRegDt(dt: string) {
 }
 .stock-log-adjust {
   border-top: 1px solid var(--ods-color-border);
-  padding-top: var(--ods-space-8);
+  padding-top: var(--ods-space-10);
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-8);

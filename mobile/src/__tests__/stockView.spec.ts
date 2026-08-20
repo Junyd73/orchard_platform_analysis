@@ -170,29 +170,108 @@ describe('StockView', () => {
     expect(store.shipLines[1].item_cd).toBe('FR010202')
   })
 
-  it('T1 폐기: 증가 disabled / 감소 enabled + 이력 자동조회 없음', async () => {
+  it('T1~T4 헤더 단순화 + summary 제거 + 수량 min=1', async () => {
     const wrapper = await openSheet()
+    const sheet = document.body.textContent || ''
+    expect(sheet).toContain('신고 · 15kg · 25과 · 특')
+    expect(sheet).not.toContain('신고 · 15kg · 25과 · 특 · 재고 조정')
+    expect(sheet).not.toContain('배정 0')
+    expect(sheet).not.toContain('가용 10')
     expect(listStockLogs).not.toHaveBeenCalled()
-    const { inc, dec } = dirButtons()
-    expect(inc?.disabled).toBe(true)
-    expect(dec?.disabled).toBe(false)
-    expect(document.body.textContent || '').toContain('감소')
-    expect(document.body.textContent || '').not.toContain('조정 적용')
     expect(document.querySelector('.stock-log-adjust__row')).toBeTruthy()
+
+    const qtyInput = document.querySelector('.stock-log-adjust input.ods-input') as HTMLInputElement | null
+    expect(qtyInput?.getAttribute('min')).toBe('1')
+    expect(qtyInput?.getAttribute('step')).toBe('1')
     wrapper.unmount()
   })
 
-  it('T2 반품: 증가 enabled / 감소 disabled', async () => {
+  it('T5 qty=0 차단 + API 호출 없음', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    confirmSpy.mockClear()
+    const wrapper = await openSheet()
+    await setQty('0')
+    dirButtons().dec?.click()
+    await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(adjustStock).not.toHaveBeenCalled()
+    expect(document.body.textContent || '').toContain('조정 수량은 1 이상 입력해 주세요.')
+    wrapper.unmount()
+  })
+
+  it('T6 qty=-1 차단 + 미리보기에 음수 반영 없음', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    confirmSpy.mockClear()
+    const wrapper = await openSheet()
+    await setQty('-1')
+    const sheetBefore = document.body.textContent || ''
+    expect(sheetBefore).toContain('조정 수량은 1 이상 입력해 주세요.')
+    expect(sheetBefore).not.toContain('폐기 · -1박스 감소')
+    dirButtons().dec?.click()
+    await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(adjustStock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('T7 qty=빈값 차단', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    confirmSpy.mockClear()
+    const wrapper = await openSheet()
+    await setQty('')
+    dirButtons().dec?.click()
+    await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(adjustStock).not.toHaveBeenCalled()
+    expect(document.body.textContent || '').toContain('조정 수량은 1 이상 입력해 주세요.')
+    wrapper.unmount()
+  })
+
+  it('T8 qty=3 + 감소 confirm 문구', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = await openSheet()
+    await setQty('3')
+    dirButtons().dec?.click()
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('3박스를 감소하시겠습니까?'))
+    expect(adjustStock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('T9 qty=3 + 증가 confirm 문구', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = await openSheet()
+    await setReason(REASON_RETURN)
+    await setQty('3')
+    dirButtons().inc?.click()
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('3박스를 증가하시겠습니까?'))
+    expect(adjustStock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('T10 폐기/파손/증정은 감소만 가능', async () => {
+    const wrapper = await openSheet()
+    const reasons = ['AD010101', 'AD010102', 'AD010103']
+    for (const reason of reasons) {
+      await setReason(reason)
+      const { inc, dec } = dirButtons()
+      expect(inc?.disabled).toBe(true)
+      expect(dec?.disabled).toBe(false)
+    }
+    wrapper.unmount()
+  })
+
+  it('T11 반품은 증가만 가능', async () => {
     const wrapper = await openSheet()
     await setReason(REASON_RETURN)
     const { inc, dec } = dirButtons()
     expect(inc?.disabled).toBe(false)
     expect(dec?.disabled).toBe(true)
-    expect(document.body.textContent || '').toContain('증가')
     wrapper.unmount()
   })
 
-  it('T3 실사차이/기타: 증가·감소 모두 enabled', async () => {
+  it('T12 실사차이/기타는 양방향 가능', async () => {
     const wrapper = await openSheet()
     await setReason(REASON_COUNT_DIFF)
     let btns = dirButtons()
@@ -205,76 +284,17 @@ describe('StockView', () => {
     wrapper.unmount()
   })
 
-  it('T4 사유 변경 시 금지 방향이 남지 않음', async () => {
+  it('T13 미리보기는 양수 수량만 사용', async () => {
     const wrapper = await openSheet()
-    await setReason(REASON_RETURN)
-    expect((document.body.textContent || '')).toContain('증가')
-    await setReason(REASON_DISPOSE)
+    await setQty('-3')
     const sheet = document.body.textContent || ''
-    expect(sheet).toContain('감소')
-    expect(sheet).not.toMatch(/폐기 · \d+박스 증가/)
-    const { inc, dec } = dirButtons()
-    expect(inc?.disabled).toBe(true)
-    expect(dec?.disabled).toBe(false)
+    expect(sheet).toContain('조정 수량은 1 이상 입력해 주세요.')
+    expect(sheet).not.toContain('조정 후 13박스')
+    expect(sheet).not.toContain('폐기 · -3박스 감소')
     wrapper.unmount()
   })
 
-  it('T5 폐기 + qty3 → 미리보기 감소 / 조정 후 7', async () => {
-    const wrapper = await openSheet()
-    await setQty('3')
-    const sheet = document.body.textContent || ''
-    expect(sheet).toContain('폐기 · 3박스 감소')
-    expect(sheet).toContain('조정 후 7박스')
-    wrapper.unmount()
-  })
-
-  it('T6 반품 + qty2 → 미리보기 증가 / 조정 후 12', async () => {
-    const wrapper = await openSheet()
-    await setReason(REASON_RETURN)
-    await setQty('2')
-    const sheet = document.body.textContent || ''
-    expect(sheet).toContain('반품 · 2박스 증가')
-    expect(sheet).toContain('조정 후 12박스')
-    wrapper.unmount()
-  })
-
-  it('T7~T9 confirm 후 adjustStock 호출 / 취소 시 미호출', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const wrapper = await openSheet()
-    await setQty('3')
-    const { dec } = dirButtons()
-    dec?.click()
-    await flushPromises()
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(adjustStock).not.toHaveBeenCalled()
-    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
-
-    confirmSpy.mockReturnValue(true)
-    confirmSpy.mockClear()
-    dec?.click()
-    await flushPromises()
-    expect(confirmSpy).toHaveBeenCalledTimes(1)
-    expect(adjustStock).toHaveBeenCalledTimes(1)
-    expect(adjustStock.mock.calls[0][1]).toMatchObject({ io_type: 'OUT', qty: 3, reason_cd: REASON_DISPOSE })
-    wrapper.unmount()
-  })
-
-  it('T10 OUT 초과 시 confirm/API 금지 + 오류 표시', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    confirmSpy.mockClear()
-    const wrapper = await openSheet()
-    await setQty('11')
-    const { dec } = dirButtons()
-    dec?.click()
-    await flushPromises()
-    expect(confirmSpy).not.toHaveBeenCalled()
-    expect(adjustStock).not.toHaveBeenCalled()
-    expect(document.body.textContent || '').toContain('가용재고보다 많이 줄일 수 없습니다')
-    expect(document.querySelector('.stock-log-sheet')).toBeTruthy()
-    wrapper.unmount()
-  })
-
-  it('T11 성공 시 목록 reload + sheet close + 메인 성공 메시지', async () => {
+  it('T14 성공 시 목록 reload + sheet close + 메인 성공 메시지', async () => {
     listFruitStock
       .mockResolvedValueOnce([
         {
@@ -309,7 +329,7 @@ describe('StockView', () => {
     wrapper.unmount()
   })
 
-  it('T12 실패 시 sheet 유지 + 입력값 유지', async () => {
+  it('T14 실패 시 sheet 유지 + 입력값 유지', async () => {
     adjustStock.mockRejectedValueOnce(new Error('boom'))
     const wrapper = await openSheet()
     await setQty('2')
