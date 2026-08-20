@@ -530,18 +530,23 @@ function formatRegDt(dt: string) {
 
           <div v-if="logTarget" class="stock-log-adjust">
             <div class="stock-log-adjust__row">
-              <div class="stock-log-adjust__field stock-log-adjust__field--reason">
-                <p class="stock-log-adjust__lbl">조정 사유</p>
-                <OdsSelect v-model="adjustReason" variant="form">
-                  <option v-for="r in adjustReasons" :key="r.value" :value="r.value">
-                    {{ r.label }}
-                  </option>
-                </OdsSelect>
-              </div>
-              <div class="stock-log-adjust__field stock-log-adjust__field--qty">
-                <p class="stock-log-adjust__lbl">조정 수량</p>
-                <OdsInput v-model="adjustQty" type="number" min="1" step="1" inputmode="numeric" variant="form" bare />
-              </div>
+              <p class="stock-log-adjust__lbl">조정 사유</p>
+              <OdsSelect v-model="adjustReason" variant="form" class="stock-log-adjust__reason">
+                <option v-for="r in adjustReasons" :key="r.value" :value="r.value">
+                  {{ r.label }}
+                </option>
+              </OdsSelect>
+              <OdsInput
+                v-model="adjustQty"
+                type="number"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                variant="form"
+                bare
+                class="stock-log-adjust__qty"
+                aria-label="조정 수량"
+              />
             </div>
 
             <div class="stock-log-adjust__btns">
@@ -894,15 +899,9 @@ function formatRegDt(dt: string) {
 }
 .stock-log-adjust__row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) minmax(72px, 88px);
   gap: var(--ods-space-8);
-  align-items: end;
-}
-.stock-log-adjust__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
-  min-width: 0;
+  align-items: center;
 }
 .stock-log-adjust__btns {
   display: flex;
@@ -915,12 +914,16 @@ function formatRegDt(dt: string) {
   font-size: var(--ods-font-size-body-2, 14px);
   font-weight: 700;
   color: var(--ods-color-text);
+  white-space: nowrap;
 }
-.stock-log-adjust__field :deep(.ods-select),
-.stock-log-adjust__field :deep(.ods-input) {
+.stock-log-adjust__row :deep(.ods-select),
+.stock-log-adjust__row :deep(.ods-input) {
   font: var(--ods-font-form-value, var(--ods-font-body-1));
   font-weight: 600;
   color: var(--ods-color-text);
+}
+.stock-log-adjust__row :deep(.stock-log-adjust__qty) {
+  text-align: center;
 }
 
 .stock-log-adjust__preview {
