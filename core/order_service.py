@@ -860,6 +860,21 @@ class OrderService:
             existing_cust = str(_row_val(row, "custm_id", 4) or "").strip()
             existing_pre_pay = _as_float(_row_val(row, "pre_pay_amt", 5))
             existing_rmk = str(_row_val(row, "rmk", 6) or "")
+            existing_method: str | None = None
+            if _column_exists(cur, "t_order_master", "pre_pay_method_cd"):
+                cur.execute(
+                    """
+                    SELECT pre_pay_method_cd
+                    FROM t_order_master
+                    WHERE farm_cd = ? AND order_no = ?
+                    """,
+                    (farm, no),
+                )
+                method_row = cur.fetchone()
+                existing_method = self._normalize_pre_pay_method(
+                    _row_val(method_row, "pre_pay_method_cd", 0) if method_row else None
+                )
+            incoming_method = self._normalize_pre_pay_method(payload.pre_pay_method_cd)
             if stock_status == "Y":
                 raise OrderValidationError("이미 출고 처리된 주문은 수정할 수 없습니다.")
             if sales_no:
@@ -905,12 +920,18 @@ class OrderService:
             if status_cd == ORDER_STATUS_CONFIRMED_CD:
                 if abs(float(payload.pre_pay_amt or 0) - existing_pre_pay) > _QTY_EPS:
                     raise OrderValidationError(MSG_ORDER_CONFIRMED_LIMITED)
+                # DEC-028: 기존 method 있으면 변경 금지. NULL→유효 method만 레거시 보완.
+                if existing_method is not None and incoming_method != existing_method:
+                    raise OrderValidationError(MSG_ORDER_CONFIRMED_LIMITED)
             if status_cd == ORDER_STATUS_PREP_CD:
                 if (
                     payload.custm_id.strip() != existing_cust
                     or abs(float(payload.pre_pay_amt or 0) - existing_pre_pay) > _QTY_EPS
                     or str(payload.rmk or "") != existing_rmk
                 ):
+                    raise OrderValidationError(MSG_ORDER_SHIP_ONLY)
+                # DEC-028: 기존 method 있으면 변경 금지. NULL→유효 method만 레거시 보완.
+                if existing_method is not None and incoming_method != existing_method:
                     raise OrderValidationError(MSG_ORDER_SHIP_ONLY)
             cur.execute(
                 "DELETE FROM t_order_delivery WHERE farm_cd = ? AND order_no = ?",

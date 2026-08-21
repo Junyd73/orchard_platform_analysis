@@ -145,6 +145,8 @@ const orderDt = ref(todayBizIso())
 const custmId = ref('')
 const prePay = ref('0')
 const prePayMethodCd = ref('')
+/** hydrate 시점의 저장된 결제수단. 레거시 NULL 보완 판정용. */
+const originalPrePayMethodCd = ref('')
 const payMethodOptions = ref<WorkLogAccountCodeOption[]>([])
 const rmk = ref('')
 const lines = ref<EditLine[]>([emptyLine()])
@@ -166,6 +168,18 @@ const harvestYear = computed(() => Number(todayBizIso().slice(0, 4)))
 const totalQty = computed(() => lines.value.reduce((sum, line) => sum + num(line.qty), 0))
 const totalAmt = computed(() => lines.value.reduce((sum, line) => sum + lineAmt(line), 0))
 const showPrePayMethod = computed(() => num(prePay.value) > 0)
+/** 확정/부분출고 + 선입금>0 + 저장 method 없음 → 결제수단만 1회 보완 가능 */
+const legacyMissingPrePayMethod = computed(
+  () =>
+    isEdit.value &&
+    num(prePay.value) > 0 &&
+    !originalPrePayMethodCd.value &&
+    (statusCd.value === ORDER_STATUS_CONFIRMED || statusCd.value === ORDER_STATUS_PREP),
+)
+/** 결제수단 잠금: 헤더 잠금이어도 레거시 보완이면 예외로 열림 */
+const lockPrePayMethod = computed(
+  () => editLocked.value || (lockHeaderCore.value && !legacyMissingPrePayMethod.value),
+)
 
 watch(prePay, (raw) => {
   if (num(raw) <= 0) {
@@ -479,7 +493,8 @@ async function hydrateOrder() {
   orderDt.value = detail.order_dt
   custmId.value = detail.custm_id
   prePay.value = String(detail.pre_pay_amt ?? 0)
-  prePayMethodCd.value = String(detail.pre_pay_method_cd || '')
+  originalPrePayMethodCd.value = String(detail.pre_pay_method_cd || '')
+  prePayMethodCd.value = originalPrePayMethodCd.value
   rmk.value = detail.rmk || ''
   lines.value = linesFromDetail(detail, (line) =>
     isPearVariety(line.variety_cd) ? weightKgCodes.value : weightPackCodes.value,
@@ -675,7 +690,13 @@ watch(
             <OdsInput v-model="prePay" type="number" variant="form" bare :disabled="lockHeaderCore" />
           </OdsFormField>
           <OdsFormField v-if="showPrePayMethod" :label="LABEL_PREPAY_METHOD" required>
-            <OdsSelect v-model="prePayMethodCd" variant="form" required :disabled="lockHeaderCore">
+            <OdsSelect
+              v-model="prePayMethodCd"
+              variant="form"
+              required
+              data-testid="order-prepay-method"
+              :disabled="lockPrePayMethod"
+            >
               <option value="">선택</option>
               <option
                 v-for="opt in payMethodOptions"

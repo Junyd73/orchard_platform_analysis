@@ -805,4 +805,226 @@ describe('OrderNewView', () => {
     expect(payload.lines[0].deliveries.map((d) => d.qty)).toEqual([5, 7])
     wrapper.unmount()
   })
+
+  it('ST010200 legacy prepay without method enables payment select', async () => {
+    const detail = {
+      ...sampleEditDetail(),
+      status_cd: 'ST010200',
+      status_nm: '주문확정',
+      pre_pay_amt: 5000,
+      pre_pay_method_cd: null,
+    }
+    vi.mocked(fetchOrder).mockResolvedValue(detail as never)
+    setActivePinia(createPinia())
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'orders', component: { template: '<div />' } },
+        {
+          path: '/orders/:orderNo/edit',
+          name: 'order-edit',
+          component: OrderNewView,
+        },
+        {
+          path: '/orders/:orderNo',
+          name: 'order-detail',
+          component: { template: '<div class="detail" />' },
+        },
+      ],
+    })
+    await router.push('/orders/ORD20260817-001/edit')
+    await router.isReady()
+    const wrapper = mount(OrderNewView, {
+      global: {
+        plugins: [router],
+        stubs: { OdsAppBar: true, OdsBottomNav: true },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const sel = wrapper.find('[data-testid="order-prepay-method"]')
+    expect(sel.exists()).toBe(true)
+    expect((sel.element as HTMLSelectElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('ST010300 legacy prepay without method enables payment select', async () => {
+    const detail = {
+      ...sampleEditDetail(),
+      status_cd: 'ST010300',
+      status_nm: '부분출고',
+      pre_pay_amt: 5000,
+      pre_pay_method_cd: null,
+    }
+    vi.mocked(fetchOrder).mockResolvedValue(detail as never)
+    // remount with custom mock — mountEditOrder also sets fetchOrder
+    setActivePinia(createPinia())
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'orders', component: { template: '<div />' } },
+        {
+          path: '/orders/:orderNo/edit',
+          name: 'order-edit',
+          component: OrderNewView,
+        },
+        {
+          path: '/orders/:orderNo',
+          name: 'order-detail',
+          component: { template: '<div class="detail" />' },
+        },
+      ],
+    })
+    await router.push('/orders/ORD20260817-001/edit')
+    await router.isReady()
+    const wrapper = mount(OrderNewView, {
+      global: {
+        plugins: [router],
+        stubs: { OdsAppBar: true, OdsBottomNav: true },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const sel = wrapper.find('[data-testid="order-prepay-method"]')
+    expect(sel.exists()).toBe(true)
+    expect((sel.element as HTMLSelectElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('ST010200 with existing method keeps select disabled', async () => {
+    const detail = {
+      ...sampleEditDetail(),
+      status_cd: 'ST010200',
+      status_nm: '주문확정',
+      pre_pay_amt: 5000,
+      pre_pay_method_cd: 'AS010101',
+    }
+    vi.mocked(fetchOrder).mockResolvedValue(detail as never)
+    setActivePinia(createPinia())
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'orders', component: { template: '<div />' } },
+        {
+          path: '/orders/:orderNo/edit',
+          name: 'order-edit',
+          component: OrderNewView,
+        },
+        {
+          path: '/orders/:orderNo',
+          name: 'order-detail',
+          component: { template: '<div class="detail" />' },
+        },
+      ],
+    })
+    await router.push('/orders/ORD20260817-001/edit')
+    await router.isReady()
+    const wrapper = mount(OrderNewView, {
+      global: {
+        plugins: [router],
+        stubs: { OdsAppBar: true, OdsBottomNav: true },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const sel = wrapper.find('[data-testid="order-prepay-method"]')
+    expect(sel.exists()).toBe(true)
+    expect((sel.element as HTMLSelectElement).disabled).toBe(true)
+    expect((sel.element as HTMLSelectElement).value).toBe('AS010101')
+    wrapper.unmount()
+  })
+
+  it('ST010300 with existing method keeps select disabled', async () => {
+    const detail = {
+      ...sampleEditDetail(),
+      status_cd: 'ST010300',
+      status_nm: '부분출고',
+      pre_pay_amt: 5000,
+      pre_pay_method_cd: 'AS010102',
+    }
+    vi.mocked(fetchOrder).mockResolvedValue(detail as never)
+    setActivePinia(createPinia())
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'orders', component: { template: '<div />' } },
+        {
+          path: '/orders/:orderNo/edit',
+          name: 'order-edit',
+          component: OrderNewView,
+        },
+        {
+          path: '/orders/:orderNo',
+          name: 'order-detail',
+          component: { template: '<div class="detail" />' },
+        },
+      ],
+    })
+    await router.push('/orders/ORD20260817-001/edit')
+    await router.isReady()
+    const wrapper = mount(OrderNewView, {
+      global: {
+        plugins: [router],
+        stubs: { OdsAppBar: true, OdsBottomNav: true },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const sel = wrapper.find('[data-testid="order-prepay-method"]')
+    expect(sel.exists()).toBe(true)
+    expect((sel.element as HTMLSelectElement).disabled).toBe(true)
+    expect((sel.element as HTMLSelectElement).value).toBe('AS010102')
+    wrapper.unmount()
+  })
+
+  it('legacy confirmed can choose method and include in update payload', async () => {
+    const detail = {
+      ...sampleEditDetail(),
+      status_cd: 'ST010200',
+      status_nm: '주문확정',
+      pre_pay_amt: 1000,
+      pre_pay_method_cd: null,
+      rmk: '기존비고',
+    }
+    vi.mocked(fetchOrder).mockResolvedValue(detail as never)
+    vi.mocked(updateOrder).mockResolvedValue(detail as never)
+    setActivePinia(createPinia())
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'orders', component: { template: '<div />' } },
+        {
+          path: '/orders/:orderNo/edit',
+          name: 'order-edit',
+          component: OrderNewView,
+        },
+        {
+          path: '/orders/:orderNo',
+          name: 'order-detail',
+          component: { template: '<div class="detail" />' },
+        },
+      ],
+    })
+    await router.push('/orders/ORD20260817-001/edit')
+    await router.isReady()
+    const wrapper = mount(OrderNewView, {
+      global: {
+        plugins: [router],
+        stubs: { OdsAppBar: true, OdsBottomNav: true },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const sel = wrapper.find('[data-testid="order-prepay-method"]')
+    await sel.setValue('AS010103')
+    await clickSave(wrapper)
+    expect(updateOrder).toHaveBeenCalled()
+    const payload = vi.mocked(updateOrder).mock.calls.at(-1)?.[2] as {
+      pre_pay_amt: number
+      pre_pay_method_cd: string | null
+    }
+    expect(payload.pre_pay_amt).toBe(1000)
+    expect(payload.pre_pay_method_cd).toBe('AS010103')
+    wrapper.unmount()
+  })
 })

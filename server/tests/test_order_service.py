@@ -21,9 +21,11 @@ for p in (_SERVER, _ROOT):
 from core.ops_biz_date import today_ops, today_ops_iso  # noqa: E402
 from core.order_constants import (  # noqa: E402
     MSG_ORDER_CANCEL_FORBIDDEN,
+    MSG_ORDER_CONFIRMED_LIMITED,
     MSG_ORDER_LOCKED_CANCEL,
     MSG_ORDER_LOCKED_DELIVERED,
     MSG_ORDER_QTY_LOCKED,
+    MSG_ORDER_SHIP_ONLY,
     ORDER_STATUS_CANCEL_CD,
     ORDER_STATUS_CONFIRMED_CD,
     ORDER_STATUS_DELIVERED_CD,
@@ -1094,6 +1096,127 @@ class OrderPrepayMethodStage2Test(unittest.TestCase):
         again = ensure_order_prepay_method_schema(self.conn)
         self.assertTrue(again["ok"])
         self.assertEqual(again["columns"], [])
+
+    def _set_status(self, order_no: str, status_cd: str) -> None:
+        self.conn.execute(
+            "UPDATE t_order_master SET status_cd = ? WHERE farm_cd = ? AND order_no = ?",
+            (status_cd, FARM, order_no),
+        )
+        self.conn.commit()
+
+    def _seed_legacy_null_method(self, order_no: str, *, status_cd: str, pre_pay: float = 5000) -> None:
+        """선입금>0 · method NULL 레거시 주문 + 줄/배송."""
+        self.conn.execute(
+            """
+            INSERT INTO t_order_master (
+                order_no, farm_cd, order_dt, custm_id, status_cd, stock_status,
+                tot_order_amt, tot_ship_fee, tot_pay_amt, pre_pay_amt, pre_pay_method_cd,
+                sales_no, rmk
+            ) VALUES (?, ?, ?, ?, ?, 'N', 2500000, 0, ?, ?, NULL, '', 'legacy')
+            """,
+            (order_no, FARM, today_ops_iso(), CUST, status_cd, pre_pay, pre_pay),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO t_order_detail (
+                order_detail_id, order_no, farm_cd, item_cd, variety_cd, grade_cd, size_cd,
+                weight, qty, unit_price, item_amt, wh_cd, dlvry_tp, harvest_year
+            ) VALUES (?, ?, ?, 'FR010100', ?, ?, ?, 15, 100, 25000, 2500000, ?, ?, 2026)
+            """,
+            (
+                f"{order_no}-01",
+                order_no,
+                FARM,
+                VARIETY,
+                GRADE,
+                SPEC,
+                WAREHOUSE_CD_DEFAULT,
+                DLVRY_VISIT,
+            ),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO t_order_delivery (
+                order_dlvry_id, order_no, farm_cd, order_detail_id,
+                delivery_tp_cd, dlvry_qty, planned_dt
+            ) VALUES (?, ?, ?, ?, ?, 100, ?)
+            """,
+            (
+                f"{order_no}-01-001",
+                order_no,
+                FARM,
+                f"{order_no}-01",
+                DLVRY_VISIT,
+                today_ops_iso(),
+            ),
+        )
+        self.conn.commit()
+
+    def test_confirmed_legacy_null_to_method_ok(self) -> None:
+        before = _counts(self.conn)
+        no = "ORD20260821-201"
+        self._seed_legacy_null_method(no, status_cd=ORDER_STATUS_CONFIRMED_CD)
+        payload = _sample_payload(pre_pay=5000, pre_pay_method_cd="AS010102")
+        payload.rmk = "legacy"
+        self.svc.replace_order(FARM, no, payload, user_id="t")
+        detail = self.svc.get_order(FARM, no)
+        self.assertEqual(detail["pre_pay_method_cd"], "AS010102")
+        self.assertEqual(detail["status_cd"], ORDER_STATUS_CONFIRMED_CD)
+        self._assert_no_accounting(before)
+
+    def test_prep_legacy_null_to_method_ok(self) -> None:
+        before = _counts(self.conn)
+        no = "ORD20260821-301"
+        self._seed_legacy_null_method(no, status_cd=ORDER_STATUS_PREP_CD)
+        payload = _sample_payload(pre_pay=5000, pre_pay_method_cd="AS010101")
+        payload.rmk = "legacy"
+        self.svc.replace_order(FARM, no, payload, user_id="t")
+        detail = self.svc.get_order(FARM, no)
+        self.assertEqual(detail["pre_pay_method_cd"], "AS010101")
+        self._assert_no_accounting(before)
+
+    def test_confirmed_existing_method_change_rejected(self) -> None:
+        no = self.svc.create_order(
+            FARM,
+            _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010101"),
+            user_id="t",
+        )
+        self._set_status(no, ORDER_STATUS_CONFIRMED_CD)
+        payload = _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010102")
+        with self.assertRaises(OrderValidationError) as ctx:
+            self.svc.replace_order(FARM, no, payload, user_id="t")
+        self.assertEqual(str(ctx.exception.message), MSG_ORDER_CONFIRMED_LIMITED)
+
+    def test_prep_existing_method_change_rejected(self) -> None:
+        no = self.svc.create_order(
+            FARM,
+            _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010101"),
+            user_id="t",
+        )
+        detail = self.svc.get_order(FARM, no)
+        self._set_status(no, ORDER_STATUS_PREP_CD)
+        payload = _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010102")
+        payload.rmk = detail["rmk"]
+        with self.assertRaises(OrderValidationError) as ctx:
+            self.svc.replace_order(FARM, no, payload, user_id="t")
+        self.assertEqual(str(ctx.exception.message), MSG_ORDER_SHIP_ONLY)
+
+    def test_confirmed_keep_method_allowed_edit_ok(self) -> None:
+        before = _counts(self.conn)
+        no = self.svc.create_order(
+            FARM,
+            _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010101"),
+            user_id="t",
+        )
+        detail = self.svc.get_order(FARM, no)
+        self._set_status(no, ORDER_STATUS_CONFIRMED_CD)
+        payload = _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010101")
+        payload.rmk = (detail["rmk"] or "") + " note"
+        self.svc.replace_order(FARM, no, payload, user_id="t")
+        after = self.svc.get_order(FARM, no)
+        self.assertEqual(after["pre_pay_method_cd"], "AS010101")
+        self.assertEqual(after["rmk"], payload.rmk)
+        self._assert_no_accounting(before)
 
 
 if __name__ == "__main__":
