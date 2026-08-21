@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { createCustomer, createOrder, fetchCustomers, fetchOrder, updateOrder } from '@/api/orders'
-import OrderNewView from '@/views/orders/OrderNewView.vue'
+import OrderNewView from '@/features/orders/OrderNewView.vue'
 import {
   LABEL_ALLOC,
   LABEL_CUSTOMER,
@@ -31,7 +31,7 @@ import {
   formatOrderLineSpec,
   parseWeightFromCodeNm,
   pickDefaultWeightCd,
-} from '@/views/orders/ordersConstants'
+} from '@/features/orders/ordersConstants'
 
 vi.mock('@/api/orders', () => ({
   fetchCustomers: vi.fn().mockResolvedValue([

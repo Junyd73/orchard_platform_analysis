@@ -51,6 +51,9 @@ class ShipConfirmRequest(BaseModel):
     rcv_addr: str = ""
     dlvry_msg: str = ""
     lines: list[ShipLineRequest] = Field(min_length=1)
+    snd_name: str = ""
+    snd_tel: str = ""
+    snd_addr: str = ""
 
 
 class ShipDetailOut(BaseModel):

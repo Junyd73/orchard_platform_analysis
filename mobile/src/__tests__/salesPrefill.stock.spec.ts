@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import type { StockItem } from '@/api/stock'
-import { stockSaleSpecKey } from '@/views/sales/shipConfirmModel'
-import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import { stockSaleSpecKey } from '@/features/sales/shipConfirmModel'
+import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
 
 function stock(partial: Partial<StockItem> = {}): StockItem {
   return {

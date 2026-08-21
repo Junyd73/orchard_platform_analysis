@@ -4,13 +4,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { ref } from 'vue'
 
-import StockView from '@/views/stock/StockView.vue'
-import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import StockView from '@/features/stock/StockView.vue'
+import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
 import {
   REASON_COUNT_DIFF,
   REASON_OTHER,
   REASON_RETURN,
-} from '@/views/stock/stockAdjustConstants'
+} from '@/features/stock/stockAdjustConstants'
 import type { StockItem } from '@/api/stock'
 
 const listFruitStock = vi.fn()

@@ -5,8 +5,8 @@ import {
   deliveryStatusText,
   findParcelDeliveryIssue,
   totalAllocShipFee,
-} from '@/views/sales/shipDeliveryModel'
-import type { ShipDraftLine } from '@/views/sales/shipConfirmModel'
+} from '@/features/sales/shipDeliveryModel'
+import type { ShipDraftLine } from '@/features/sales/shipConfirmModel'
 
 function line(partial: Partial<ShipDraftLine> & { qty: number }): ShipDraftLine {
   return {
