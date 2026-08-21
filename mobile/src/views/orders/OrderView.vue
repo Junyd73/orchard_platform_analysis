@@ -454,7 +454,8 @@ onMounted(() => {
   --order-col-ship: 3.5rem;
   --order-col-status: 4.25rem;
   list-style: none;
-  margin: 0 calc(var(--ods-space-16) * -1);
+  /* 페이지 padding 유지 — 재고 목록(ods-page-content 안쪽 폭)과 동일 */
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -471,6 +472,7 @@ onMounted(() => {
     var(--order-col-status);
   align-items: center;
   column-gap: var(--ods-space-6);
+  /* 재고 row와 동일: 리스트 가장자리 + 16 → 텍스트 들여쓰기 */
   padding: 0 var(--ods-space-16);
 }
 .order-list__head {
