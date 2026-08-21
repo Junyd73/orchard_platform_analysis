@@ -12,6 +12,14 @@ from core.stock_constants import ITEM_JUICE, JUICE_STOCK_ITEM_CDS, PARENT_PEAR_V
 from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
+from core.pc_sales_provenance import (
+    MSG_PREPAY_CASH_IMMUTABLE,
+    PcPrepayImmutableError,
+    cash_order_no_on_resave,
+    fetch_master_order_no,
+    fetch_master_sales_dt,
+    validate_pc_prepay_save,
+)
 from ui.ops_qdate import qdate_today_ops
 
 # 배송 리스트 팝업
@@ -2670,12 +2678,19 @@ class SalesPage(QWidget):
                 if not method_w or not amt_w: continue
                 
                 orig = (status_item.data(Qt.ItemDataRole.UserRole + 1) if status_item else {}) or {}
+                dt_w = self.pay_table.cellWidget(r, 1)
+                row_pay_dt = (
+                    dt_w.date().toString("yyyy-MM-dd")
+                    if dt_w is not None
+                    else sales_date_str
+                )
                 pay_basket.append({
                     'status': status_item.text() if status_item else "INS",
                     'orig_data': orig,
                     'acct_cd': method_w.currentData(),
                     'method': method_w.currentData(),
                     'amt': get_amt(amt_w),
+                    'pay_dt': row_pay_dt,
                     'pay_status': 'Y',
                     'rmk': self.pay_table.cellWidget(r, 4).text() if self.pay_table.cellWidget(r, 4) else f"판매입금({s_no})"
                 })
@@ -2686,9 +2701,20 @@ class SalesPage(QWidget):
                     'acct_cd': del_item.get('acct_cd'),
                     'method': del_item.get('pay_method_cd'),
                     'amt': 0, # 삭제이므로 현재 금액은 0
+                    'pay_dt': del_item.get('pay_dt'),
                     'pay_status': 'N', # 삭제는 미지급과 같음
                     'rmk': '' # 👈 적요 키를 명시적으로 추가
                 })
+
+            # Stage4-P2/P2b: 선입금 행·판매일 불변성 (AccountManager sync 이전)
+            existing_sales_dt = fetch_master_sales_dt(
+                self.db.conn.cursor(), self.farm_cd, s_no
+            )
+            validate_pc_prepay_save(
+                pay_basket,
+                original_sales_dt=existing_sales_dt,
+                current_sales_dt=sales_date_str,
+            )
 
             if ledger_enabled:
                 ledger_queries, slip_map = self.acct_mgr.sync_ledger_by_basket('SALE', s_no, sales_date_str, pay_basket, self.user_id)
@@ -2698,6 +2724,11 @@ class SalesPage(QWidget):
             self.deleted_pay_items = []
             queries = []
             queries.extend(ledger_queries) # 전표 90/80/10 쿼리 선삽입
+
+            # Stage4-P1: DELETE 전 master.order_no 보존 (UI/역산 금지)
+            existing_master_order_no = fetch_master_order_no(
+                self.db.conn.cursor(), self.farm_cd, s_no
+            )
 
             # -----------------------------------------------------------------
             # [Step 2] 기존 내역 삭제 (FK 제약 조건 준수: 자식부터 삭제)
@@ -2715,8 +2746,9 @@ class SalesPage(QWidget):
                     sales_no, farm_cd, sales_dt, sales_tp, custm_id,
                     tot_sales_amt, tot_ship_fee, tot_item_amt, tot_paid_amt, tot_unpaid_amt,
                     auction_fee, extra_cost, bill_yn, bill_dt, bill_no, 
-                    pay_method_cd, status_cd, rmk, reg_id, reg_dt, sales_status, sales_source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pay_method_cd, status_cd, rmk, reg_id, reg_dt,
+                    order_no, sales_status, sales_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             queries.append((sql_master, (
                 s_no, self.farm_cd, sales_date_str, self.sales_tp.currentData(), getattr(self, 'custm_id', None),
@@ -2724,6 +2756,7 @@ class SalesPage(QWidget):
                 get_amt(self.auction_fee), get_amt(self.extra_cost),
                 ui_bill_yn, ui_bill_dt, ui_bill_no, ui_pay_method, ui_status_cd, ui_master_rmk, self.user_id,
                 now_ops_str(),
+                existing_master_order_no,
                 sales_status, sales_source
             )))
 
@@ -2778,8 +2811,8 @@ class SalesPage(QWidget):
             sql_pay = """
                 INSERT INTO t_cash_ledger (
                     paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, 
-                    pay_amt, slip_no, rmk, reg_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pay_amt, slip_no, rmk, reg_id, order_no
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             for i, item in enumerate(pay_basket):
                 if item.get('status') == 'DEL':
@@ -2789,11 +2822,18 @@ class SalesPage(QWidget):
                 pd_no = f"{s_no}-P{i+1:02d}"
                 s_key = f"{item['acct_cd']}_{item['method']}"
                 slip_no = slip_map.get(s_key)
+                # Stage4-P1: ORG/MOD는 행별 orig order_no, INS는 NULL (master 상속 금지)
+                preserved_cash_order_no = cash_order_no_on_resave(
+                    status=str(item.get("status") or ""),
+                    orig_data=item.get("orig_data"),
+                )
+                row_pay_dt = str(item.get("pay_dt") or "").strip()[:10] or sales_date_str
                 queries.append((sql_pay, (
-                    pd_no, s_no, self.farm_cd, sales_date_str, item['method'], 
+                    pd_no, s_no, self.farm_cd, row_pay_dt, item['method'], 
                     item['amt'], slip_no, 
                     item.get('rmk', ''), # 안전하게 get 사용
-                    self.user_id
+                    self.user_id,
+                    preserved_cash_order_no,
                 )))
 
             # -----------------------------------------------------------------
@@ -2825,6 +2865,8 @@ class SalesPage(QWidget):
             else:
                 QMessageBox.critical(self, "저장 실패", "데이터베이스 트랜잭션 오류가 발생했습니다.")
 
+        except PcPrepayImmutableError as e:
+            QMessageBox.warning(self, "선입금 변경 불가", str(e) or MSG_PREPAY_CASH_IMMUTABLE)
         except Exception as e:
             QMessageBox.critical(self, "치명적 오류", f"❌ 저장 중 예외 발생: {str(e)}")
             traceback.print_exc()

@@ -86,7 +86,7 @@ def _schema_sql() -> str:
             status_cd TEXT, stock_status TEXT,
             tot_order_amt REAL, tot_ship_fee REAL, tot_pay_amt REAL,
             rmk TEXT, reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT,
-            season_type_cd TEXT, pre_pay_amt REAL, sales_no TEXT
+            season_type_cd TEXT, pre_pay_amt REAL, pre_pay_method_cd TEXT, sales_no TEXT
         );
         CREATE TABLE t_order_detail (
             order_detail_id TEXT PRIMARY KEY, order_no TEXT, farm_cd TEXT,
@@ -145,8 +145,23 @@ def _schema_sql() -> str:
             remark TEXT, reg_id TEXT, reg_dt TEXT,
             stock_seq INTEGER, ref_type TEXT, ref_id TEXT
         );
-        CREATE TABLE t_cash_ledger (cash_id INTEGER PRIMARY KEY, farm_cd TEXT);
-        CREATE TABLE t_ledger (slip_no TEXT, farm_cd TEXT);
+        CREATE TABLE m_account_code (
+            acct_cd TEXT PRIMARY KEY, acct_nm TEXT, acct_level INTEGER,
+            parent_cd TEXT, use_yn TEXT DEFAULT 'Y'
+        );
+        CREATE TABLE t_cash_ledger (
+            paid_detail_no TEXT PRIMARY KEY,
+            sales_no TEXT NOT NULL, farm_cd TEXT NOT NULL,
+            pay_dt TEXT NOT NULL, pay_method_cd TEXT NOT NULL,
+            pay_amt REAL DEFAULT 0, rmk TEXT, reg_id TEXT, reg_dt TEXT,
+            slip_no TEXT, order_no TEXT
+        );
+        CREATE TABLE t_ledger (
+            slip_no TEXT PRIMARY KEY, farm_cd TEXT NOT NULL, trans_dt TEXT,
+            trans_type_cd TEXT, acct_cd TEXT, trans_amt REAL, rmk TEXT,
+            ref_id TEXT, parent_slip_no TEXT, trans_st TEXT DEFAULT '10',
+            reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT
+        );
     """
 
 

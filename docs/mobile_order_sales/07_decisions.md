@@ -317,9 +317,9 @@
 | 폐기된 초안 | 「선입금 전액을 첫 출고 판매에 적용」 — 선입금 30만 · 첫 출고 판매금액 10만이면 성립하지 않는다. |
 | 예시 | 주문 30만 · 선입금 15만 → 판매1 10만: 적용 10만, 미수 0, 선입금 잔액 5만 → 판매2 20만: 적용 5만, 미수 15만 |
 | 유지 | DEC-009: 주문 단계는 금액(+결제수단, DEC-028)만. 전표는 판매 CONFIRMED 기준. 선수금 계정 설계는 비범위. |
-| 선입금 잔액 | `prepay_balance` 컬럼 **신설하지 않음**. 잔액 = `t_order_master.pre_pay_amt − 그 주문의 CONFIRMED 판매에 적용된 선입금 합`. |
-| 구현 전 확인 | `t_cash_ledger`에서 **선입금 적용분과 이후 추가수금을 구분할 실제 컬럼**을 운영 PRAGMA로 재확인. 없는 컬럼을 가정하지 않는다. 연결키가 없으면 OPEN으로 남기고 임의 DDL 확장 금지. |
-| 영향 | 단계 4 출고 TX. 관련: DEC-014 · DEC-017 · **DEC-028** · **DEC-029** |
+| 선입금 잔액 | `prepay_balance` 컬럼 **신설하지 않음**. 잔액 = `pre_pay_amt − applied_prepay` (`t_cash_ledger.order_no`=주문번호 · CONFIRMED 판매 JOIN). |
+| provenance | **CLOSED.** `t_cash_ledger.order_no` NULL=일반수금, 주문번호=출고 선입금 자동적용. 신규 DDL 없음. |
+| 영향 | 단계 4 출고 TX (feature 구현 · main 미반영). 관련: DEC-014 · DEC-017 · **DEC-028** · **DEC-029** |
 | 승인 | **2026-08-21 대표** |
 
 ---
@@ -513,10 +513,10 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.
 
-### 스키마 확인 대기 (APPROVED 설계, DDL 미실행)
+### 스키마 확인 (2026-08-22)
 
 | 항목 | 확인 내용 |
 |------|-----------|
-| `t_order_master.pre_pay_method_cd` | 운영 PRAGMA로 동일 목적 컬럼 유무 확인 후 ALTER 여부 결정 (DEC-028) |
-| `t_cash_ledger` 선입금 구분 | 선입금 적용분 vs 이후 추가수금을 구분·연결할 **실제 컬럼**이 있는지 재확인. 없으면 OPEN 유지, 임의 DDL 금지 (DEC-019) |
-| 선입금 결제수단 계정 범위 | **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 제외. `get_account_codes('AS', …)` 전체 노출을 SSOT로 두지 않음 (DEC-028) |
+| `t_order_master.pre_pay_method_cd` | **완료 · 운영** (DEC-028) |
+| `t_cash_ledger.order_no` provenance | **CLOSED** — NULL=일반수금, 주문번호=선입금 자동적용. Stage4 DDL 0 (DEC-019) |
+| 선입금 결제수단 계정 범위 | `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권(`AS02…`) 제외 (DEC-028) |

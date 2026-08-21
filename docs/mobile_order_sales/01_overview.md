@@ -49,7 +49,7 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 공유 
 | 주문상태 ≠ 이행상태 | 013 | APPROVED |
 | 주문 단계 전표 없음 (금액+결제수단만) | 009, 028 | APPROVED |
 | 선입금 **순차 배분** (min(잔액, 판매금액)) | 019 | **APPROVED** (2026-08-21) |
-| 주문 선입금 **결제수단** (금액>0이면 필수) | 028 | **APPROVED** (2026-08-21). 컬럼 제안, DDL 미실행 |
+| 주문 선입금 **결제수단** (금액>0이면 필수) | 028 | **APPROVED** · **완료 · 운영** (`pre_pay_method_cd`) |
 | **판매상태 ≠ 수금상태** (수금상태는 금액 계산값) | 029 | **APPROVED** (2026-08-21) |
 | 규격 4요소 | 004 | APPROVED |
 | harvest_year = 원료 수확연도 | 026 | APPROVED |
@@ -116,7 +116,7 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 공유 
 
 DEC-019는 **2026-08-21 APPROVED**로 OPEN 목록에서 제외.
 
-**스키마 확인 대기** (APPROVED 설계, DDL 미실행): `t_order_master.pre_pay_method_cd` (DEC-028) · `t_cash_ledger` 선입금/추가수금 구분키 (DEC-019) · 기존 결제수단 계정코드 실사용 확인. 상세: [03 §1.1·§9](./03_data_contract.md) · [06](./06_development_progress.md).
+**스키마:** `t_order_master.pre_pay_method_cd` (DEC-028 · **완료·운영**). `t_cash_ledger.order_no` provenance (DEC-019 · NULL=일반수금 / 주문번호=선입금 자동적용 · **CLOSED**, Stage4 DDL 0). 상세: [03 §1.1·§9](./03_data_contract.md) · [06](./06_development_progress.md).
 
 ## 9. 코드 근거
 
