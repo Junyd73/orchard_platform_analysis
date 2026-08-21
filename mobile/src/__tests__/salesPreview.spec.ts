@@ -122,6 +122,20 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
+  it('미리보기 품목명은 품종부터 표기 · 공통 formatOrderLineSpec 유지', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ variety_nm: '신고', size_nm: '2다이전', weight: 5, grade_nm: '상' }), 1)
+    const { wrapper } = await mountPreview()
+    const title = wrapper.find('.line__title').text()
+    expect(title).toContain('신고')
+    expect(title).toContain('5kg')
+    expect(title).toContain('상')
+    expect(title).not.toMatch(/^배 ·/)
+    expect(wrapper.find('.header-row').exists()).toBe(true)
+    expect(wrapper.text()).toMatch(/배송/)
+    wrapper.unmount()
+  })
+
   it('T1~T2 품목별 카드 반복 없음 · divider 리스트 · 섹션 card 허용', async () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock(), 2)

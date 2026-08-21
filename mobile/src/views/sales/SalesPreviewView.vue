@@ -24,7 +24,11 @@ import {
   LABEL_RCV_TEL,
   formatOrderAmt,
   formatOrderLineSpec,
+  formatWeightLabel,
+  isJuiceItemCd,
   isParcelDelivery,
+  joinDot,
+  juiceItemLabel,
 } from '@/views/orders/ordersConstants'
 import {
   MSG_NO_PREFILL,
@@ -50,11 +54,12 @@ const LABEL_PAGE = '판매 미리보기'
 const LABEL_ADD_ITEM = '+ 품목 추가'
 const LABEL_CANCEL_PREP = '판매 준비 취소'
 const LABEL_SHIP_FEE = '배송비'
-const LABEL_ITEM_AMT = '상품금액'
 const LABEL_TOTAL = '총액'
 const LABEL_GO_SALE = '판매 진행'
 const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
+const LABEL_DLVRY_SHORT = '배송'
+const LABEL_PARCEL_SETUP = '설정 ›'
 const LABEL_VIEW_DEST = '배송지 편집 ›'
 const LABEL_LINES = '판매 품목'
 const LABEL_COL_ITEM = '품목'
@@ -165,6 +170,19 @@ function lineKey(ln: (typeof lines.value)[number], idx: number) {
   return `${stockSaleSpecKey(ln)}#${idx}`
 }
 
+/** 미리보기 전용 표기 — 재고 cardTitle 계열(품종·중량·등급·규격). 공통 formatOrderLineSpec 미변경 */
+function formatPreviewLineSpec(ln: (typeof lines.value)[number]): string {
+  if (isJuiceItemCd(ln.item_cd)) {
+    return juiceItemLabel(ln.item_cd, ln.item_nm)
+  }
+  return joinDot([
+    ln.variety_nm || ln.variety_cd,
+    formatWeightLabel(ln.weight),
+    ln.grade_nm || ln.grade_cd,
+    ln.size_nm || ln.size_cd,
+  ])
+}
+
 function lineUnit(ln: (typeof lines.value)[number]) {
   return ln.item_cd === 'FR010300' ? '통' : '박스'
 }
@@ -212,6 +230,12 @@ function addMoreItems() {
 /** 수량/규격은 재고 화면의 담기·수정(updateStockLineQty)으로 갱신 */
 function editLineInStock() {
   goStockTab()
+}
+
+/** 상단 미지정 bar → 첫 미완료 품목 배송지 sheet */
+function openFirstIncompleteDest() {
+  const idx = lines.value.findIndex((_, i) => deliveryTone(i) !== 'ok')
+  if (idx >= 0) openDestSheet(idx)
 }
 
 function cancelSalePrep() {
@@ -432,38 +456,55 @@ onMounted(async () => {
           data-testid="sales-preview-header"
         >
           <div class="header-fields">
-            <OdsFormField :label="LABEL_CUSTOMER">
-              <OdsSelect v-model="custmId" variant="form" aria-label="고객 선택">
+            <div class="header-row">
+              <span class="header-row__lbl">{{ LABEL_CUSTOMER }}</span>
+              <OdsSelect
+                v-model="custmId"
+                variant="form"
+                class="header-row__ctrl"
+                aria-label="고객 선택"
+              >
                 <option value="">고객 선택</option>
                 <option v-for="c in customers" :key="c.custm_id" :value="c.custm_id">
                   {{ c.custm_nm }} · {{ c.mobile }}
                 </option>
               </OdsSelect>
-            </OdsFormField>
-            <OdsFormField :label="LABEL_DLVRY_METHOD">
+            </div>
+            <div class="header-row">
+              <span class="header-row__lbl">{{ LABEL_DLVRY_SHORT }}</span>
               <OdsSelect
+                class="header-row__ctrl"
                 :model-value="prefill.dlvryTp"
                 variant="form"
-                aria-label="배송방법"
+                :aria-label="LABEL_DLVRY_METHOD"
                 @update:model-value="prefill.setDelivery({ dlvryTp: $event })"
               >
                 <option v-for="d in deliveryOptions" :key="d.value" :value="d.value">
                   {{ d.label }}
                 </option>
               </OdsSelect>
-            </OdsFormField>
+            </div>
+            <div
+              v-if="isParcel && parcelHeaderHint"
+              class="header-hint"
+              :class="{
+                'header-hint--ok': !parcelIssue,
+                'header-hint--warn': Boolean(parcelIssue),
+              }"
+              data-testid="sales-preview-parcel-hint"
+            >
+              <span class="header-hint__txt">{{ parcelHeaderHint }}</span>
+              <button
+                v-if="parcelIssue"
+                type="button"
+                class="header-hint__act"
+                data-testid="sales-preview-parcel-setup"
+                @click="openFirstIncompleteDest"
+              >
+                {{ LABEL_PARCEL_SETUP }}
+              </button>
+            </div>
           </div>
-          <p
-            v-if="isParcel && parcelHeaderHint"
-            class="header-hint"
-            :class="{
-              'header-hint--ok': !parcelIssue,
-              'header-hint--warn': Boolean(parcelIssue),
-            }"
-            data-testid="sales-preview-parcel-hint"
-          >
-            {{ parcelHeaderHint }}
-          </p>
         </OdsCard>
 
         <!-- B. 판매 품목 — 재고 compact list 계열 (품목별 카드 반복 없음) -->
@@ -496,7 +537,7 @@ onMounted(async () => {
                 data-testid="sales-preview-line"
               >
                 <div class="line__row">
-                  <span class="line__title">{{ formatOrderLineSpec(ln) }}</span>
+                  <span class="line__title">{{ formatPreviewLineSpec(ln) }}</span>
                   <span class="line__qty" data-testid="sales-preview-qty">{{ ln.qty }}</span>
                   <OdsInput
                     :model-value="String(ln.unit_price)"
@@ -516,7 +557,7 @@ onMounted(async () => {
                       type="button"
                       class="line__icon-btn"
                       data-testid="sales-preview-edit"
-                      :aria-label="`${formatOrderLineSpec(ln)} 수량 수정`"
+                      :aria-label="`${formatPreviewLineSpec(ln)} 수량 수정`"
                       title="수정"
                       @click="editLineInStock"
                     >
@@ -539,7 +580,7 @@ onMounted(async () => {
                       type="button"
                       class="line__icon-btn line__icon-btn--danger"
                       data-testid="sales-preview-remove"
-                      :aria-label="`${formatOrderLineSpec(ln)} 삭제`"
+                      :aria-label="`${formatPreviewLineSpec(ln)} 삭제`"
                       title="삭제"
                       @click="removeLine(idx)"
                     >
@@ -618,10 +659,9 @@ onMounted(async () => {
         <!-- D. sticky summary — 재고 판매예정 bar 계열 + 전체폭 CTA -->
         <div class="footer" data-testid="sales-preview-footer" role="region" aria-label="합계">
           <div class="footer__panel">
-            <p class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</p>
-            <p class="footer__row">
-              <span class="footer__lbl">{{ LABEL_ITEM_AMT }}</span>
-              <span class="footer__val">{{ formatOrderAmt(itemAmt) }}원</span>
+            <p class="footer__top">
+              <span class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</span>
+              <span class="footer__item-amt">상품 {{ formatOrderAmt(itemAmt) }}원</span>
             </p>
             <p class="footer__row">
               <span class="footer__lbl">{{ LABEL_SHIP_FEE }}</span>
@@ -800,7 +840,7 @@ onMounted(async () => {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 12rem;
+  --sales-preview-footer-h: 10rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   --sales-preview-inline: var(--ods-page-padding-x, var(--ods-space-16));
@@ -812,7 +852,7 @@ onMounted(async () => {
   box-sizing: border-box;
 }
 .content {
-  gap: var(--ods-space-12);
+  gap: var(--ods-space-8);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin-inline: auto;
@@ -832,11 +872,12 @@ onMounted(async () => {
 .preview-card {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-12);
+  gap: var(--ods-space-8);
   min-width: 0;
 }
 .preview-card--compact {
   padding: var(--ods-space-12);
+  gap: var(--ods-space-8);
 }
 .preview-card--lines {
   padding: 0;
@@ -851,19 +892,41 @@ onMounted(async () => {
 .header-fields {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-12);
+  gap: var(--ods-space-8);
   min-width: 0;
 }
-
+.header-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  column-gap: var(--ods-space-8);
+  align-items: center;
+  min-width: 0;
+}
+.header-row__lbl {
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  color: var(--ods-color-text-label);
+  white-space: nowrap;
+}
+.header-row__ctrl {
+  min-width: 0;
+  width: 100%;
+}
+.header-row :deep(select.ods-select) {
+  height: 38px;
+  min-height: 38px;
+  max-height: 38px;
+}
 .header-hint {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
   box-sizing: border-box;
-  min-height: 36px;
+  min-height: 28px;
+  max-height: 32px;
   margin: 0;
-  padding: var(--ods-space-4) var(--ods-space-12);
+  padding: 0 var(--ods-space-8);
   border-radius: var(--ods-radius-button);
   font: var(--ods-font-caption);
   font-weight: 600;
@@ -878,14 +941,36 @@ onMounted(async () => {
   background: var(--ods-color-caution-soft);
   color: var(--ods-color-gray-900);
 }
+.header-hint__txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header-hint__act {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-primary);
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  min-height: 28px;
+  white-space: nowrap;
+}
+.header-hint__act:focus-visible {
+  outline: 2px solid var(--ods-color-primary);
+  outline-offset: 2px;
+}
 
 .lines__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 40px;
-  padding: var(--ods-space-8) var(--line-pad-x, var(--ods-space-16));
+  min-height: 34px;
+  padding: var(--ods-space-4) var(--line-pad-x, var(--ods-space-16));
   box-sizing: border-box;
 }
 .lines__title {
@@ -922,7 +1007,7 @@ onMounted(async () => {
   padding-inline: var(--line-pad-x, var(--ods-space-16));
 }
 .lines__cols {
-  min-height: 32px;
+  min-height: 28px;
   padding-block: var(--ods-space-4);
   border-bottom: 1px solid var(--ods-color-border);
   font: var(--ods-font-caption);
@@ -951,7 +1036,7 @@ onMounted(async () => {
   background: var(--ods-color-white);
 }
 .line {
-  padding: var(--ods-space-8) 0;
+  padding: var(--ods-space-4) 0;
   border-bottom: 1px solid var(--ods-color-border);
   min-width: 0;
 }
@@ -1044,9 +1129,9 @@ onMounted(async () => {
   justify-content: space-between;
   gap: var(--ods-space-8);
   box-sizing: border-box;
-  min-height: 28px;
-  max-height: 32px;
-  margin: var(--ods-space-4) var(--line-pad-x, var(--ods-space-16)) 0;
+  min-height: 26px;
+  max-height: 28px;
+  margin: 2px var(--line-pad-x, var(--ods-space-16)) 0;
   padding: 0 var(--ods-space-8);
   border-radius: var(--ods-radius-button);
   min-width: 0;
@@ -1087,7 +1172,7 @@ onMounted(async () => {
   font-weight: 700;
   cursor: pointer;
   padding: 0;
-  min-height: 28px;
+  min-height: 26px;
   white-space: nowrap;
 }
 .line__dest-btn:focus-visible {
@@ -1099,7 +1184,7 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ods-space-8);
-  padding: var(--ods-space-12) var(--line-pad-x, var(--ods-space-16)) var(--ods-space-16);
+  padding: var(--ods-space-8) var(--line-pad-x, var(--ods-space-16)) var(--ods-space-12);
   border-top: 1px solid var(--ods-color-border);
 }
 
@@ -1113,12 +1198,12 @@ onMounted(async () => {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-6);
+  gap: var(--ods-space-4);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-8) var(--sales-preview-inline);
+  padding: var(--ods-space-6) var(--sales-preview-inline);
   background: var(--ods-color-bg-muted, #f5f5f5);
   border-top: 1px solid var(--ods-color-border);
 }
@@ -1127,17 +1212,37 @@ onMounted(async () => {
   flex-direction: column;
   gap: 0;
   min-width: 0;
-  padding: var(--ods-space-8) var(--ods-space-12);
+  padding: var(--ods-space-6) var(--ods-space-12);
   background: var(--ods-color-primary-subtle, #e8f5ee);
   border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
   box-shadow: none;
 }
-.footer__count {
+.footer__top {
   margin: 0 0 var(--ods-space-4);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+.footer__count {
+  margin: 0;
   font: var(--ods-font-body-2);
   font-weight: 600;
   color: var(--ods-color-text);
+  white-space: nowrap;
+}
+.footer__item-amt {
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .footer__row {
   margin: 0;
@@ -1146,7 +1251,7 @@ onMounted(async () => {
   justify-content: space-between;
   gap: var(--ods-space-8);
   font: var(--ods-font-caption);
-  line-height: 1.35;
+  line-height: 1.3;
   color: var(--ods-color-text-secondary);
 }
 .footer__lbl {
