@@ -71,6 +71,9 @@ const LABEL_DEST_DONE = '완료'
 const LABEL_DEST_QTY = '수량'
 const LABEL_DEST_FEE = '배송비'
 const LABEL_DEST_MEMO = '배송메모'
+const LABEL_DEST_PRODUCT = '상품'
+const LABEL_DEST_ORDER_QTY = '주문량'
+const LABEL_DEST_UNASSIGNED = '미지정'
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
 const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
@@ -357,24 +360,26 @@ function destAssignedSum() {
   return destDrafts.value.reduce((s, d) => s + Number(d.qty || 0), 0)
 }
 
-function destSheetRemainLabel(): string {
+function destSheetRemainQty(): string {
   const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
   if (!ln) return ''
   const sale = Number(ln.qty)
   const got = destAssignedSum()
   const remain = sale - got
   const unit = lineUnit(ln)
-  if (remain > 0) return `미지정 ${remain}${unit}`
-  if (remain < 0) return `${-remain}${unit} 초과`
-  return '지정 완료'
+  if (remain < 0) return `초과 ${-remain}${unit}`
+  return `${Math.max(0, remain)}${unit}`
 }
 
-/** Sheet 상품 카드 1행 — 품종·중량·등급·크기(대분류 제외) / 판매수량 / 미지정 */
-function destSheetProductSummary(): string {
+function destSheetOrderQty(): string {
   const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
   if (!ln) return ''
-  const qty = `${Number(ln.qty)}${lineUnit(ln)}`
-  return `${formatPreviewLineSpec(ln)} / ${qty} / ${destSheetRemainLabel()}`
+  return `${Number(ln.qty)}${lineUnit(ln)}`
+}
+
+function destSheetProductSpec(): string {
+  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
+  return ln ? formatPreviewLineSpec(ln) : ''
 }
 
 function commitDestSheet() {
@@ -784,7 +789,18 @@ onMounted(async () => {
               </div>
               <div class="dest-sheet__product" data-testid="sales-preview-dest-product">
                 <p class="dest-sheet__product-line" data-testid="sales-preview-dest-summary">
-                  {{ destSheetProductSummary() }}
+                  <span class="dest-sheet__meta">
+                    <span class="dest-sheet__meta-lbl">{{ LABEL_DEST_PRODUCT }} :</span>
+                    <span class="dest-sheet__meta-val">{{ destSheetProductSpec() }}</span>
+                  </span>
+                  <span class="dest-sheet__meta">
+                    <span class="dest-sheet__meta-lbl">{{ LABEL_DEST_ORDER_QTY }} :</span>
+                    <span class="dest-sheet__meta-val">{{ destSheetOrderQty() }}</span>
+                  </span>
+                  <span class="dest-sheet__meta">
+                    <span class="dest-sheet__meta-lbl">{{ LABEL_DEST_UNASSIGNED }} :</span>
+                    <span class="dest-sheet__meta-val">{{ destSheetRemainQty() }}</span>
+                  </span>
                 </p>
               </div>
             </div>
@@ -1541,14 +1557,35 @@ onMounted(async () => {
 }
 .dest-sheet__product-line {
   margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ods-space-4) var(--ods-space-16);
+  min-width: 0;
+  font: var(--ods-font-body-2);
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.dest-sheet__meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.dest-sheet__meta-lbl {
+  flex-shrink: 0;
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  color: var(--ods-color-text-secondary);
+}
+.dest-sheet__meta-val {
   font: var(--ods-font-body-2);
   font-weight: 700;
   color: var(--ods-color-text);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .dest-sheet__x {
   border: none;
