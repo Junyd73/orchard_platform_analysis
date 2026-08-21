@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
 import { confirmShipment } from '@/api/shipments'
 import { fetchCustomers } from '@/api/orders'
 import { fetchCommonCodes } from '@/api/commonCodes'
+import ParcelDestinationSheet from '@/components/sales/ParcelDestinationSheet.vue'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
@@ -19,9 +20,6 @@ import {
   DELIVERY_TP_VISIT,
   CODE_PARENT_DELIVERY,
   LABEL_CUSTOMER,
-  LABEL_RCV_ADDR,
-  LABEL_RCV_NAME,
-  LABEL_RCV_TEL,
   formatOrderAmt,
   formatPhoneKr,
   formatWeightLabel,
@@ -41,7 +39,6 @@ import {
 import {
   allocQtySum,
   deliveryStatusText,
-  emptyDeliveryDraft,
   findParcelDeliveryIssue,
   totalAllocShipFee,
 } from '@/views/sales/shipDeliveryModel'
@@ -81,36 +78,12 @@ const LABEL_LINES = '판매 품목'
 const LABEL_COL_ITEM = '품목'
 const LABEL_COL_QTY = '수량'
 const LABEL_COL_PRICE = '단가'
-const LABEL_DEST_SHEET = '배송지 등록'
-const LABEL_ADD_DEST = '+ 배송지 추가'
-const LABEL_DEST_SAVE = '배송지추가'
-const LABEL_DEST_DONE = '완료'
-const LABEL_DEST_QTY = '수량'
-const LABEL_DEST_FEE = '배송비'
-const LABEL_DEST_MEMO = '배송메모'
-const LABEL_DEST_PRODUCT = '상품'
-const LABEL_DEST_ORDER_QTY = '주문량'
-const LABEL_DEST_UNASSIGNED = '미지정'
-const LABEL_DEST_COMMON_MEMO = '공통 배송메모'
-const LABEL_DEST_MEMO_APPLY = '전체 적용'
-const DEST_MEMO_MODE_PRODUCT = 'product'
-const DEST_MEMO_MODE_ORDERER = 'orderer'
-const DEST_MEMO_MODE_CUSTOM = 'custom'
-const DEST_COMMON_MEMO_OPTIONS = [
-  { value: DEST_MEMO_MODE_PRODUCT, label: '상품정보' },
-  { value: DEST_MEMO_MODE_ORDERER, label: '주문자' },
-  { value: DEST_MEMO_MODE_CUSTOM, label: '직접입력' },
-] as const
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
 const MSG_NEED_SENDER = '보내는 사람 정보를 입력해 주세요.'
 const MSG_NEED_SENDER_ADDR = '과수원 주소가 없어 직접 입력해 주세요.'
 const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
-const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요.'
-const MSG_DEST_QTY_OVER = '주문량을 초과할 수 없습니다.'
-const MSG_DEST_ADD_OVER = '주문량이 모두 지정되어 배송지를 추가할 수 없습니다.'
-const DEST_TIP_MS = 1800
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -128,18 +101,6 @@ const deliveryOptions = ref<{ value: string; label: string }[]>([
 ])
 
 const destEditIdx = ref<number | null>(null)
-/** sheet 내 편집 중인 배송지 index — null이면 전부 요약 1줄 */
-const destFormIdx = ref<number | null>(null)
-const destDrafts = ref<ShipDeliveryDraft[]>([])
-const destSheetErr = ref('')
-/** 초과 안내 — 하단 문구 대신 입력/버튼 옆 고정 tip (경량, 라이브러리 없음) */
-const destTip = ref<{ text: string; top: number; left: number } | null>(null)
-const destQtyInputKey = ref(0)
-let destTipTimer: ReturnType<typeof setTimeout> | null = null
-/** 공통 배송메모 — 상품정보 | 주문자 | 직접입력 */
-const destCommonMemoMode = ref<string>(DEST_MEMO_MODE_PRODUCT)
-/** 선택값 채우기 + 직접 수정 공용 텍스트 */
-const destCommonMemoText = ref('')
 
 const lines = computed(() => prefill.shipLines)
 const isParcel = computed(() => isParcelDelivery(prefill.dlvryTp))
@@ -363,22 +324,10 @@ function openDestSheet(idx: number) {
   const ln = lines.value[idx]
   if (!ln) return
   destEditIdx.value = idx
-  destFormIdx.value = null
-  destSheetErr.value = ''
-  destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
-  destCommonMemoText.value = formatPreviewLineSpec(ln)
-  const existing = ln.delivery_allocations || []
-  destDrafts.value = existing.length ? existing.map((a) => ({ ...a })) : []
 }
 
 function closeDestSheet() {
   destEditIdx.value = null
-  destFormIdx.value = null
-  destDrafts.value = []
-  destSheetErr.value = ''
-  destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
-  destCommonMemoText.value = ''
-  hideDestTip()
 }
 
 function customerDefaults() {
@@ -389,229 +338,34 @@ function customerDefaults() {
   }
 }
 
-function commonMemoTemplate(mode: string): string {
-  if (mode === DEST_MEMO_MODE_ORDERER) {
-    return String(prefill.customerNm || customerDefaults().rcv_name || '').trim()
-  }
-  if (mode === DEST_MEMO_MODE_CUSTOM) {
-    return String(destCommonMemoText.value || '').trim()
-  }
-  return destSheetProductSpec()
-}
+const destSheetLine = computed(() =>
+  destEditIdx.value != null ? lines.value[destEditIdx.value] ?? null : null,
+)
 
-function resolveCommonMemo(): string {
-  return String(destCommonMemoText.value || '').trim()
-}
+const destProductSummary = computed(() =>
+  destSheetLine.value ? formatPreviewLineSpec(destSheetLine.value) : '',
+)
 
-function applyCommonMemoToAll() {
-  const msg = resolveCommonMemo()
-  destDrafts.value = destDrafts.value.map((d) => ({ ...d, dlvry_msg: msg }))
-}
+const destOrderQty = computed(() =>
+  Math.max(0, Math.floor(Number(destSheetLine.value?.qty || 0))),
+)
 
-/** 선택 → 템플릿 채움. 직접입력은 현재 텍스트 유지(이어서 수정) */
-function setCommonMemoMode(mode: string) {
-  destCommonMemoMode.value = mode
-  if (mode !== DEST_MEMO_MODE_CUSTOM) {
-    destCommonMemoText.value = commonMemoTemplate(mode)
-  }
-  applyCommonMemoToAll()
-}
+const destSaleUnit = computed(() => {
+  const ln = destSheetLine.value
+  return ln ? lineUnit(ln) : '박스'
+})
 
-/** 직접 수정 시 모드를 직접입력으로 전환 */
-function setCommonMemoText(raw: string) {
-  destCommonMemoText.value = raw
-  destCommonMemoMode.value = DEST_MEMO_MODE_CUSTOM
-  applyCommonMemoToAll()
-}
+const destInitialDests = computed((): ShipDeliveryDraft[] => {
+  const existing = destSheetLine.value?.delivery_allocations || []
+  return existing.map((a) => ({ ...a }))
+})
 
-function formatDestSummaryPrimary(d: ShipDeliveryDraft): string {
-  const unit = destSaleUnit.value
-  const name = String(d.rcv_name || '').trim() || '수령인 미입력'
-  const tel = String(d.rcv_tel || '').trim()
-  const qty = `${Math.max(0, Math.floor(Number(d.qty) || 0))}${unit}`
-  return [name, tel, qty].filter(Boolean).join(' · ')
-}
+const destOrdererName = computed(
+  () => String(prefill.customerNm || customerDefaults().rcv_name || '').trim(),
+)
 
-function formatDestSummaryAddr(d: ShipDeliveryDraft): string {
-  return String(d.rcv_addr || '').trim()
-}
-
-function formatDestSummaryMemo(d: ShipDeliveryDraft): string {
-  return String(d.dlvry_msg || '').trim()
-}
-
-function destDraftFieldError(d: ShipDeliveryDraft): string {
-  if (!(Number(d.qty) >= 1)) return '배송수량은 1 이상이어야 합니다.'
-  if (Number(d.ship_fee) < 0) return MSG_SHIP_FEE_NEG
-  if (!String(d.rcv_name).trim() || !String(d.rcv_tel).trim() || !String(d.rcv_addr).trim()) {
-    return MSG_DEST_INCOMPLETE
-  }
-  return ''
-}
-
-function destSaleQtyNum(): number {
-  if (destEditIdx.value == null) return 0
-  return Math.max(0, Math.floor(Number(lines.value[destEditIdx.value]?.qty || 0)))
-}
-
-function destAssignedSumExcept(di: number): number {
-  return destDrafts.value.reduce(
-    (s, d, i) => (i === di ? s : s + Math.max(0, Math.floor(Number(d.qty) || 0))),
-    0,
-  )
-}
-
-/** 현재 편집 행 기준 할당 가능 최대 수량 */
-function destMaxQtyForRow(di: number): number {
-  return Math.max(0, destSaleQtyNum() - destAssignedSumExcept(di))
-}
-
-function hideDestTip() {
-  destTip.value = null
-  if (destTipTimer != null) {
-    clearTimeout(destTipTimer)
-    destTipTimer = null
-  }
-}
-
-function showDestTipNear(selector: string, text: string) {
-  const el = document.querySelector(selector) as HTMLElement | null
-  const r = el?.getBoundingClientRect()
-  destTip.value = {
-    text,
-    top: r ? r.top - 6 : 96,
-    left: r ? r.left + r.width / 2 : Math.round(window.innerWidth / 2),
-  }
-  if (destTipTimer != null) clearTimeout(destTipTimer)
-  destTipTimer = setTimeout(() => {
-    destTip.value = null
-    destTipTimer = null
-  }, DEST_TIP_MS)
-}
-
-/** 수량 입력 — 초과 시 값 유지(미상승) + 입력 옆 tip */
-function setDestQty(di: number, raw: string) {
-  const maxForRow = destMaxQtyForRow(di)
-  const wanted = Math.max(1, Math.floor(Number(String(raw).replace(/,/g, '')) || 1))
-  if (wanted > maxForRow || maxForRow < 1) {
-    destQtyInputKey.value += 1
-    showDestTipNear('[data-testid="sales-preview-dest-qty"]', MSG_DEST_QTY_OVER)
-    return
-  }
-  patchDestDraft(di, { qty: wanted })
-  hideDestTip()
-}
-
-/** 편집 폼 → 상단 요약. 유효하지 않으면 false */
-function collapseDestForm(): boolean {
-  if (destFormIdx.value == null) return true
-  const d = destDrafts.value[destFormIdx.value]
-  if (!d) {
-    destFormIdx.value = null
-    return true
-  }
-  const err = destDraftFieldError(d)
-  if (err) {
-    destSheetErr.value = err
-    return false
-  }
-  if (destAssignedSum() > destSaleQtyNum()) {
-    destQtyInputKey.value += 1
-    showDestTipNear('[data-testid="sales-preview-dest-qty"]', MSG_DEST_QTY_OVER)
-    return false
-  }
-  destFormIdx.value = null
-  destSheetErr.value = ''
-  hideDestTip()
-  return true
-}
-
-function addDestDraft() {
-  if (destFormIdx.value != null && !collapseDestForm()) return
-  const sale = destSaleQtyNum()
-  const got = destAssignedSum()
-  if (got >= sale) {
-    showDestTipNear('[data-testid="sales-preview-dest-add"]', MSG_DEST_ADD_OVER)
-    return
-  }
-  const defs = customerDefaults()
-  const remain = Math.max(1, sale - got)
-  destDrafts.value = [
-    ...destDrafts.value,
-    emptyDeliveryDraft({
-      qty: Math.min(1, remain),
-      rcv_name: defs.rcv_name,
-      rcv_tel: defs.rcv_tel,
-      dlvry_msg: resolveCommonMemo(),
-    }),
-  ]
-  destFormIdx.value = destDrafts.value.length - 1
-  destSheetErr.value = ''
-  hideDestTip()
-}
-
-function editDestDraft(di: number) {
-  if (destFormIdx.value != null && destFormIdx.value !== di && !collapseDestForm()) return
-  destFormIdx.value = di
-  destSheetErr.value = ''
-}
-
-function removeDestDraft(di: number) {
-  destDrafts.value = destDrafts.value.filter((_, i) => i !== di)
-  if (destFormIdx.value == null) return
-  if (destFormIdx.value === di) destFormIdx.value = null
-  else if (destFormIdx.value > di) destFormIdx.value -= 1
-}
-
-function patchDestDraft(di: number, patch: Partial<ShipDeliveryDraft>) {
-  destDrafts.value = destDrafts.value.map((d, i) => (i === di ? { ...d, ...patch } : d))
-}
-
-function destAssignedSum() {
-  return destDrafts.value.reduce((s, d) => s + Number(d.qty || 0), 0)
-}
-
-function destSheetRemainQty(): string {
-  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
-  if (!ln) return ''
-  const sale = Number(ln.qty)
-  const got = destAssignedSum()
-  const remain = sale - got
-  const unit = lineUnit(ln)
-  if (remain < 0) return `초과 ${-remain}${unit}`
-  return `${Math.max(0, remain)}${unit}`
-}
-
-function destSheetOrderQty(): string {
-  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
-  if (!ln) return ''
-  return `${Number(ln.qty)}${lineUnit(ln)}`
-}
-
-function destSheetProductSpec(): string {
-  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
-  return ln ? formatPreviewLineSpec(ln) : ''
-}
-
-function commitDestSheet() {
+function onDestComplete(cleaned: ShipDeliveryDraft[]) {
   if (destEditIdx.value == null) return
-  if (destFormIdx.value != null && !collapseDestForm()) return
-  for (const d of destDrafts.value) {
-    const err = destDraftFieldError(d)
-    if (err) {
-      destSheetErr.value = err
-      return
-    }
-  }
-  const cleaned = destDrafts.value.map((d) => ({
-    ...d,
-    qty: Math.max(1, Math.floor(Number(d.qty))),
-    ship_fee: Math.max(0, Math.round(Number(d.ship_fee) || 0)),
-    rcv_name: String(d.rcv_name).trim(),
-    rcv_tel: String(d.rcv_tel).trim(),
-    rcv_addr: String(d.rcv_addr).trim(),
-    dlvry_msg: String(d.dlvry_msg || '').trim(),
-  }))
   prefill.setShipLineDeliveries(destEditIdx.value, cleaned)
   closeDestSheet()
 }
@@ -689,12 +443,6 @@ function goStock() {
   void router.replace({ name: 'orders', query: { tab: 'stock' } })
 }
 
-const destSaleUnit = computed(() => {
-  if (destEditIdx.value == null) return '박스'
-  const ln = lines.value[destEditIdx.value]
-  return ln ? lineUnit(ln) : '박스'
-})
-
 onMounted(async () => {
   try {
     customers.value = await fetchCustomers(farmCd.value)
@@ -711,10 +459,6 @@ onMounted(async () => {
   } catch {
     /* 로컬 기본 유지 */
   }
-})
-
-onBeforeUnmount(() => {
-  hideDestTip()
 })
 </script>
 
@@ -990,285 +734,19 @@ onBeforeUnmount(() => {
     </main>
     <OdsBottomNav />
 
-    <Teleport to="body">
-      <div
-        v-if="destEditIdx != null"
-        class="dest-overlay"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="LABEL_DEST_SHEET"
-        data-testid="sales-preview-dest-sheet"
-        @click.self="closeDestSheet"
-      >
-        <div class="dest-sheet">
-          <header class="dest-sheet__head">
-            <div class="dest-sheet__head-main">
-              <div class="dest-sheet__title-row">
-                <h3 class="dest-sheet__title">{{ LABEL_DEST_SHEET }}</h3>
-                <button type="button" class="dest-sheet__x" aria-label="닫기" @click="closeDestSheet">
-                  ✕
-                </button>
-              </div>
-              <div class="dest-sheet__product" data-testid="sales-preview-dest-product">
-                <p class="dest-sheet__product-line" data-testid="sales-preview-dest-summary">
-                  <span class="dest-sheet__meta">
-                    <span class="dest-sheet__meta-lbl">{{ LABEL_DEST_PRODUCT }} :</span>
-                    <span class="dest-sheet__meta-val">{{ destSheetProductSpec() }}</span>
-                  </span>
-                  <span class="dest-sheet__meta">
-                    <span class="dest-sheet__meta-lbl">{{ LABEL_DEST_ORDER_QTY }} :</span>
-                    <span class="dest-sheet__meta-val">{{ destSheetOrderQty() }}</span>
-                  </span>
-                  <span class="dest-sheet__meta">
-                    <span class="dest-sheet__meta-lbl">{{ LABEL_DEST_UNASSIGNED }} :</span>
-                    <span class="dest-sheet__meta-val">{{ destSheetRemainQty() }}</span>
-                  </span>
-                </p>
-              </div>
-            </div>
-          </header>
-
-          <div class="dest-sheet__body">
-            <div class="dest-common-memo" data-testid="sales-preview-dest-common-memo">
-              <OdsFormField :label="LABEL_DEST_COMMON_MEMO">
-                <div class="dest-common-memo__row">
-                  <OdsSelect
-                    :model-value="destCommonMemoMode"
-                    variant="form"
-                    class="dest-common-memo__mode"
-                    data-testid="sales-preview-dest-common-mode"
-                    @update:model-value="setCommonMemoMode"
-                  >
-                    <option
-                      v-for="opt in DEST_COMMON_MEMO_OPTIONS"
-                      :key="opt.value"
-                      :value="opt.value"
-                    >
-                      {{ opt.label }}
-                    </option>
-                  </OdsSelect>
-                  <OdsInput
-                    :model-value="destCommonMemoText"
-                    variant="form"
-                    bare
-                    class="dest-common-memo__input"
-                    data-testid="sales-preview-dest-common-input"
-                    :aria-label="LABEL_DEST_COMMON_MEMO"
-                    @update:model-value="setCommonMemoText"
-                  />
-                  <OdsButton
-                    type="button"
-                    variant="secondary"
-                    class="dest-common-memo__apply"
-                    data-testid="sales-preview-dest-common-apply"
-                    :disabled="!destDrafts.length"
-                    @click="applyCommonMemoToAll"
-                  >
-                    {{ LABEL_DEST_MEMO_APPLY }}
-                  </OdsButton>
-                </div>
-              </OdsFormField>
-            </div>
-
-            <ul v-if="destDrafts.length" class="dest-summary-list" aria-label="배송지 목록">
-              <li
-                v-for="(d, di) in destDrafts"
-                v-show="di !== destFormIdx"
-                :key="d.draft_id"
-                class="dest-summary"
-                data-testid="sales-preview-dest-summary-row"
-              >
-                <div class="dest-summary__body">
-                  <p class="dest-summary__line1">{{ formatDestSummaryPrimary(d) }}</p>
-                  <p class="dest-summary__line2">
-                    <span
-                      class="dest-summary__addr"
-                      :title="formatDestSummaryAddr(d) || undefined"
-                    >{{ formatDestSummaryAddr(d) || '주소 미입력' }}</span>
-                    <template v-if="formatDestSummaryMemo(d)">
-                      <span class="dest-summary__sep" aria-hidden="true"> · </span>
-                      <span class="dest-summary__memo">{{ formatDestSummaryMemo(d) }}</span>
-                    </template>
-                  </p>
-                </div>
-                <div class="dest-summary__actions">
-                  <button
-                    type="button"
-                    class="line__icon-btn"
-                    data-testid="sales-preview-dest-edit"
-                    :aria-label="`배송지 ${di + 1} 수정`"
-                    title="수정"
-                    @click="editDestDraft(di)"
-                  >
-                    <svg class="line__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                      <path
-                        d="M12.2 3.6l4.2 4.2"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                      />
-                      <path
-                        d="M4 16l.7-3.6L13.2 4l2.8 2.8L7.6 15.3 4 16z"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    class="line__icon-btn line__icon-btn--danger"
-                    data-testid="sales-preview-dest-remove"
-                    :aria-label="`배송지 ${di + 1} 삭제`"
-                    title="삭제"
-                    @click="removeDestDraft(di)"
-                  >
-                    <svg class="line__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                      <path
-                        d="M5.2 6.2h9.6"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                      />
-                      <path
-                        d="M8 4.2h4l.8 2H7.2L8 4.2z"
-                        stroke="currentColor"
-                        stroke-width="1.4"
-                        stroke-linejoin="round"
-                      />
-                      <path
-                        d="M7.5 8.2v6M10 8.2v6M12.5 8.2v6"
-                        stroke="currentColor"
-                        stroke-width="1.4"
-                        stroke-linecap="round"
-                      />
-                      <path
-                        d="M6.2 6.2l.6 10.2a1 1 0 001 .8h4.4a1 1 0 001-.8l.6-10.2"
-                        stroke="currentColor"
-                        stroke-width="1.4"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </li>
-            </ul>
-
-            <div
-              v-if="destFormIdx != null && destDrafts[destFormIdx]"
-              class="dest-form"
-              data-testid="sales-preview-dest-row"
-            >
-              <div class="dest-form__row dest-form__row--top">
-                <OdsFormField :label="LABEL_RCV_NAME" required>
-                  <OdsInput
-                    :model-value="destDrafts[destFormIdx].rcv_name"
-                    variant="form"
-                    bare
-                    @update:model-value="patchDestDraft(destFormIdx, { rcv_name: $event })"
-                  />
-                </OdsFormField>
-                <OdsFormField :label="LABEL_RCV_TEL" required>
-                  <OdsInput
-                    :model-value="destDrafts[destFormIdx].rcv_tel"
-                    variant="form"
-                    bare
-                    @update:model-value="patchDestDraft(destFormIdx, { rcv_tel: $event })"
-                  />
-                </OdsFormField>
-                <OdsFormField :label="LABEL_DEST_QTY" required>
-                  <OdsInput
-                    :key="`dest-qty-${destFormIdx}-${destQtyInputKey}`"
-                    :model-value="String(destDrafts[destFormIdx].qty)"
-                    type="number"
-                    min="1"
-                    step="1"
-                    inputmode="numeric"
-                    variant="form"
-                    bare
-                    class="dest-form__qty"
-                    data-testid="sales-preview-dest-qty"
-                    @update:model-value="setDestQty(destFormIdx, $event)"
-                  />
-                </OdsFormField>
-                <OdsFormField :label="LABEL_DEST_FEE" required>
-                  <OdsInput
-                    :model-value="formatAmt(Number(destDrafts[destFormIdx].ship_fee))"
-                    type="text"
-                    inputmode="numeric"
-                    variant="form"
-                    bare
-                    class="amt-input dest-form__fee"
-                    data-testid="sales-preview-dest-fee"
-                    @update:model-value="
-                      patchDestDraft(destFormIdx, { ship_fee: normalizeShipFee($event) })
-                    "
-                  />
-                </OdsFormField>
-              </div>
-              <OdsFormField :label="LABEL_RCV_ADDR" required>
-                <OdsInput
-                  :model-value="destDrafts[destFormIdx].rcv_addr"
-                  variant="form"
-                  bare
-                  @update:model-value="patchDestDraft(destFormIdx, { rcv_addr: $event })"
-                />
-              </OdsFormField>
-              <OdsFormField :label="LABEL_DEST_MEMO" optional>
-                <OdsInput
-                  :model-value="destDrafts[destFormIdx].dlvry_msg"
-                  variant="form"
-                  bare
-                  @update:model-value="patchDestDraft(destFormIdx, { dlvry_msg: $event })"
-                />
-              </OdsFormField>
-              <OdsButton
-                type="button"
-                variant="secondary"
-                data-testid="sales-preview-dest-save"
-                @click="collapseDestForm"
-              >
-                {{ LABEL_DEST_SAVE }}
-              </OdsButton>
-            </div>
-
-            <OdsButton
-              v-if="destFormIdx == null"
-              type="button"
-              variant="secondary"
-              data-testid="sales-preview-dest-add"
-              @click="addDestDraft"
-            >
-              {{ LABEL_ADD_DEST }}
-            </OdsButton>
-
-            <p
-              v-if="destSheetErr"
-              class="dest-sheet__err"
-              role="alert"
-              data-testid="sales-preview-dest-err"
-            >
-              {{ destSheetErr }}
-            </p>
-          </div>
-
-          <footer class="dest-sheet__foot">
-            <OdsButton type="button" data-testid="sales-preview-dest-done" @click="commitDestSheet">
-              {{ LABEL_DEST_DONE }}
-            </OdsButton>
-          </footer>
-        </div>
-      </div>
-      <div
-        v-if="destTip"
-        class="dest-tip"
-        data-testid="sales-preview-dest-tip"
-        role="status"
-        :style="{ top: `${destTip.top}px`, left: `${destTip.left}px` }"
-      >
-        {{ destTip.text }}
-      </div>
-    </Teleport>
+    <ParcelDestinationSheet
+      :open="destEditIdx != null"
+      :product-summary="destProductSummary"
+      :order-qty="destOrderQty"
+      :unit-label="destSaleUnit"
+      :initial-dests="destInitialDests"
+      :customer-defaults="customerDefaults()"
+      :orderer-name="destOrdererName"
+      :show-ship-fee="true"
+      test-id-prefix="sales-preview"
+      @close="closeDestSheet"
+      @complete="onDestComplete"
+    />
 
     <Teleport to="body">
       <div
@@ -1936,45 +1414,6 @@ onBeforeUnmount(() => {
   font: var(--ods-font-title-3);
   font-weight: 700;
 }
-.dest-sheet__product {
-  min-width: 0;
-  padding: var(--ods-space-8) var(--ods-space-12);
-  border-radius: var(--ods-radius-button);
-  background: var(--ods-color-bg-muted, #f3f4f0);
-  box-sizing: border-box;
-}
-.dest-sheet__product-line {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--ods-space-4) var(--ods-space-16);
-  min-width: 0;
-  font: var(--ods-font-body-2);
-  line-height: 1.35;
-  font-variant-numeric: tabular-nums;
-}
-.dest-sheet__meta {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--ods-space-4);
-  min-width: 0;
-}
-.dest-sheet__meta-lbl {
-  flex-shrink: 0;
-  font: var(--ods-font-caption);
-  font-weight: 700;
-  color: var(--ods-color-text-secondary);
-}
-.dest-sheet__meta-val {
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
 .dest-sheet__x {
   border: none;
   background: transparent;
@@ -1992,155 +1431,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--ods-space-12);
   min-width: 0;
-}
-.dest-common-memo {
-  min-width: 0;
-}
-.dest-common-memo :deep(.ods-form-field) {
-  gap: var(--ods-space-4);
-}
-.dest-common-memo :deep(.ods-form-field__label) {
-  font: var(--ods-font-caption);
-  font-weight: 700;
-  color: var(--ods-color-text-secondary);
-}
-.dest-common-memo__row {
-  display: grid;
-  grid-template-columns: minmax(5.5rem, 6.5rem) minmax(0, 1fr) auto;
-  gap: var(--ods-space-4);
-  align-items: center;
-  min-width: 0;
-}
-.dest-common-memo__mode {
-  width: 100%;
-  min-width: 0;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
-  font: var(--ods-font-caption);
-  font-weight: 600;
-  padding-inline: var(--ods-space-4);
-  box-sizing: border-box;
-}
-.dest-common-memo__input {
-  min-width: 0;
-  width: 100%;
-}
-.dest-common-memo :deep(input.ods-input),
-.dest-common-memo :deep(.dest-common-memo__input.ods-input) {
-  height: 28px;
-  min-height: 28px;
-  padding: 0 var(--ods-space-8);
-  font: var(--ods-font-caption);
-  font-weight: 600;
-  box-sizing: border-box;
-}
-.dest-common-memo__apply {
-  flex-shrink: 0;
-  min-height: 28px !important;
-  height: 28px;
-  padding-inline: var(--ods-space-8);
-  font: var(--ods-font-caption) !important;
-  font-weight: 700 !important;
-}
-.dest-summary-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
-  min-width: 0;
-}
-.dest-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--ods-space-8);
-  min-height: var(--preview-icon-touch, 40px);
-  padding: var(--ods-space-8) 0;
-  border-bottom: 1px solid var(--ods-color-border);
-  min-width: 0;
-}
-.dest-summary__body {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.dest-summary__line1 {
-  margin: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dest-summary__line2 {
-  margin: 0;
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dest-summary__addr {
-  cursor: help;
-}
-.dest-summary__memo {
-  color: var(--ods-color-text-secondary);
-}
-.dest-summary__actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ods-space-4);
-  flex-shrink: 0;
-  align-self: center;
-}
-.dest-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-8);
-  min-width: 0;
-  padding-bottom: var(--ods-space-4);
-  border-bottom: 1px solid var(--ods-color-border);
-}
-.dest-form__row--top {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) 52px 72px;
-  gap: var(--ods-space-8);
-  align-items: start;
-  min-width: 0;
-}
-.dest-form :deep(.ods-form-field__label) {
-  font: var(--ods-font-caption);
-  font-weight: 700;
-}
-.dest-form :deep(input.ods-input) {
-  height: 36px;
-  min-height: 36px;
-  padding: 0 var(--ods-space-8);
-  box-sizing: border-box;
-}
-.dest-form__qty :deep(input.ods-input),
-.dest-form :deep(input.dest-form__qty.ods-input),
-.dest-form :deep(.dest-form__qty.ods-input) {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  padding-inline: var(--ods-space-4);
-}
-.dest-form__fee :deep(input.ods-input),
-.dest-form :deep(input.dest-form__fee.ods-input),
-.dest-form :deep(.dest-form__fee.ods-input) {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  padding-inline: var(--ods-space-4);
-}
-.dest-sheet__err {
-  margin: 0;
-  color: var(--ods-color-danger, #b00020);
-  font: var(--ods-font-footnote, 12px);
 }
 .dest-sheet__sender-hint {
   margin: var(--ods-space-4) 0 0;
@@ -2185,32 +1475,9 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 44px;
 }
-.dest-tip {
-  position: fixed;
-  z-index: 90;
-  transform: translate(-50%, -100%);
-  max-width: min(280px, calc(100vw - 24px));
-  padding: var(--ods-space-4) var(--ods-space-8);
-  border-radius: var(--ods-radius-button);
-  background: color-mix(in srgb, var(--ods-color-text) 88%, transparent);
-  color: var(--ods-color-white, #fff);
-  font: var(--ods-font-caption);
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: center;
-  pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  white-space: normal;
-}
 .dest-sheet__foot {
   padding: var(--ods-space-12) var(--ods-space-16) calc(var(--ods-space-12) + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--ods-color-border);
-}
-
-@media (max-width: 360px) {
-  .dest-form__row--top {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
 }
 
 </style>

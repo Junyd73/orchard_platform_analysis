@@ -3,10 +3,10 @@ import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import SalesPreviewView from '@/features/sales/SalesPreviewView.vue'
-import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
-import { stockSaleSpecKey } from '@/features/sales/shipConfirmModel'
-import { DELIVERY_TP_PARCEL, DELIVERY_TP_VISIT } from '@/features/orders/ordersConstants'
+import SalesPreviewView from '@/views/sales/SalesPreviewView.vue'
+import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import { stockSaleSpecKey } from '@/views/sales/shipConfirmModel'
+import { DELIVERY_TP_PARCEL, DELIVERY_TP_VISIT } from '@/views/orders/ordersConstants'
 import type { StockItem } from '@/api/stock'
 
 const confirmShipment = vi.fn()
@@ -23,7 +23,7 @@ vi.mock('@/api/commonCodes', () => ({
   fetchCommonCodes: (...a: unknown[]) => fetchCommonCodes(...a),
 }))
 
-vi.mock('@/shared/stores/app', async () => {
+vi.mock('@/composables/stores/app', async () => {
   const { ref } = await import('vue')
   return {
     useAppStore: () => ({

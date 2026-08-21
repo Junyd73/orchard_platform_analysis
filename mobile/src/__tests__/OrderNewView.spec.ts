@@ -1,17 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DOMWrapper, mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { createCustomer, createOrder, fetchCustomers, fetchOrder, updateOrder } from '@/api/orders'
 import OrderNewView from '@/views/orders/OrderNewView.vue'
 import {
-  LABEL_ALLOC,
   LABEL_CUSTOMER,
   LABEL_CUSTOMER_SAVE,
   LABEL_DELIVERY_INFO,
   LABEL_DELIVERY_TP,
-  LABEL_DEST_QTY,
   LABEL_EDIT_ORDER,
   LABEL_LINE,
   LABEL_NEW_ORDER,
@@ -23,10 +21,10 @@ import {
   LABEL_RCV_TEL,
   LABEL_SAVE_ORDER,
   LABEL_SIZE,
-  LABEL_UNASSIGNED,
   LABEL_VARIETY,
   LABEL_WEIGHT,
   MSG_LINE_REQUIRED,
+  MSG_PARCEL_DEST_NONE,
   MSG_PARCEL_QTY_OVER,
   formatOrderLineSpec,
   parseWeightFromCodeNm,
@@ -105,14 +103,49 @@ async function selectParcel(wrapper: ReturnType<typeof mount>) {
   await flushPromises()
 }
 
-async function fillOpenDest(
-  wrapper: ReturnType<typeof mount>,
-  dest: { qty: string; name: string; tel: string; addr: string },
-) {
-  await fieldByLabel(wrapper, LABEL_DEST_QTY)?.find('input').setValue(dest.qty)
-  await fieldByLabel(wrapper, LABEL_RCV_NAME)?.find('input').setValue(dest.name)
-  await fieldByLabel(wrapper, LABEL_RCV_TEL)?.find('input').setValue(dest.tel)
-  await fieldByLabel(wrapper, LABEL_RCV_ADDR)?.find('input').setValue(dest.addr)
+function destSheet() {
+  return document.querySelector('[data-testid="order-new-dest-sheet"]')
+}
+
+async function openDestSheet(wrapper: ReturnType<typeof mount>) {
+  await wrapper.find('[data-testid="order-new-dest-open"]').trigger('click')
+  await flushPromises()
+}
+
+async function addDestInSheet() {
+  const sheet = destSheet()
+  ;(sheet!.querySelector('[data-testid="order-new-dest-add"]') as HTMLButtonElement).click()
+  await flushPromises()
+}
+
+async function fillOpenDestInSheet(dest: {
+  qty: string
+  name: string
+  tel: string
+  addr: string
+}) {
+  const sheet = destSheet()!
+  const row = sheet.querySelector('[data-testid="order-new-dest-row"]')!
+  const inputs = row.querySelectorAll('input')
+  /* 수령인 · 연락처 · 수량 · 주소 · 배송메모 (배송비 없음) */
+  await new DOMWrapper(inputs[0]).setValue(dest.name)
+  await new DOMWrapper(inputs[1]).setValue(dest.tel)
+  await new DOMWrapper(inputs[2]).setValue(dest.qty)
+  await new DOMWrapper(inputs[3]).setValue(dest.addr)
+  ;(sheet.querySelector('[data-testid="order-new-dest-save"]') as HTMLButtonElement).click()
+  await flushPromises()
+  expect(sheet.querySelector('[data-testid="order-new-dest-row"]')).toBeFalsy()
+}
+
+afterEach(() => {
+  document.body.querySelectorAll('[data-testid$="-dest-sheet"]').forEach((el) => el.remove())
+  document.body.querySelectorAll('[data-testid$="-dest-tip"]').forEach((el) => el.remove())
+})
+
+async function doneDestSheet() {
+  const sheet = destSheet()!
+  ;(sheet.querySelector('[data-testid="order-new-dest-done"]') as HTMLButtonElement).click()
+  await flushPromises()
 }
 
 async function clickSave(wrapper: ReturnType<typeof mount>) {
@@ -539,27 +572,30 @@ describe('OrderNewView', () => {
     await fieldByLabel(wrapper, LABEL_CUSTOMER)?.find('select').setValue('C001')
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('10')
     await selectParcel(wrapper)
-    await wrapper.find('.dest-summary').trigger('click')
-    await fillOpenDest(wrapper, {
+    expect(wrapper.text()).toContain(MSG_PARCEL_DEST_NONE)
+    await openDestSheet(wrapper)
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '3',
       name: '이문자',
       tel: '010-1111-0001',
       addr: '경기 하남시 A',
     })
-    await wrapper.find('.add-dest-btn').trigger('click')
-    await fillOpenDest(wrapper, {
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '2',
       name: '김수령',
       tel: '010-1111-0002',
       addr: '경기 하남시 B',
     })
-    await wrapper.find('.add-dest-btn').trigger('click')
-    await fillOpenDest(wrapper, {
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '5',
       name: '박수령',
       tel: '010-1111-0003',
       addr: '경기 하남시 C',
     })
+    await doneDestSheet()
     await clickSave(wrapper)
     expect(createOrder).toHaveBeenCalled()
     const payload = vi.mocked(createOrder).mock.calls.at(-1)?.[1] as {
@@ -576,52 +612,71 @@ describe('OrderNewView', () => {
     await fieldByLabel(wrapper, LABEL_CUSTOMER)?.find('select').setValue('C001')
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('10')
     await selectParcel(wrapper)
-    await wrapper.find('.dest-summary').trigger('click')
-    await fillOpenDest(wrapper, {
+    await openDestSheet(wrapper)
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '8',
       name: '이문자',
       tel: '010-1111-0001',
       addr: '경기 하남시 A',
     })
+    await doneDestSheet()
     await clickSave(wrapper)
     expect(createOrder).toHaveBeenCalled()
     createOrder.mockClear()
-    await fillOpenDest(wrapper, {
-      qty: '12',
-      name: '이문자',
-      tel: '010-1111-0001',
-      addr: '경기 하남시 A',
-    })
+
+    await openDestSheet(wrapper)
+    const sheet = destSheet()!
+    ;(sheet.querySelector('[data-testid="order-new-dest-edit"]') as HTMLButtonElement).click()
+    await flushPromises()
+    await new DOMWrapper(sheet.querySelector('[data-testid="order-new-dest-qty"]')!).setValue('12')
+    await flushPromises()
+    expect(
+      (sheet.querySelector('[data-testid="order-new-dest-qty"]') as HTMLInputElement).value,
+    ).toBe('8')
+    expect(document.querySelector('[data-testid="order-new-dest-tip"]')?.textContent || '').toContain(
+      '초과',
+    )
+    ;(sheet.querySelector('[data-testid="order-new-dest-save"]') as HTMLButtonElement).click()
+    await flushPromises()
+    await doneDestSheet()
+
+    await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('5')
     await clickSave(wrapper)
     expect(wrapper.text()).toContain(MSG_PARCEL_QTY_OVER)
     expect(createOrder).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('recalculates alloc after deleting a destination', async () => {
+  it('recalculates status after deleting a destination', async () => {
     const wrapper = await mountNewOrder()
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('10')
     await selectParcel(wrapper)
-    expect(wrapper.text()).toContain(LABEL_ALLOC)
-    expect(wrapper.text()).toContain(LABEL_UNASSIGNED)
-    await wrapper.find('.dest-summary').trigger('click')
-    await fillOpenDest(wrapper, {
+    expect(wrapper.text()).toContain(MSG_PARCEL_DEST_NONE)
+    await openDestSheet(wrapper)
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '4',
       name: '이문자',
       tel: '010-1111-0001',
       addr: '경기 하남시 A',
     })
-    await wrapper.find('.add-dest-btn').trigger('click')
-    await fillOpenDest(wrapper, {
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '3',
       name: '김수령',
       tel: '010-1111-0002',
       addr: '경기 하남시 B',
     })
-    expect(wrapper.text()).toContain(`${LABEL_ALLOC} 7 / 10`)
-    await wrapper.find('.line-head__del').trigger('click')
-    expect(wrapper.findAll('.dest-card')).toHaveLength(1)
-    expect(wrapper.text()).toContain(`${LABEL_ALLOC} 4 / 10`)
+    await doneDestSheet()
+    expect(wrapper.text()).toContain('배송 7/10박스')
+    await openDestSheet(wrapper)
+    const sheet = destSheet()!
+    const removes = sheet.querySelectorAll('[data-testid="order-new-dest-remove"]')
+    ;(removes[1] as HTMLButtonElement).click()
+    await flushPromises()
+    await doneDestSheet()
+    expect(wrapper.text()).toContain('배송 4/10박스')
     wrapper.unmount()
   })
 
@@ -630,30 +685,34 @@ describe('OrderNewView', () => {
     await fieldByLabel(wrapper, LABEL_CUSTOMER)?.find('select').setValue('C001')
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('3')
     await selectParcel(wrapper)
-    await wrapper.find('.dest-summary').trigger('click')
-    await fillOpenDest(wrapper, {
+    await openDestSheet(wrapper)
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '3',
       name: '상품1수령',
       tel: '010-2000-0001',
       addr: '서울 1',
     })
+    await doneDestSheet()
     await wrapper.find('.add-line-btn').trigger('click')
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('5')
     await selectParcel(wrapper)
-    await wrapper.find('.dest-summary').trigger('click')
-    await fillOpenDest(wrapper, {
+    await openDestSheet(wrapper)
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '2',
       name: '상품2수령A',
       tel: '010-2000-0002',
       addr: '서울 2A',
     })
-    await wrapper.find('.add-dest-btn').trigger('click')
-    await fillOpenDest(wrapper, {
+    await addDestInSheet()
+    await fillOpenDestInSheet({
       qty: '3',
       name: '상품2수령B',
       tel: '010-2000-0003',
       addr: '서울 2B',
     })
+    await doneDestSheet()
     await clickSave(wrapper)
     const payload = vi.mocked(createOrder).mock.calls.at(-1)?.[1] as {
       lines: { qty: number; deliveries: { qty: number; rcv_name: string }[] }[]
@@ -669,16 +728,17 @@ describe('OrderNewView', () => {
     await fieldByLabel(wrapper, LABEL_CUSTOMER)?.find('select').setValue('C001')
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('10')
     await selectParcel(wrapper)
-    await wrapper.find('.dest-summary').trigger('click')
+    await openDestSheet(wrapper)
     for (let i = 1; i <= 10; i += 1) {
-      if (i > 1) await wrapper.find('.add-dest-btn').trigger('click')
-      await fillOpenDest(wrapper, {
+      await addDestInSheet()
+      await fillOpenDestInSheet({
         qty: '1',
         name: `수령${i}`,
         tel: `010-3000-${String(i).padStart(4, '0')}`,
         addr: `서울 ${i}`,
       })
     }
+    await doneDestSheet()
     await clickSave(wrapper)
     const payload = vi.mocked(createOrder).mock.calls.at(-1)?.[1] as {
       lines: { deliveries: { qty: number }[] }[]
@@ -699,8 +759,11 @@ describe('OrderNewView', () => {
       value: 'SZ010200',
     })
     await wrapper.find('.ship-head').trigger('click')
-    expect(wrapper.text()).toContain('이문자')
-    expect(wrapper.findAll('.dest-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('배송지 등록 완료')
+    await openDestSheet(wrapper)
+    const sheet = destSheet()!
+    expect(sheet.querySelectorAll('[data-testid="order-new-dest-summary-row"]')).toHaveLength(2)
+    expect(sheet.textContent || '').toContain('이문자')
     wrapper.unmount()
   })
 
@@ -708,14 +771,21 @@ describe('OrderNewView', () => {
     const wrapper = await mountEditOrder()
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('12')
     await wrapper.find('.ship-head').trigger('click')
-    await wrapper.find('.dest-summary').trigger('click')
-    await fieldByLabel(wrapper, LABEL_DEST_QTY)?.find('input').setValue('5')
-    await wrapper.findAll('.dest-summary').at(-1)?.trigger('click')
-    const destQtyFields = wrapper.findAll('.ods-form-field').filter((f) => {
-      const lab = f.find('.ods-form-field__label-text')
-      return lab.exists() && lab.text() === LABEL_DEST_QTY
-    })
-    await destQtyFields.at(-1)?.find('input').setValue('7')
+    await openDestSheet(wrapper)
+    const sheet = destSheet()!
+    const edits = sheet.querySelectorAll('[data-testid="order-new-dest-edit"]')
+    ;(edits[0] as HTMLButtonElement).click()
+    await flushPromises()
+    await new DOMWrapper(sheet.querySelector('[data-testid="order-new-dest-qty"]')!).setValue('5')
+    ;(sheet.querySelector('[data-testid="order-new-dest-save"]') as HTMLButtonElement).click()
+    await flushPromises()
+    const edits2 = sheet.querySelectorAll('[data-testid="order-new-dest-edit"]')
+    ;(edits2[1] as HTMLButtonElement).click()
+    await flushPromises()
+    await new DOMWrapper(sheet.querySelector('[data-testid="order-new-dest-qty"]')!).setValue('7')
+    ;(sheet.querySelector('[data-testid="order-new-dest-save"]') as HTMLButtonElement).click()
+    await flushPromises()
+    await doneDestSheet()
     await clickSave(wrapper)
     expect(createOrder).not.toHaveBeenCalled()
     expect(updateOrder).toHaveBeenCalled()

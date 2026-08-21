@@ -1,5 +1,6 @@
 import {
   MSG_PARCEL_DEST_INCOMPLETE,
+  MSG_PARCEL_DEST_NONE,
   MSG_PARCEL_DEST_QTY,
   MSG_PARCEL_DEST_REQUIRED,
   MSG_PARCEL_QTY_MISMATCH,
@@ -56,6 +57,28 @@ export function deliveryStatusText(saleQty: number, assigned: number, unit = '�
     return `배송 ${got}/${sale}${unit} · ${-remain}초과`
   }
   return '배송지 등록 완료'
+}
+
+/** 주문 택배 — 미배정(0)은 미등록, 그 외는 sales 동일 문구 */
+export function orderParcelStatusText(
+  orderQty: number,
+  assigned: number,
+  unit = '박스',
+): string {
+  if (Number(assigned) <= QTY_EPS) return MSG_PARCEL_DEST_NONE
+  return deliveryStatusText(orderQty, assigned, unit)
+}
+
+/** ok | warn | danger — 배송상태 시각 구분 */
+export function deliveryQtyTone(
+  orderQty: number,
+  assigned: number,
+): 'ok' | 'warn' | 'danger' {
+  const sale = Number(orderQty) || 0
+  const got = Number(assigned) || 0
+  if (Math.abs(got - sale) <= QTY_EPS) return 'ok'
+  if (got > sale) return 'danger'
+  return 'warn'
 }
 
 export function isDeliveryQtyMatched(line: ShipDraftLine): boolean {
