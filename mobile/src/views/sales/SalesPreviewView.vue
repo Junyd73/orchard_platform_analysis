@@ -65,9 +65,9 @@ const LABEL_LINES = '판매 품목'
 const LABEL_COL_ITEM = '품목'
 const LABEL_COL_QTY = '수량'
 const LABEL_COL_PRICE = '단가'
-const LABEL_DEST_SHEET = '배송지 배분'
+const LABEL_DEST_SHEET = '배송지 등록'
 const LABEL_ADD_DEST = '+ 배송지 추가'
-const LABEL_DEST_SAVE = '담기'
+const LABEL_DEST_SAVE = '배송지추가'
 const LABEL_DEST_DONE = '완료'
 const LABEL_SALE_QTY = '판매수량'
 const LABEL_DEST_QTY = '수량'
@@ -280,13 +280,20 @@ function customerDefaults() {
   }
 }
 
-function formatDestSummaryLine(d: ShipDeliveryDraft): string {
+function formatDestSummaryPrimary(d: ShipDeliveryDraft): string {
   const unit = destSaleUnit.value
   const name = String(d.rcv_name || '').trim() || '수령인 미입력'
   const tel = String(d.rcv_tel || '').trim()
   const qty = `${Math.max(0, Math.floor(Number(d.qty) || 0))}${unit}`
-  const fee = `${formatAmt(Number(d.ship_fee))}원`
-  return [name, tel, qty, fee].filter(Boolean).join(' · ')
+  return [name, tel, qty].filter(Boolean).join(' · ')
+}
+
+function formatDestSummaryAddr(d: ShipDeliveryDraft): string {
+  return String(d.rcv_addr || '').trim()
+}
+
+function formatDestSummaryMemo(d: ShipDeliveryDraft): string {
+  return String(d.dlvry_msg || '').trim()
 }
 
 function destDraftFieldError(d: ShipDeliveryDraft): string {
@@ -298,7 +305,7 @@ function destDraftFieldError(d: ShipDeliveryDraft): string {
   return ''
 }
 
-/** 편집 폼 → 상단 요약 1줄. 유효하지 않으면 false */
+/** 편집 폼 → 상단 요약. 유효하지 않으면 false */
 function collapseDestForm(): boolean {
   if (destFormIdx.value == null) return true
   const d = destDrafts.value[destFormIdx.value]
@@ -774,12 +781,21 @@ onMounted(async () => {
       >
         <div class="dest-sheet">
           <header class="dest-sheet__head">
-            <div>
-              <h3 class="dest-sheet__title">{{ LABEL_DEST_SHEET }}</h3>
-              <p class="dest-sheet__spec">{{ destLineSpec }}</p>
-              <p class="dest-sheet__qty">{{ LABEL_SALE_QTY }} {{ destSaleQty }}{{ destSaleUnit }}</p>
+            <div class="dest-sheet__head-main">
+              <div class="dest-sheet__title-row">
+                <h3 class="dest-sheet__title">{{ LABEL_DEST_SHEET }}</h3>
+                <button type="button" class="dest-sheet__x" aria-label="닫기" @click="closeDestSheet">
+                  ✕
+                </button>
+              </div>
+              <div class="dest-sheet__product" data-testid="sales-preview-dest-product">
+                <p class="dest-sheet__spec">{{ destLineSpec }}</p>
+                <p class="dest-sheet__qty">
+                  <span class="dest-sheet__qty-lbl">{{ LABEL_SALE_QTY }}</span>
+                  <strong class="dest-sheet__qty-val">{{ destSaleQty }}{{ destSaleUnit }}</strong>
+                </p>
+              </div>
             </div>
-            <button type="button" class="dest-sheet__x" aria-label="닫기" @click="closeDestSheet">✕</button>
           </header>
 
           <div class="dest-sheet__body">
@@ -791,7 +807,19 @@ onMounted(async () => {
                 class="dest-summary"
                 data-testid="sales-preview-dest-summary-row"
               >
-                <span class="dest-summary__text">{{ formatDestSummaryLine(d) }}</span>
+                <div class="dest-summary__body">
+                  <p class="dest-summary__line1">{{ formatDestSummaryPrimary(d) }}</p>
+                  <p class="dest-summary__line2">
+                    <span
+                      class="dest-summary__addr"
+                      :title="formatDestSummaryAddr(d) || undefined"
+                    >{{ formatDestSummaryAddr(d) || '주소 미입력' }}</span>
+                    <template v-if="formatDestSummaryMemo(d)">
+                      <span class="dest-summary__sep" aria-hidden="true"> · </span>
+                      <span class="dest-summary__memo">{{ formatDestSummaryMemo(d) }}</span>
+                    </template>
+                  </p>
+                </div>
                 <div class="dest-summary__actions">
                   <button
                     type="button"
@@ -1494,21 +1522,64 @@ onMounted(async () => {
   overflow: hidden;
 }
 .dest-sheet__head {
+  padding: var(--ods-space-12) var(--ods-space-16);
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.dest-sheet__head-main {
   display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+  min-width: 0;
+  width: 100%;
+}
+.dest-sheet__title-row {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  padding: var(--ods-space-16);
-  border-bottom: 1px solid var(--ods-color-border);
+  min-width: 0;
 }
 .dest-sheet__title {
   margin: 0;
   font: var(--ods-font-title-3);
 }
-.dest-sheet__spec,
+.dest-sheet__product {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+  min-width: 0;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-bg-muted, #f3f4f0);
+  box-sizing: border-box;
+}
+.dest-sheet__spec {
+  margin: 0;
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-text);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dest-sheet__qty {
-  margin: var(--ods-space-4) 0 0;
-  font: var(--ods-font-footnote, 12px);
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
+}
+.dest-sheet__qty-lbl {
+  flex-shrink: 0;
+}
+.dest-sheet__qty-val {
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-primary);
+  font-variant-numeric: tabular-nums;
 }
 .dest-sheet__x {
   border: none;
@@ -1516,6 +1587,9 @@ onMounted(async () => {
   font-size: 18px;
   cursor: pointer;
   color: var(--ods-color-text-secondary);
+  flex-shrink: 0;
+  line-height: 1;
+  padding: var(--ods-space-4);
 }
 .dest-sheet__body {
   overflow-y: auto;
@@ -1540,24 +1614,45 @@ onMounted(async () => {
   align-items: center;
   gap: var(--ods-space-8);
   min-height: var(--preview-icon-touch, 40px);
-  padding: var(--ods-space-4) 0;
+  padding: var(--ods-space-8) 0;
   border-bottom: 1px solid var(--ods-color-border);
   min-width: 0;
 }
-.dest-summary__text {
+.dest-summary__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dest-summary__line1 {
+  margin: 0;
   font: var(--ods-font-body-2);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ods-color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+}
+.dest-summary__line2 {
+  margin: 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dest-summary__addr {
+  cursor: help;
+}
+.dest-summary__memo {
+  color: var(--ods-color-text-secondary);
 }
 .dest-summary__actions {
   display: inline-flex;
   align-items: center;
   gap: var(--ods-space-4);
   flex-shrink: 0;
+  align-self: center;
 }
 .dest-form {
   display: flex;
