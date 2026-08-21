@@ -1,8 +1,8 @@
 # 06. Development progress
 
-> **현재 기준 (2026-08-21):** private main **`4c77791`** (2단계 DEC-028 merge). 운영 backend **`fd963e0`** (미배포). analysis main **`c51aa33`** (자동 mirror 전 기준 · push 후 갱신).  
+> **현재 기준 (2026-08-21):** private main **`a41b40e`**. 운영 backend **`a41b40e`**. analysis main **`e2e4026`** (문서 push 후 auto mirror 갱신).  
 > Stage 6 출고/판매 · Order→Shipment Step1~3 · 주문목록 compact 2줄 UI **운영 반영 완료**.  
-> 설계 문서(DEC-019/028/029) · 2단계 선입금 결제수단 코드는 **private main 반영 완료**. 운영 ALTER/배포 **대기**.  
+> **2단계 DEC-028 선입금 결제수단: 완료 · 운영** (`pre_pay_method_cd` ALTER + 배포).  
 > **다음 개발 순서 SSOT:** [2026-08-21 절](#2026-08-21--선입금수금-정책-확정) 1~8.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019/028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
@@ -21,8 +21,8 @@
 | 5A (=3A) | 재고배정 Core — HOLD / RELEASE / allocation | **완료 · 운영** |
 | 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료 · 운영** |
 | 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **완료 · 운영** |
-| 6 | 모바일 출고·배정·판매 UX + Order→Ship Step1~3 | **완료 · 운영** (`fd963e0`) |
-| — | **다음:** 2단계 운영 ALTER/배포 → 3 수금 Core → 출고 선입금 배분 → 판매목록/상세 → PC 정합 → 가락 | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
+| 6 | 모바일 출고·배정·판매 UX + Order→Ship Step1~3 | **완료 · 운영** |
+| — | **다음:** 3 판매 수금 Core → 출고 선입금 배분 → 판매목록/상세 → PC 정합 → 가락 | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
 | 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
 | 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
 
@@ -30,13 +30,13 @@
 
 ```
 1 설계서 정합성 완료
-2 선입금 결제수단 기반  ← 코드/main 완료, 운영 ALTER·배포 대기
+2 선입금 결제수단 기반  ← 완료 · 운영
 3 판매 수금 Core        ← 아직 착수 금지
 → 4 출고 시 선입금 자동배분  →  5 판매목록  →  6 판매상세/수금등록
 → 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
 ```
 
-SHA 스냅샷: private main = `4c77791` · 운영 backend = `fd963e0` · analysis main = `c51aa33` (자동 mirror 전).
+SHA 스냅샷: private main = `a41b40e` · 운영 backend = `a41b40e` · analysis main = `e2e4026` (문서 커밋 push 후 mirror 갱신).
 
 ---
 
@@ -103,7 +103,7 @@ SHA 스냅샷: private main = `4c77791` · 운영 backend = `fd963e0` · analysi
 - [x] Stage 5B 재고조회/이력 (**운영 반영됨**. 당시 기록: 로컬 · main 미머지)
 - [x] ST01 운영 DB 확인 (DEC-011 **CLOSED** — 2026-08-17)
 - [x] **선입금 배분 확정 (DEC-019 APPROVED — 2026-08-21).** 순차 배분, 회차 적용액 = `min(선입금 잔액, 그 판매금액)`
-- [x] **주문 선입금 결제수단 (DEC-028 APPROVED — 2026-08-21).** 설계 + **2단계 코드 private main 반영** (`4c77791`). 운영 DDL/배포 **미실행**
+- [x] **주문 선입금 결제수단 (DEC-028 APPROVED — 2026-08-21).** 설계 + 코드 + **운영 ALTER/배포 완료** (`a41b40e`)
 - [x] **판매상태 ≠ 수금상태 (DEC-029 APPROVED — 2026-08-21).** 수금상태는 금액 계산값
 - [ ] 기존 HOLD 백필 (DEC-015 OPEN — **CLOSED 후보**. 운영 테스트데이터 초기화로 대상 없음. 운영 DB 재확인 SQL: `scripts/ops/check_order_alloc_preflight.sql`. 재확인 전 CLOSED 금지)
 - [ ] 가락 확정 시 `t_sales_delivery` (DEC-016 OPEN — 단계 6 전)
@@ -381,7 +381,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | DEC | 내용 | 상태 |
 |-----|------|------|
 | DEC-019 | 부분출고 선입금 **순차 배분**. 회차 적용액 = `min(선입금 잔액, 그 판매금액)`. 초과 적용·기존 CONFIRMED 판매 재작성 금지 | **APPROVED** |
-| DEC-028 | 주문 **선입금 결제수단**. `pre_pay_amt=0` → NULL, `>0` → 필수. 제안 컬럼 `t_order_master.pre_pay_method_cd TEXT NULL`. **DDL 미실행**. 결제수단 = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 제외 | **APPROVED** (설계) |
+| DEC-028 | 주문 **선입금 결제수단**. `pre_pay_amt=0` → NULL, `>0` → 필수. 컬럼 `t_order_master.pre_pay_method_cd TEXT NULL`. 결제수단 = **현금성 자산 계정**(`AS0101` level4). 채권(`AS02…`) 제외. **운영 ALTER·배포 완료** | **APPROVED** · **완료 · 운영** |
 | DEC-029 | **판매상태 ≠ 수금상태.** `sales_status`는 DRAFT/CONFIRMED만. 수금상태는 금액 계산값 | **APPROVED** |
 
 정리된 개념:
@@ -398,7 +398,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 
 ```
 1  설계서 정합성 완료
-2  선입금 결제수단 기반  ← 코드/main 완료, 운영 ALTER·배포 대기
+2  선입금 결제수단 기반  ← 완료 · 운영
 3  판매 수금 Core        ← 아직 착수 금지
 4  출고 시 선입금 자동배분
 5  판매목록
@@ -410,7 +410,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | # | 항목 | 상태 | 내용 | 선행 확인 |
 |---|------|------|------|-----------|
 | 1 | **설계서 정합성 완료** | **완료** | 본 문서 세트에 DEC-019/028/029 반영 | — |
-| 2 | **선입금 결제수단 기반** | **구현·private main 완료 / 운영 ALTER·배포 대기** | `pre_pay_method_cd` 저장·조회. `0`→NULL, `>0`→현금성 필수. parent `AS0101` / level4 / `use_yn=Y` 검증. legacy prepay>0·method NULL 조회 허용. ST010200/300 NULL→유효 method 최초 1회 보완 · 기존 method 변경 금지. 주문 단계 cash/ledger/sales **변화 없음** | 운영 ALTER 승인 후 배포 |
+| 2 | **선입금 결제수단 기반** | **완료 · 운영** | `pre_pay_method_cd` 저장·조회. `0`→NULL, `>0`→현금성 필수. parent `AS0101` / level4 / `use_yn=Y` 검증. legacy prepay>0·method NULL 조회 허용. ST010200/300 NULL→유효 method 최초 1회 보완 · 기존 method 변경 금지. 주문 단계 cash/ledger/sales **변화 없음**. 운영 ALTER `ADD COLUMN pre_pay_method_cd TEXT` + backend/frontend `a41b40e` | — |
 | 3 | **판매 수금 Core** | **미착수** | CONFIRMED 판매 수금 저장 Core 1곳. `t_cash_ledger` → `AccountManager` → `t_ledger` → paid/unpaid. DRAFT 금지 | 운영 `PRAGMA table_info(t_cash_ledger)` · 기존 계정코드 사용 실태 |
 | 4 | **출고 시 선입금 자동배분** | **예정** | `OrderShipService.confirm()`에 순차 배분 + 회계 연동 (DEC-019) | 3번 Core 완료 · 선입금/추가수금 구분키 확인 |
 | 5 | **판매목록** | **예정** | 판매금액·수금액·미수금·수금상태 배지. 판매상태 배지와 분리 | 3·4 |
@@ -422,7 +422,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 
 | 항목 | 확인 내용 | 상태 |
 |------|-----------|------|
-| `t_order_master.pre_pay_method_cd` | 운영에 **없음**. helper `ensure_order_prepay_method_schema` 로컬/테스트용. **운영 ALTER는 별도 승인** | 2단계 코드/main 완료 · **운영 ALTER·배포 대기** |
+| `t_order_master.pre_pay_method_cd` | 운영 **TEXT NULL 추가 완료** (2026-08-21). 기존 row NULL 유지(backfill 0). helper는 로컬/테스트용 | **완료 · 운영** |
 | 현금성 결제수단 범위 | `parent_cd='AS0101'` · level4 · `use_yn=Y` → AS010101/102/103. 채권 AS02 제외. 카드 계정 없음 | **확정** |
 | `t_cash_ledger.order_no` | 컬럼 **존재**하나 PC INSERT·운영 데이터 **미사용**. 선입금/추가수금 전용 구분키 **없음** | **OPEN** (3·4) |
 | DEC-016 가락 배송 | 가락 확정 시 `t_sales_delivery` | **OPEN** |
