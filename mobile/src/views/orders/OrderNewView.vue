@@ -17,7 +17,6 @@ import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
   CODE_PARENT_DELIVERY,
-  CODE_PARENT_FRUIT,
   CODE_PARENT_GRADE,
   CODE_PARENT_SIZE,
   CODE_PARENT_SPEC,
@@ -357,8 +356,8 @@ function lineWeightValue(line: EditLine): number {
 }
 
 function applyLineDefaults(line: EditLine) {
-  if (!line.variety_cd && varieties.value[0]) {
-    line.variety_cd = varieties.value[0].code_cd
+  if (!line.variety_cd || !isVarietyCode(line.variety_cd)) {
+    line.variety_cd = varieties.value[0]?.code_cd || ''
   }
   if (!line.grade_cd && grades.value[0]) {
     line.grade_cd = grades.value[0].code_cd
@@ -390,22 +389,17 @@ function setVariety(line: EditLine, varietyCd: string) {
 async function loadMasters() {
   errorMsg.value = ''
   try {
-    const [cust, fruit, grade, spec, size, dlv] = await Promise.all([
+    const [cust, pearKids, grade, spec, size, dlv] = await Promise.all([
       fetchCustomers(farmCd.value),
-      fetchCommonCodes(farmCd.value, CODE_PARENT_FRUIT),
+      fetchCommonCodes(farmCd.value, PEAR_ITEM_CD),
       fetchCommonCodes(farmCd.value, CODE_PARENT_GRADE),
       fetchCommonCodes(farmCd.value, CODE_PARENT_SPEC),
       fetchCommonCodes(farmCd.value, CODE_PARENT_SIZE),
       fetchCommonCodes(farmCd.value, CODE_PARENT_DELIVERY),
     ])
     customers.value = cust
-    const small = fruit.filter((c) => isPearVariety(c.code_cd))
-    if (small.length) {
-      varieties.value = small
-    } else {
-      varieties.value = (await fetchCommonCodes(farmCd.value, PEAR_ITEM_CD))
-        .filter((c) => isVarietyCode(c.code_cd))
-    }
+    // FR01 직계는 중분류(배/배즙/원물). 품종은 FR010100 하위 소분류만.
+    varieties.value = pearKids.filter((c) => isVarietyCode(c.code_cd))
     grades.value = grade
     specs.value = spec
     pearSizes.value = size
