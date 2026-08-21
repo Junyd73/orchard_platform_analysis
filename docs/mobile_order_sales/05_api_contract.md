@@ -80,20 +80,18 @@ POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, **`pre_pay_m
 PUT: `stock_status=Y` → 409. 부분출고(`shipped_qty>0`) 후 주문 헤더/줄 수정은 1차 거부 권고.  
 cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t_order_alloc` 행 단위** (DEC-018). 이미 출고된 allocation은 단순 취소 금지.
 
-### 3.1 선입금 결제수단 (DEC-028 APPROVED · 설계)
+### 3.1 선입금 결제수단 (DEC-028 APPROVED · **완료·운영**)
 
-POST / PUT 공통 필드. **컬럼 ALTER 전이므로 구현 상태 아님.**
+POST / PUT 공통 필드. `t_order_master.pre_pay_method_cd` 운영 반영됨.
 
 | 필드 | 타입 | 규칙 |
 |------|------|------|
 | `pre_pay_amt` | number | 기본 0. 음수 거부 |
 | `pre_pay_method_cd` | string \| null | `pre_pay_amt = 0` → **null 강제**(값이 오면 400). `pre_pay_amt > 0` → **필수**(누락/공백이면 400) |
 
-값 도메인은 **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 선입금은 실제 받은 돈이므로 **채권계정(외상·미수 `AS02…`)을 결제수단으로 쓰지 않는다.** `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 확정하지 않는다. **API·클라이언트에 결제수단 코드 하드코딩 금지.** 모바일 전용 결제수단 코드 정의 금지.
+값 도메인: **현금성** `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권(`AS02…`) 금지. 하드코딩 목록 금지.
 
-**주문 API는 회계를 만들지 않는다.** 결제수단을 받아도 `t_cash_ledger` / `t_ledger` INSERT·전표 채번은 **금지** (DEC-009). 회계는 판매확정에서만.
-
-검증은 Core(`core/order_service.py`)가 SSOT. FastAPI에 같은 검증을 복제하지 않는다 (DEC-007).
+**주문 API는 회계를 만들지 않는다** (DEC-009). 검증 SSOT = `core/order_service.py`.
 
 ---
 
@@ -222,32 +220,30 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 ---
 
-## 8. payment — 판매확정 기준 수금/회계 (**설계. 미구현**)
+## 8. payment — 판매확정 기준 수금/회계
 
-> **상태: 설계 단계.** 아래 경로는 아직 구현되지 않았다. `구현 완료`로 읽지 말 것.
+> **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **feature 구현.** main/운영 반영은 별도 승인.  
+> **HTTP GET/PUT:** 아직 **미구현** (개발순서 6 판매상세/수금등록).
 
-| method | path | 용도 |
-|--------|------|------|
-| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 그 판매의 수금 내역 + 판매금액/수금액/미수금/수금상태 |
-| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 등록/갱신 |
+| method | path | 용도 | 상태 |
+|--------|------|------|------|
+| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 내역 + 판매금액/수금액/미수금/수금상태 | **미구현** |
+| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 등록/갱신 | **미구현** |
 
-**검증 (DEC-029):**
+**검증 (DEC-029 · Core 반영):**
 
 | 항목 | 규칙 |
 |------|------|
-| 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT는 409** |
-| 수금액 | `> 0`. **그 판매의 미수금(`tot_unpaid_amt`) 초과 금지** → 400/409 |
-| 결제수단 | **필수**. **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 금지. 모바일 전용 코드 하드코딩 금지 |
-| 수금상태 | 응답 계산값 — `미수` / `부분수금` / `수금완료` ([03 §4.1](./03_data_contract.md)). DB 컬럼 아님 |
+| 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT 거부** |
+| 수금액 | `> 0`. 미수 = `tot_sales_amt − SUM(cash)`. 초과 금지 |
+| 결제수단 | **필수**. `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권 금지 |
+| 수금상태 | 응답 계산값 — `미수` / `부분수금` / `수금완료` ([03 §4.1](./03_data_contract.md)) |
 
-**단일 트랜잭션:** `t_cash_ledger` → `AccountManager.sync_ledger_by_basket('SALE', …)` → `t_ledger` → 판매마스터 `tot_paid_amt` / `tot_unpaid_amt`. 실패 시 전체 rollback.
+**단일 트랜잭션:** ledger sync → cash append(+동일 method slip 갱신) → master paid/unpaid. 실패 시 전체 rollback.  
+`add_payment_in_tx`는 caller-owned TX (4단계 OrderShip 재사용 예정).
 
-`sales_status`는 수금으로 **변경되지 않는다** (`PAID` 등 금지, DEC-029).  
-**주문 API에서 전표 생성 금지** (DEC-009).
-
-출고 TX가 선입금 적용분을 이미 넣었으면 이중 전표 주의 — 수금 서비스가 기존 줄을 포함한 **바구니 전체**를 `sync_ledger_by_basket`으로 동기화한다 (기존 엔진 재사용, 신규 회계 로직 금지).
-
-**구현 전 확인:** `t_cash_ledger`에서 선입금 적용분과 추가수금을 구분할 실제 컬럼 유무 ([03 §9](./03_data_contract.md) OPEN).
+`sales_status`는 수금으로 **변경되지 않는다** (DEC-029).  
+일반 추가수금 `t_cash_ledger.order_no = NULL`. 선입금 배분은 4단계.
 
 ---
 
@@ -291,4 +287,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
 
-**미구현 (설계만):** `sales/{sales_no}/payments` GET/PUT (§8) · 주문 `pre_pay_method_cd` (§3.1) · confirm 선입금 순차 배분 (§6.C).
+**미구현:** `sales/{sales_no}/payments` GET/PUT HTTP (§8 · Core는 개발순서 3 완료) · confirm 선입금 순차 배분 (§6.C · 개발순서 4).  
+**완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028).
