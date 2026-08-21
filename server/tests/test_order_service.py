@@ -40,11 +40,20 @@ from core.order_service import (  # noqa: E402
     OrderValidationError,
     item_cd_from_variety,
 )
+from core.order_ship_constants import SALES_STATUS_CONFIRMED  # noqa: E402
 
 
 FARM = "OR001"
 CUST = "C001"
 VARIETY = "FR010101"
+VARIETY_2 = "FR010102"
+GRADE = "GR010100"
+GRADE_2 = "GR010200"
+SPEC = "SZ010100"
+SPEC_2 = "SZ010200"
+DLVRY_VISIT = "LO010100"
+DLVRY_PARCEL = "LO010200"
+SALES_STATUS_DRAFT = "DRAFT"
 
 
 def _schema_sql() -> str:
@@ -78,10 +87,11 @@ def _schema_sql() -> str:
             dlvry_qty REAL, dlvry_msg TEXT, delivery_tp_cd TEXT, planned_dt TEXT, reg_dt TEXT
         );
         CREATE TABLE t_sales_master (
-            sales_no TEXT, farm_cd TEXT, order_no TEXT
+            sales_no TEXT, farm_cd TEXT, order_no TEXT, sales_status TEXT
         );
         CREATE TABLE t_sales_detail (
-            sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT, order_detail_id TEXT
+            sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT, order_detail_id TEXT,
+            qty REAL DEFAULT 0
         );
         CREATE TABLE t_sales_delivery (
             dlvry_no TEXT, sales_no TEXT, farm_cd TEXT
@@ -113,8 +123,11 @@ def _schema_sql() -> str:
             ('OR001', 'ST010400', '배송완료', 'ST01'),
             ('OR001', 'ST010500', '취소', 'ST01'),
             ('OR001', 'FR010101', '신고배', 'FR010100'),
+            ('OR001', 'FR010102', '원황배', 'FR010100'),
             ('OR001', 'GR010100', '특', 'GR01'),
+            ('OR001', 'GR010200', '상', 'GR01'),
             ('OR001', 'SZ010100', '15kg', 'SZ01'),
+            ('OR001', 'SZ010200', '7.5kg', 'SZ01'),
             ('OR001', 'LO010100', '방문수령', 'LO01'),
             ('OR001', 'LO010200', '택배', 'LO01');
     """
@@ -703,6 +716,187 @@ class OrderServiceStage2Test(unittest.TestCase):
         self.assertEqual(before["t_sales_master"], 0)
         self.assertEqual(before["hold"], 0)
         self.assertEqual(before["t_ledger"], 0)
+
+
+class OrderListCompactTest(unittest.TestCase):
+    """목록 2줄 compact — 대표상품·배송유형·출고/잔여 bulk 집계."""
+
+    def setUp(self) -> None:
+        self.path, self.conn = _open_tmp()
+        self.svc = OrderService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _line(
+        self,
+        *,
+        qty: float,
+        variety_cd: str = VARIETY,
+        grade_cd: str = GRADE,
+        size_cd: str = SPEC,
+        weight: float = 15,
+        dlvry_tp: str = DLVRY_VISIT,
+    ) -> OrderLineInput:
+        parcel = dlvry_tp == DLVRY_PARCEL
+        return OrderLineInput(
+            variety_cd=variety_cd,
+            weight=weight,
+            grade_cd=grade_cd,
+            size_cd=size_cd,
+            qty=qty,
+            unit_price=25000,
+            harvest_year=2026,
+            warehouse_cd=WAREHOUSE_CD_DEFAULT,
+            dlvry_tp=dlvry_tp,
+            deliveries=[
+                OrderDeliveryInput(
+                    delivery_tp_cd=dlvry_tp,
+                    qty=qty,
+                    rcv_name="수령인",
+                    rcv_tel="010-1111-2222",
+                    rcv_addr="경기 하남시 1" if parcel else "",
+                )
+            ],
+        )
+
+    def _create(self, lines: list[OrderLineInput]) -> str:
+        payload = _sample_payload(qty=1, pre_pay=0)
+        payload.lines = lines
+        return self.svc.create_order(FARM, payload, user_id="TEST")
+
+    def _first_item(self, order_no: str) -> dict:
+        listed = self.svc.list_orders(FARM, keyword=order_no)
+        self.assertEqual(listed["total"], 1)
+        return listed["items"][0]
+
+    def _add_sale(
+        self,
+        order_no: str,
+        *,
+        seq: int,
+        detail_seq: int = 1,
+        qty: float,
+        sales_status: str = SALES_STATUS_CONFIRMED,
+    ) -> None:
+        """주문에 연결된 판매 1건을 직접 넣는다 (출고 서비스 비의존)."""
+        sales_no = f"{order_no}-S{seq:02d}"
+        self.conn.execute(
+            "INSERT INTO t_sales_master (sales_no, farm_cd, order_no, sales_status)"
+            " VALUES (?, ?, ?, ?)",
+            (sales_no, FARM, order_no, sales_status),
+        )
+        self.conn.execute(
+            "INSERT INTO t_sales_detail (sale_detail_no, sales_no, farm_cd,"
+            " order_detail_id, qty) VALUES (?, ?, ?, ?, ?)",
+            (f"{sales_no}-01", sales_no, FARM, f"{order_no}-{detail_seq:02d}", qty),
+        )
+        self.conn.commit()
+
+    def test_single_line_representative_fields(self) -> None:
+        order_no = self._create([self._line(qty=30)])
+        item = self._first_item(order_no)
+        self.assertEqual(item["line_count"], 1)
+        self.assertEqual(item["rep_item_cd"], item_cd_from_variety(VARIETY))
+        self.assertEqual(item["rep_variety_cd"], VARIETY)
+        self.assertEqual(item["rep_variety_nm"], "신고배")
+        self.assertEqual(item["rep_grade_cd"], GRADE)
+        self.assertEqual(item["rep_grade_nm"], "특")
+        self.assertEqual(item["rep_size_cd"], SPEC)
+        self.assertEqual(item["rep_size_nm"], "15kg")
+        self.assertAlmostEqual(float(item["rep_weight"]), 15)
+        self.assertAlmostEqual(float(item["total_qty"]), 30)
+
+    def test_multi_line_rep_is_first_detail_and_outer_fields(self) -> None:
+        order_no = self._create(
+            [
+                self._line(qty=10),
+                self._line(qty=7, variety_cd=VARIETY_2, grade_cd=GRADE_2),
+                self._line(qty=3, size_cd=SPEC_2, weight=7.5),
+            ]
+        )
+        item = self._first_item(order_no)
+        self.assertEqual(item["line_count"], 3)
+        # 대표는 order_detail_id 최소값(-01) 이며 나머지 라인 규격이 섞이지 않는다
+        first = self.conn.execute(
+            "SELECT order_detail_id, variety_cd, grade_cd, size_cd, weight"
+            " FROM t_order_detail WHERE order_no = ? ORDER BY order_detail_id",
+            (order_no,),
+        ).fetchall()[0]
+        self.assertEqual(first["order_detail_id"], f"{order_no}-01")
+        self.assertEqual(item["rep_variety_cd"], first["variety_cd"])
+        self.assertEqual(item["rep_grade_cd"], first["grade_cd"])
+        self.assertEqual(item["rep_size_cd"], first["size_cd"])
+        self.assertAlmostEqual(float(item["rep_weight"]), float(first["weight"]))
+        self.assertEqual(item["rep_variety_nm"], "신고배")
+        self.assertEqual(item["rep_grade_nm"], "특")
+        # outer(주문 단위) 필드는 라인 합계/주문 상태를 따른다
+        self.assertAlmostEqual(float(item["total_qty"]), 20)
+        self.assertEqual(item["order_no"], order_no)
+        self.assertEqual(item["customer"], "테스트고객")
+        self.assertEqual(item["status_cd"], ORDER_STATUS_RESERVED_CD)
+        self.assertAlmostEqual(float(item["remaining_order_qty"]), 20)
+
+    def test_single_delivery_tp_count_is_one(self) -> None:
+        order_no = self._create([self._line(qty=5), self._line(qty=5)])
+        item = self._first_item(order_no)
+        self.assertEqual(item["delivery_tp_count"], 1)
+        self.assertEqual(item["delivery_tp_cd"], DLVRY_VISIT)
+        self.assertEqual(item["delivery_tp_nm"], "방문수령")
+
+    def test_mixed_delivery_tp_count_over_one_hides_single_name(self) -> None:
+        order_no = self._create(
+            [self._line(qty=5), self._line(qty=5, dlvry_tp=DLVRY_PARCEL)]
+        )
+        item = self._first_item(order_no)
+        self.assertEqual(item["delivery_tp_count"], 2)
+        self.assertEqual(item["delivery_tp_cd"], "")
+        self.assertEqual(item["delivery_tp_nm"], "")
+
+    def test_unshipped_30_has_zero_shipped_and_full_remaining(self) -> None:
+        order_no = self._create([self._line(qty=30)])
+        item = self._first_item(order_no)
+        self.assertAlmostEqual(float(item["confirmed_shipped_qty"]), 0)
+        self.assertAlmostEqual(float(item["remaining_order_qty"]), 30)
+
+    def test_partial_ship_10_of_30(self) -> None:
+        order_no = self._create([self._line(qty=30)])
+        self._add_sale(order_no, seq=1, qty=10)
+        item = self._first_item(order_no)
+        self.assertAlmostEqual(float(item["confirmed_shipped_qty"]), 10)
+        self.assertAlmostEqual(float(item["remaining_order_qty"]), 20)
+
+    def test_complete_ship_30_of_30(self) -> None:
+        order_no = self._create([self._line(qty=30)])
+        self._add_sale(order_no, seq=1, qty=10)
+        self._add_sale(order_no, seq=2, qty=20)
+        item = self._first_item(order_no)
+        self.assertAlmostEqual(float(item["confirmed_shipped_qty"]), 30)
+        self.assertAlmostEqual(float(item["remaining_order_qty"]), 0)
+
+    def test_non_confirmed_sales_excluded_from_shipped(self) -> None:
+        order_no = self._create([self._line(qty=30)])
+        self._add_sale(order_no, seq=1, qty=10)
+        self._add_sale(order_no, seq=2, qty=20, sales_status=SALES_STATUS_DRAFT)
+        item = self._first_item(order_no)
+        self.assertAlmostEqual(float(item["confirmed_shipped_qty"]), 10)
+        self.assertAlmostEqual(float(item["remaining_order_qty"]), 20)
+
+    def test_bulk_enrich_keeps_each_order_isolated(self) -> None:
+        visit = self._create([self._line(qty=30)])
+        mixed = self._create(
+            [self._line(qty=4, dlvry_tp=DLVRY_PARCEL), self._line(qty=6)]
+        )
+        self._add_sale(visit, seq=1, qty=30)
+        listed = self.svc.list_orders(FARM)
+        by_no = {r["order_no"]: r for r in listed["items"]}
+        self.assertEqual(listed["total"], 2)
+        self.assertAlmostEqual(float(by_no[visit]["remaining_order_qty"]), 0)
+        self.assertEqual(by_no[visit]["delivery_tp_count"], 1)
+        self.assertAlmostEqual(float(by_no[mixed]["confirmed_shipped_qty"]), 0)
+        self.assertAlmostEqual(float(by_no[mixed]["remaining_order_qty"]), 10)
+        self.assertEqual(by_no[mixed]["delivery_tp_count"], 2)
 
 
 if __name__ == "__main__":

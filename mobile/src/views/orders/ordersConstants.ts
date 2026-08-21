@@ -150,6 +150,23 @@ export function orderStatusLabelOf(statusCd: string | null | undefined): string 
   return ORDER_STATUS_LABEL[cd] || cd
 }
 
+/** 목록/상세 공통 상태 badge tone (ODS 지원 범위만) */
+export function orderStatusToneOf(
+  statusCd: string | null | undefined,
+): 'neutral' | 'ok' | 'caution' | 'danger' {
+  const cd = String(statusCd || '').trim()
+  if (cd === ORDER_STATUS_CANCEL) return 'danger'
+  if (cd === ORDER_STATUS_PREP) return 'caution'
+  if (cd === ORDER_STATUS_DELIVERED || cd === ORDER_STATUS_RESERVED) return 'neutral'
+  return 'ok'
+}
+
+export const LABEL_ORDER_LIST_COL_CUSTOMER = '고객 / 상품'
+export const LABEL_ORDER_LIST_COL_QTY = '주문'
+export const LABEL_ORDER_LIST_COL_SHIP = '출고/잔여'
+export const LABEL_ORDER_LIST_COL_STATUS = '상태'
+export const LABEL_MIXED_DELIVERY = '복합배송'
+
 export const LABEL_FILTER = '필터'
 export const LABEL_LOOKUP_PERIOD = '조회기간'
 export const LABEL_DATE_FROM = '시작일'
@@ -328,6 +345,88 @@ export function formatOrderLineSpec(line: {
     line.grade_nm || line.grade_cd,
     line.size_nm || line.size_cd,
   ])
+}
+
+/** 목록 2줄용 — 대표 규격 (+ 외 N건) */
+export function orderListProductText(row: {
+  line_count?: number
+  rep_item_cd?: string
+  rep_variety_cd?: string
+  rep_variety_nm?: string
+  rep_grade_cd?: string
+  rep_grade_nm?: string
+  rep_size_cd?: string
+  rep_size_nm?: string
+  rep_weight?: number
+}): string {
+  const count = Number(row.line_count || 0)
+  if (count <= 0) return ''
+  const spec = formatOrderLineSpec({
+    item_cd: row.rep_item_cd,
+    variety_cd: String(row.rep_variety_cd || ''),
+    variety_nm: row.rep_variety_nm,
+    grade_cd: String(row.rep_grade_cd || ''),
+    grade_nm: row.rep_grade_nm,
+    size_cd: String(row.rep_size_cd || ''),
+    size_nm: row.rep_size_nm,
+    weight: Number(row.rep_weight || 0),
+  })
+  if (count <= 1) return spec
+  return `${spec} 외 ${count - 1}건`
+}
+
+export function orderListDeliveryText(row: {
+  delivery_tp_count?: number
+  delivery_tp_cd?: string
+  delivery_tp_nm?: string
+}): string {
+  const n = Number(row.delivery_tp_count || 0)
+  if (n > 1) return LABEL_MIXED_DELIVERY
+  return String(row.delivery_tp_nm || row.delivery_tp_cd || '').trim()
+}
+
+/** YYYY-MM-DD → MM-DD (목록용, 연도 생략) */
+export function orderListDateText(orderDt: string | null | undefined): string {
+  const raw = String(orderDt || '').trim()
+  const m = raw.match(/(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return `${m[2]}-${m[3]}`
+  if (raw.length >= 8 && /^\d{8}/.test(raw)) return `${raw.slice(4, 6)}-${raw.slice(6, 8)}`
+  return raw
+}
+
+export function orderListSecondaryText(row: {
+  order_dt?: string
+  line_count?: number
+  rep_item_cd?: string
+  rep_variety_cd?: string
+  rep_variety_nm?: string
+  rep_grade_cd?: string
+  rep_grade_nm?: string
+  rep_size_cd?: string
+  rep_size_nm?: string
+  rep_weight?: number
+  delivery_tp_count?: number
+  delivery_tp_cd?: string
+  delivery_tp_nm?: string
+}): string {
+  return joinDot([
+    orderListProductText(row),
+    orderListDeliveryText(row),
+    orderListDateText(row.order_dt),
+  ])
+}
+
+export function orderListShipRemainText(row: {
+  confirmed_shipped_qty?: number
+  remaining_order_qty?: number
+  total_qty?: number
+}): string {
+  const shipped = Number(row.confirmed_shipped_qty ?? 0)
+  const remaining =
+    row.remaining_order_qty != null && !Number.isNaN(Number(row.remaining_order_qty))
+      ? Number(row.remaining_order_qty)
+      : Math.max(0, Number(row.total_qty || 0) - shipped)
+  return `${formatOrderAmt(shipped)}/${formatOrderAmt(remaining)}`
 }
 
 export function formatOrderLineShip(line: {

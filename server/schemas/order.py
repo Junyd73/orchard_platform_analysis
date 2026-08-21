@@ -109,6 +109,21 @@ class OrderListItem(BaseModel):
     total_qty: float
     total_amt: float
     pre_pay_amt: float
+    # compact list 보강 (상세 호환을 위해 default)
+    line_count: int = 0
+    rep_item_cd: str = ""
+    rep_variety_cd: str = ""
+    rep_variety_nm: str = ""
+    rep_grade_cd: str = ""
+    rep_grade_nm: str = ""
+    rep_size_cd: str = ""
+    rep_size_nm: str = ""
+    rep_weight: float = 0
+    delivery_tp_cd: str = ""
+    delivery_tp_nm: str = ""
+    delivery_tp_count: int = 0
+    confirmed_shipped_qty: float = 0
+    remaining_order_qty: float = 0
 
 
 class OrderListPage(BaseModel):
