@@ -21,8 +21,12 @@ for p in (_SERVER, _ROOT):
 from core.order_ship_constants import SALES_STATUS_CONFIRMED  # noqa: E402
 from core.order_ship_service import OrderShipService  # noqa: E402
 from core.pc_sales_provenance import (  # noqa: E402
+    MSG_PREPAY_CASH_IMMUTABLE,
+    PcPrepayImmutableError,
     cash_order_no_on_resave,
     fetch_master_order_no,
+    validate_pc_prepay_basket,
+    validate_protected_prepay_row,
 )
 
 FARM = "OR001"
@@ -51,6 +55,9 @@ def _schema() -> str:
         CREATE TABLE t_order_master (
             order_no TEXT PRIMARY KEY, farm_cd TEXT, pre_pay_amt REAL,
             pre_pay_method_cd TEXT
+        );
+        CREATE TABLE t_ledger (
+            slip_no TEXT PRIMARY KEY, farm_cd TEXT, trans_amt REAL, trans_st TEXT
         );
     """
 
@@ -373,6 +380,239 @@ class PcSalesProvenanceTests(unittest.TestCase):
             self.conn.cursor(), FARM, ORDER_NO, 150000.0
         )
         self.assertEqual(remaining, 50000.0)
+
+    def _seed_protected_prepay(self, *, pay_amt: float = 100000.0) -> dict:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO t_order_master(order_no, farm_cd, pre_pay_amt, pre_pay_method_cd)
+            VALUES (?,?,150000,?)
+            """,
+            (ORDER_NO, FARM, METHOD),
+        )
+        cur.execute(
+            """
+            INSERT INTO t_sales_master(
+                sales_no, farm_cd, sales_dt, tot_sales_amt, tot_paid_amt, tot_unpaid_amt,
+                order_no, sales_status, sales_source, reg_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                SALES_NO,
+                FARM,
+                SALES_DT,
+                pay_amt,
+                pay_amt,
+                0,
+                ORDER_NO,
+                SALES_STATUS_CONFIRMED,
+                "ORDER",
+                "T",
+            ),
+        )
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, order_no, reg_id, slip_no
+            ) VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                f"{SALES_NO}-P01",
+                SALES_NO,
+                FARM,
+                SALES_DT,
+                METHOD,
+                pay_amt,
+                ORDER_NO,
+                "T",
+                "20260821-001",
+            ),
+        )
+        cur.execute(
+            """
+            INSERT INTO t_ledger(slip_no, farm_cd, trans_amt, trans_st)
+            VALUES (?,?,?,?)
+            """,
+            ("20260821-001", FARM, pay_amt, "10"),
+        )
+        self.conn.commit()
+        return dict(
+            self.conn.execute(
+                "SELECT * FROM t_cash_ledger WHERE paid_detail_no=?",
+                (f"{SALES_NO}-P01",),
+            ).fetchone()
+        )
+
+    def _snapshot(self) -> dict:
+        return {
+            "master": [
+                dict(r)
+                for r in self.conn.execute("SELECT * FROM t_sales_master").fetchall()
+            ],
+            "cash": [
+                dict(r)
+                for r in self.conn.execute(
+                    "SELECT * FROM t_cash_ledger ORDER BY paid_detail_no"
+                ).fetchall()
+            ],
+            "ledger": [
+                dict(r)
+                for r in self.conn.execute(
+                    "SELECT * FROM t_ledger ORDER BY slip_no"
+                ).fetchall()
+            ],
+        }
+
+    def test_p2_01_protected_org_unchanged_ok(self) -> None:
+        orig = self._seed_protected_prepay()
+        validate_pc_prepay_basket(
+            [
+                {
+                    "status": "ORG",
+                    "orig_data": orig,
+                    "pay_dt": SALES_DT,
+                    "method": METHOD,
+                    "amt": 100000,
+                }
+            ]
+        )
+        _pc_style_resave(
+            self.conn,
+            farm_cd=FARM,
+            sales_no=SALES_NO,
+            pay_basket=[
+                {
+                    "status": "ORG",
+                    "orig_data": orig,
+                    "method": METHOD,
+                    "amt": 100000,
+                }
+            ],
+        )
+        cash = self.conn.execute(
+            "SELECT order_no, pay_amt FROM t_cash_ledger WHERE sales_no=?",
+            (SALES_NO,),
+        ).fetchone()
+        self.assertEqual(cash["order_no"], ORDER_NO)
+        self.assertEqual(float(cash["pay_amt"]), 100000)
+
+    def test_p2_02_04_protected_mod_fields_blocked(self) -> None:
+        orig = {
+            "order_no": ORDER_NO,
+            "pay_dt": SALES_DT,
+            "pay_method_cd": METHOD,
+            "pay_amt": 100000,
+        }
+        cases = [
+            {"status": "MOD", "pay_amt": 90000, "pay_method_cd": METHOD, "pay_dt": SALES_DT},
+            {
+                "status": "MOD",
+                "pay_amt": 100000,
+                "pay_method_cd": "AS010102",
+                "pay_dt": SALES_DT,
+            },
+            {
+                "status": "MOD",
+                "pay_amt": 100000,
+                "pay_method_cd": METHOD,
+                "pay_dt": "2026-08-22",
+            },
+        ]
+        for case in cases:
+            with self.subTest(case=case):
+                with self.assertRaises(PcPrepayImmutableError) as ctx:
+                    validate_protected_prepay_row(orig_data=orig, **case)
+                self.assertIn("자동 적용된 선입금", str(ctx.exception))
+
+    def test_p2_05_protected_del_blocked(self) -> None:
+        orig = self._seed_protected_prepay()
+        before = self._snapshot()
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_pc_prepay_basket(
+                [{"status": "DEL", "orig_data": orig, "method": METHOD, "amt": 0}]
+            )
+        self.assertEqual(self._snapshot(), before)
+
+    def test_p2_06_org_status_but_value_changed_blocked(self) -> None:
+        orig = self._seed_protected_prepay()
+        before = self._snapshot()
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_pc_prepay_basket(
+                [
+                    {
+                        "status": "ORG",
+                        "orig_data": orig,
+                        "pay_dt": SALES_DT,
+                        "method": METHOD,
+                        "amt": 90000,
+                    }
+                ]
+            )
+        self.assertEqual(self._snapshot(), before)
+
+    def test_p2_07_08_ordinary_mod_del_allowed(self) -> None:
+        ordinary = {
+            "order_no": None,
+            "pay_dt": SALES_DT,
+            "pay_method_cd": METHOD,
+            "pay_amt": 20000,
+        }
+        validate_protected_prepay_row(
+            status="MOD",
+            orig_data=ordinary,
+            pay_dt=SALES_DT,
+            pay_method_cd="AS010102",
+            pay_amt=15000,
+        )
+        validate_protected_prepay_row(
+            status="DEL",
+            orig_data=ordinary,
+            pay_dt=SALES_DT,
+            pay_method_cd=METHOD,
+            pay_amt=0,
+        )
+
+    def test_p2_09_block_no_db_change(self) -> None:
+        orig = self._seed_protected_prepay()
+        before = self._snapshot()
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_pc_prepay_basket(
+                [
+                    {
+                        "status": "MOD",
+                        "orig_data": orig,
+                        "pay_dt": SALES_DT,
+                        "method": "AS010102",
+                        "amt": 50000,
+                    }
+                ]
+            )
+        self.assertEqual(self._snapshot(), before)
+
+    def test_p2_12_block_keeps_remaining_50k(self) -> None:
+        orig = self._seed_protected_prepay(pay_amt=100000)
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_pc_prepay_basket(
+                [{"status": "DEL", "orig_data": orig, "method": METHOD, "amt": 0}]
+            )
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_pc_prepay_basket(
+                [
+                    {
+                        "status": "ORG",
+                        "orig_data": orig,
+                        "pay_dt": SALES_DT,
+                        "method": METHOD,
+                        "amt": 50000,
+                    }
+                ]
+            )
+        remaining = OrderShipService(self.conn)._get_remaining_order_prepay(
+            self.conn.cursor(), FARM, ORDER_NO, 150000.0
+        )
+        self.assertEqual(remaining, 50000.0)
+        self.assertIn("자동 적용된 선입금", MSG_PREPAY_CASH_IMMUTABLE)
 
 
 if __name__ == "__main__":

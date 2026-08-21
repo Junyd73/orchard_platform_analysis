@@ -13,8 +13,11 @@ from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
 from core.pc_sales_provenance import (
+    MSG_PREPAY_CASH_IMMUTABLE,
+    PcPrepayImmutableError,
     cash_order_no_on_resave,
     fetch_master_order_no,
+    validate_pc_prepay_basket,
 )
 from ui.ops_qdate import qdate_today_ops
 
@@ -2674,12 +2677,19 @@ class SalesPage(QWidget):
                 if not method_w or not amt_w: continue
                 
                 orig = (status_item.data(Qt.ItemDataRole.UserRole + 1) if status_item else {}) or {}
+                dt_w = self.pay_table.cellWidget(r, 1)
+                row_pay_dt = (
+                    dt_w.date().toString("yyyy-MM-dd")
+                    if dt_w is not None
+                    else sales_date_str
+                )
                 pay_basket.append({
                     'status': status_item.text() if status_item else "INS",
                     'orig_data': orig,
                     'acct_cd': method_w.currentData(),
                     'method': method_w.currentData(),
                     'amt': get_amt(amt_w),
+                    'pay_dt': row_pay_dt,
                     'pay_status': 'Y',
                     'rmk': self.pay_table.cellWidget(r, 4).text() if self.pay_table.cellWidget(r, 4) else f"판매입금({s_no})"
                 })
@@ -2690,9 +2700,13 @@ class SalesPage(QWidget):
                     'acct_cd': del_item.get('acct_cd'),
                     'method': del_item.get('pay_method_cd'),
                     'amt': 0, # 삭제이므로 현재 금액은 0
+                    'pay_dt': del_item.get('pay_dt'),
                     'pay_status': 'N', # 삭제는 미지급과 같음
                     'rmk': '' # 👈 적요 키를 명시적으로 추가
                 })
+
+            # Stage4-P2: 자동 선입금 cash 수정·삭제 방어 (AccountManager sync 이전)
+            validate_pc_prepay_basket(pay_basket)
 
             if ledger_enabled:
                 ledger_queries, slip_map = self.acct_mgr.sync_ledger_by_basket('SALE', s_no, sales_date_str, pay_basket, self.user_id)
@@ -2842,6 +2856,8 @@ class SalesPage(QWidget):
             else:
                 QMessageBox.critical(self, "저장 실패", "데이터베이스 트랜잭션 오류가 발생했습니다.")
 
+        except PcPrepayImmutableError as e:
+            QMessageBox.warning(self, "선입금 변경 불가", str(e) or MSG_PREPAY_CASH_IMMUTABLE)
         except Exception as e:
             QMessageBox.critical(self, "치명적 오류", f"❌ 저장 중 예외 발생: {str(e)}")
             traceback.print_exc()

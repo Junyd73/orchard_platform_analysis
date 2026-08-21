@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""PC 판매 재저장 시 order_no provenance 보존 (Stage4-P1).
+"""PC 판매 재저장 — order_no provenance 보존(P1) + 선입금 행 불변(P2).
 
 Service 계층이 아님. SalesPage.execute_full_save와 테스트가 동일 규칙을 쓴다.
 """
@@ -7,12 +7,39 @@ Service 계층이 아님. SalesPage.execute_full_save와 테스트가 동일 규
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+
+MSG_PREPAY_CASH_IMMUTABLE = (
+    "출고 시 자동 적용된 선입금 내역은 판매관리에서 수정하거나 삭제할 수 없습니다.\n"
+    "선입금 관련 변경이 필요한 경우 주문/출고 이력을 확인해 주세요."
+)
+
+
+class PcPrepayImmutableError(Exception):
+    """Stage4 자동 선입금 cash 행 수정·삭제 시도."""
+
+    def __init__(self, message: str = MSG_PREPAY_CASH_IMMUTABLE):
+        super().__init__(message)
 
 
 def _norm_order_no(raw: Any) -> str | None:
     text = str(raw or "").strip()
     return text or None
+
+
+def _norm_pay_dt(raw: Any) -> str:
+    return str(raw or "").strip()[:10]
+
+
+def _norm_method(raw: Any) -> str:
+    return str(raw or "").strip()
+
+
+def _norm_amt(raw: Any) -> float:
+    try:
+        return round(float(raw if raw is not None else 0), 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def fetch_master_order_no(
@@ -51,3 +78,58 @@ def cash_order_no_on_resave(
             return None
         return _norm_order_no(orig_data.get("order_no"))
     return None
+
+
+def is_protected_prepay_orig(orig_data: Mapping[str, Any] | None) -> bool:
+    """보호 대상 = orig_data.order_no IS NOT NULL (Stage4 자동 선입금)."""
+    if not orig_data:
+        return False
+    return _norm_order_no(orig_data.get("order_no")) is not None
+
+
+def validate_protected_prepay_row(
+    *,
+    status: str,
+    orig_data: Mapping[str, Any] | None,
+    pay_dt: Any = None,
+    pay_method_cd: Any = None,
+    pay_amt: Any = None,
+) -> None:
+    """보호 행이면 MOD/DEL 및 ORG 핵심값 변경을 거부한다."""
+    if not is_protected_prepay_orig(orig_data):
+        return
+
+    st = str(status or "").strip().upper()
+    if st in {"MOD", "DEL"}:
+        raise PcPrepayImmutableError()
+
+    # ORG(및 UI 상태 누락)라도 핵심값 변경이면 거부
+    o = orig_data or {}
+    if (
+        _norm_pay_dt(o.get("pay_dt")) != _norm_pay_dt(pay_dt)
+        or _norm_method(o.get("pay_method_cd")) != _norm_method(pay_method_cd)
+        or _norm_amt(o.get("pay_amt")) != _norm_amt(pay_amt)
+    ):
+        raise PcPrepayImmutableError()
+
+
+def validate_pc_prepay_basket(pay_basket: Sequence[Mapping[str, Any]]) -> None:
+    """pay_basket(+deleted) 전체에 대해 Stage4 선입금 불변성 검증."""
+    for item in pay_basket:
+        orig = item.get("orig_data")
+        method = item.get("pay_method_cd")
+        if method is None:
+            method = item.get("method")
+        amt = item.get("pay_amt")
+        if amt is None:
+            amt = item.get("amt")
+        pay_dt = item.get("pay_dt")
+        if pay_dt is None and isinstance(orig, Mapping):
+            pay_dt = orig.get("pay_dt")
+        validate_protected_prepay_row(
+            status=str(item.get("status") or ""),
+            orig_data=orig if isinstance(orig, Mapping) else None,
+            pay_dt=pay_dt,
+            pay_method_cd=method,
+            pay_amt=amt,
+        )

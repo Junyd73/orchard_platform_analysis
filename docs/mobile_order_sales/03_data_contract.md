@@ -282,6 +282,10 @@ PC `sales_page.py` INSERT·일반 추가수금 Core는 `order_no`를 **넣지 �
 - 신규 PC 수금(INS) = 항상 `NULL`
 - `t_sales_detail.order_detail_id` 재저장 유실은 **별도 OPEN P1** (이번 범위 아님)
 
+**PC 선입금 행 불변 (Stage4-P2):** `orig_data.order_no IS NOT NULL`인 자동 선입금 cash는
+판매관리에서 금액·결제수단·날짜 수정 및 삭제 **금지**. 일반수금(`order_no` NULL)은 기존 수정/삭제 유지.
+AccountManager sync·DB TX 이전에 검증한다.
+
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 
 ```
