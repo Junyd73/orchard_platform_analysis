@@ -30,7 +30,7 @@ describe('shipDeliveryModel 2C', () => {
   it('deliveryStatusText 미지정/완료/초과', () => {
     expect(deliveryStatusText(3, 0)).toBe('배송 0/3박스 · 3미지정')
     expect(deliveryStatusText(3, 2)).toBe('배송 2/3박스 · 1미지정')
-    expect(deliveryStatusText(3, 3)).toBe('배송 3/3박스 지정')
+    expect(deliveryStatusText(3, 3)).toBe('배송지 등록 완료')
     expect(deliveryStatusText(3, 4)).toBe('배송 4/3박스 · 1초과')
   })
 

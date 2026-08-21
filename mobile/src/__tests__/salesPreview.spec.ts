@@ -478,7 +478,7 @@ describe('SalesPreviewView 2B', () => {
     await flushPromises()
     expect(store.shipLines[0].delivery_allocations).toHaveLength(1)
     expect(store.shipLines[0].delivery_allocations?.[0].qty).toBe(3)
-    expect(wrapper.text()).toContain('배송 3/3박스 지정')
+    expect(wrapper.text()).toContain('배송지 등록 완료')
     expect(wrapper.find('[data-testid="sales-preview-ship-fee-sum"]').text()).toContain('4,000')
     expect((wrapper.find('[data-testid="sales-preview-submit"]').element as HTMLButtonElement).disabled).toBe(false)
 

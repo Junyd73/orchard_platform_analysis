@@ -55,7 +55,7 @@ export function deliveryStatusText(saleQty: number, assigned: number, unit = '�
   if (remain < 0) {
     return `배송 ${got}/${sale}${unit} · ${-remain}초과`
   }
-  return `배송 ${got}/${sale}${unit} 지정`
+  return '배송지 등록 완료'
 }
 
 export function isDeliveryQtyMatched(line: ShipDraftLine): boolean {
