@@ -61,7 +61,6 @@ const LABEL_DLVRY_METHOD = '배송방법'
 const LABEL_DLVRY_SHORT = '배송'
 const LABEL_SENDER = '보내는 사람'
 const LABEL_SENDER_TEL = '전화번호'
-const LABEL_SENDER_UNSET = '미설정'
 const LABEL_SENDER_SETUP = '설정 ›'
 const LABEL_SENDER_EDIT = '편집 ›'
 const LABEL_SENDER_SHEET = '보내는 사람 설정'
@@ -172,10 +171,6 @@ const senderConfigured = computed(() => {
   const name = String(prefill.senderName || '').trim()
   const tel = String(prefill.senderTel || '').trim()
   return Boolean(name && tel)
-})
-const senderSummary = computed(() => {
-  if (!senderConfigured.value) return LABEL_SENDER_UNSET
-  return joinDot([prefill.senderName, prefill.senderTel])
 })
 const senderIssue = computed(() => {
   if (!isParcel.value) return ''
@@ -792,26 +787,6 @@ onBeforeUnmount(() => {
               </OdsSelect>
             </div>
             <div
-              v-if="isParcel"
-              class="header-row header-row--sender"
-              data-testid="sales-preview-sender"
-            >
-              <span class="header-row__lbl">{{ LABEL_SENDER }}</span>
-              <span
-                class="header-row__sender-val"
-                :class="{ 'header-row__sender-val--unset': !senderConfigured }"
-                data-testid="sales-preview-sender-summary"
-              >{{ senderSummary }}</span>
-              <button
-                type="button"
-                class="header-hint__act"
-                data-testid="sales-preview-sender-setup"
-                @click="openSenderSheet"
-              >
-                {{ senderConfigured ? LABEL_SENDER_EDIT : LABEL_SENDER_SETUP }}
-              </button>
-            </div>
-            <div
               v-if="isParcel && parcelHeaderHint"
               class="header-hint"
               :class="{
@@ -821,6 +796,15 @@ onBeforeUnmount(() => {
               data-testid="sales-preview-parcel-hint"
             >
               <span class="header-hint__txt">{{ parcelHeaderHint }}</span>
+              <button
+                type="button"
+                class="header-hint__act"
+                data-testid="sales-preview-sender-setup"
+                :aria-label="LABEL_SENDER"
+                @click="openSenderSheet"
+              >
+                {{ senderConfigured ? LABEL_SENDER_EDIT : LABEL_SENDER_SETUP }}
+              </button>
             </div>
           </div>
         </OdsCard>
@@ -1419,7 +1403,7 @@ onBeforeUnmount(() => {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 11rem;
+  --sales-preview-footer-h: 9.5rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   --sales-preview-inline: var(--ods-page-padding-x, var(--ods-space-16));
@@ -1455,8 +1439,8 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .preview-card--compact {
-  padding: var(--ods-space-12);
-  gap: var(--ods-space-8);
+  padding: var(--ods-space-8) var(--ods-space-12);
+  gap: var(--ods-space-6, 6px);
 }
 .preview-card--lines {
   padding: 0;
@@ -1471,7 +1455,7 @@ onBeforeUnmount(() => {
 .header-fields {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-8);
+  gap: var(--ods-space-6, 6px);
   min-width: 0;
 }
 .header-row {
@@ -1485,22 +1469,6 @@ onBeforeUnmount(() => {
   font: var(--ods-font-form-label);
   color: var(--ods-color-text-label);
   white-space: nowrap;
-}
-.header-row--sender {
-  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
-  column-gap: var(--ods-space-8);
-}
-.header-row__sender-val {
-  min-width: 0;
-  font: var(--ods-font-body);
-  color: var(--ods-color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: right;
-}
-.header-row__sender-val--unset {
-  color: var(--ods-color-text-muted, #888);
 }
 .header-row__ctrl {
   min-width: 0;
@@ -1545,7 +1513,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: var(--ods-color-primary);
+  color: var(--ods-color-text);
   font: var(--ods-font-caption);
   font-weight: 700;
   cursor: pointer;
@@ -1799,22 +1767,22 @@ onBeforeUnmount(() => {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-8);
+  gap: var(--ods-space-6, 6px);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-8) var(--sales-preview-inline);
+  padding: var(--ods-space-6, 6px) var(--sales-preview-inline) var(--ods-space-8);
   background: var(--ods-color-bg-muted, #f5f5f5);
   border-top: 1px solid var(--ods-color-border);
 }
 .footer__panel {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-4);
+  gap: 2px;
   min-width: 0;
   box-sizing: border-box;
-  padding: var(--ods-space-12);
+  padding: var(--ods-space-8) var(--ods-space-12);
   background: var(--ods-color-primary-subtle, #e8f5ee);
   border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
@@ -1826,7 +1794,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 24px;
+  min-height: 22px;
   min-width: 0;
 }
 .footer__count {
@@ -1853,8 +1821,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 28px;
-  font: var(--ods-font-body-2);
+  min-height: 22px;
+  font: var(--ods-font-caption);
   line-height: 1.35;
   color: var(--ods-color-text-secondary);
 }
@@ -1883,8 +1851,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 28px;
-  font: var(--ods-font-headline);
+  min-height: 24px;
+  font: var(--ods-font-body);
+  font-weight: 700;
   color: var(--ods-color-text);
 }
 .footer__total strong {

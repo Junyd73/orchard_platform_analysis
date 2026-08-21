@@ -733,9 +733,10 @@ describe('SalesPreviewView 2B', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="sales-preview-sender-summary"]').text()).toContain('미설정')
+    expect(wrapper.find('[data-testid="sales-preview-parcel-hint"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sales-preview-submit"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('[data-testid="sales-preview-parcel-setup"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sales-preview-sender"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sales-preview-sender-setup"]').text()).toContain('설정')
 
     await wrapper.find('[data-testid="sales-preview-sender-setup"]').trigger('click')
     await flushPromises()
@@ -763,7 +764,6 @@ describe('SalesPreviewView 2B', () => {
     expect(store.senderName).toBe('삼육농원')
     expect(store.senderTel).toBe('010-1234-5678')
     expect(store.senderAddr).toBe('경기도 화성시 테스트로 1')
-    expect(wrapper.find('[data-testid="sales-preview-sender-summary"]').text()).toContain('삼육농원')
     expect(wrapper.find('[data-testid="sales-preview-sender-setup"]').text()).toContain('편집')
 
     await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
