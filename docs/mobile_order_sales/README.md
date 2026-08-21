@@ -36,7 +36,8 @@ PC · core · FastAPI · Vue PWA **공통 업무규칙**. 기존 PC `StockPage`�
 ## 선입금 · 수금 (2026-08-21 확정)
 
 - **DEC-019 APPROVED** — 부분출고 선입금 **순차 배분**. 회차 적용액 = `min(선입금 잔액, 그 판매금액)`
-- **DEC-028 APPROVED** — 주문 **선입금 결제수단** (`pre_pay_amt>0`이면 필수). **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 제외. 컬럼 제안만, **DDL 미실행**
+- **DEC-028 APPROVED** — 주문 **선입금 결제수단** (`pre_pay_amt>0`이면 필수). **현금성 자산 계정**. 채권(`AS02…`) 제외. **완료 · 운영** (`pre_pay_method_cd`)
+- **DEC-019 provenance CLOSED** — `t_cash_ledger.order_no` NULL=일반수금, 주문번호=출고 선입금 자동적용. Stage4 feature · main 미반영 · DDL 0
 - **DEC-029 APPROVED** — **판매상태 ≠ 수금상태**. `sales_status`는 DRAFT/CONFIRMED만, 수금상태는 금액 계산값
 - 주문 단계는 계속 **전표 없음**. 회계는 판매확정에서만 (DEC-009)
 - UI 용어: **결제수단 · 수금액 · 미수금 · 수금상태**

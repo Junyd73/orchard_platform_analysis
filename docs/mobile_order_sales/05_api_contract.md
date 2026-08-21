@@ -191,7 +191,7 @@ confirm이 판매를 CONFIRMED로 만든 **같은 TX 안에서** 처리한다.
 
 예: 주문 30만 · 선입금 15만 → confirm①(판매 10만) 적용 10만·미수 0 → confirm②(판매 20만) 적용 5만·미수 15만.
 
-**현재 구현:** `OrderShipService.confirm()`은 `tot_paid_amt=0`, `tot_unpaid_amt=판매금액`으로 판매를 INSERT하며 선입금 배분·회계 연동이 없다. 위 1~5는 **확정 설계**이며 단계 4에서 구현한다. 응답 필드(적용액·잔액) 이름은 구현 시 확정.
+**현재 구현 (Stage4 feature):** `OrderShipService.confirm()`이 동일 TX에서 순차 배분·`SalesPaymentService.add_payment_in_tx`(source_order_no)·cash SUM 동기화를 수행한다. main/운영 미반영. HTTP 응답 필드(적용액·잔액)는 미추가.
 
 부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017). Core·HTTP confirm **구현**. Mobile UI **후속**.
 
@@ -243,7 +243,7 @@ DELETE 1차 비공개 (전표 역분개 전).
 `add_payment_in_tx`는 caller-owned TX (4단계 OrderShip 재사용 예정).
 
 `sales_status`는 수금으로 **변경되지 않는다** (DEC-029).  
-일반 추가수금 `t_cash_ledger.order_no = NULL`. 선입금 배분은 4단계.
+일반 추가수금 `t_cash_ledger.order_no = NULL`. 선입금 자동적용 `order_no = 원 주문번호` (Stage4 feature · main 미반영).
 
 ---
 
@@ -287,5 +287,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
 
-**미구현:** `sales/{sales_no}/payments` GET/PUT HTTP (§8 · Core는 개발순서 3 완료) · confirm 선입금 순차 배분 (§6.C · 개발순서 4).  
+**미구현:** `sales/{sales_no}/payments` GET/PUT HTTP (§8 · Core는 개발순서 3 완료) · 출고 confirm 선입금 배분은 Core feature 완료 · main/운영·HTTP 응답 확장 미반영.  
 **완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028).

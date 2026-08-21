@@ -205,7 +205,7 @@ allocation 불필요. 위 STOCK 식을 적용하지 않음.
 
 금지: 재고만 감소 / 판매만 생성 / 전량 완료인데 판매 없음 / 기존 CONFIRMED 판매·전표 수정 / 선입금을 판매금액보다 많이 적용.
 
-**현재 구현:** `core/order_ship_service.py`는 판매마스터를 `tot_paid_amt=0`, `tot_unpaid_amt=판매금액`으로 INSERT하며 선입금 배분·회계 연동은 아직 없다. 위 10~12는 **확정 설계**이며 단계 4에서 구현한다.
+**현재 구현 (Stage4 feature):** `OrderShipService.confirm()`이 판매 master/detail/delivery 직후·order status 전에 동일 TX에서 선입금 순차 배분·cash/ledger를 수행한다. main/운영 미반영. 위 10~12는 구현됨.
 
 출고 시 `allocated_qty` **유지**. stock `reserved_qty -= ship_qty`, `out_qty += ship_qty`.
 
@@ -455,7 +455,7 @@ UI 용어는 **결제수단 · 수금액 · 미수금 · 수금상태**. 「수�
             − 그 주문의 CONFIRMED 판매에 적용된 선입금 합
 ```
 
-**구현 전 확인 필요:** `t_cash_ledger`에서 선입금 적용분과 이후 추가수금을 구분·연결할 실제 컬럼이 있는지 운영 PRAGMA로 재확인한다. 없는 컬럼을 가정하지 않는다. 연결키가 없으면 OPEN으로 남기고 임의 DDL을 만들지 않는다.
+**구현 (Stage4 feature):** `t_cash_ledger.order_no`로 구분한다. NULL=일반수금, 주문번호=선입금 자동적용. 신규 DDL 없음.
 
 선수금(선수금 계정) 회계 설계는 계속 비범위.
 

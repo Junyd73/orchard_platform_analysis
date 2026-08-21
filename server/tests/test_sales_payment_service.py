@@ -29,6 +29,7 @@ from core.sales_payment_constants import (  # noqa: E402
     MSG_PAY_METHOD_INVALID,
     MSG_SALES_DRAFT_PAYMENT_FORBIDDEN,
     MSG_SALES_NOT_FOUND,
+    MSG_SOURCE_ORDER_MISMATCH,
     SALES_STATUS_DRAFT,
 )
 from core.sales_payment_service import (  # noqa: E402
@@ -104,6 +105,7 @@ def _insert_sales(
     tot: float = 300000,
     paid: float | None = None,
     unpaid: float | None = None,
+    order_no: str | None = None,
 ) -> None:
     p = 0.0 if paid is None else paid
     u = (tot - p) if unpaid is None else unpaid
@@ -111,10 +113,10 @@ def _insert_sales(
         """
         INSERT INTO t_sales_master(
             sales_no, farm_cd, sales_dt, sales_status,
-            tot_sales_amt, tot_paid_amt, tot_unpaid_amt
-        ) VALUES (?,?,?,?,?,?,?)
+            tot_sales_amt, tot_paid_amt, tot_unpaid_amt, order_no
+        ) VALUES (?,?,?,?,?,?,?,?)
         """,
-        (sales_no, farm_cd, SALES_DT, status, tot, p, u),
+        (sales_no, farm_cd, SALES_DT, status, tot, p, u, order_no),
     )
 
 
@@ -156,6 +158,7 @@ class SalesPaymentServiceTests(unittest.TestCase):
                 pay_dt=kwargs.get("pay_dt", today_ops_iso()),
                 rmk=kwargs.get("rmk", ""),
                 user_id=kwargs.get("user_id", "t"),
+                source_order_no=kwargs.get("source_order_no"),
             )
         )
 
@@ -598,6 +601,44 @@ class SalesPaymentServiceTests(unittest.TestCase):
             {f"{SALES_A}-P99", f"{SALES_A}-P100", f"{SALES_A}-P101"},
         )
         self.assertIn(f"{SALES_A}-P101", ids)
+
+    def test_source_order_no_none_keeps_order_null(self):
+        """Stage3 일반수금: source_order_no=None → cash.order_no NULL."""
+        _insert_sales(self.conn.cursor(), order_no="ORD20260821-001")
+        self.conn.commit()
+        self._add(10000, "AS010101")
+        row = self._cash_rows()[0]
+        self.assertIsNone(row["order_no"])
+
+    def test_source_order_no_match_stores_order(self):
+        order_no = "ORD20260821-001"
+        _insert_sales(self.conn.cursor(), order_no=order_no)
+        self.conn.commit()
+        self._add(10000, "AS010101", source_order_no=order_no)
+        row = self._cash_rows()[0]
+        self.assertEqual(row["order_no"], order_no)
+
+    def test_source_order_no_mismatch_rejected(self):
+        _insert_sales(self.conn.cursor(), order_no="ORD20260821-001")
+        self.conn.commit()
+        with self.assertRaises(PaymentValidationError) as ctx:
+            self._add(10000, "AS010101", source_order_no="ORD20260821-999")
+        self.assertIn(MSG_SOURCE_ORDER_MISMATCH, str(ctx.exception))
+        self.assertEqual(len(self._cash_rows()), 0)
+
+    def test_source_order_no_preserved_after_slip_remap(self):
+        """동일 method 추가수금 후 slip remap 시 order_no provenance 유지."""
+        order_no = "ORD20260821-001"
+        _insert_sales(self.conn.cursor(), order_no=order_no)
+        self.conn.commit()
+        self._add(50000, "AS010101", source_order_no=order_no)
+        self._add(30000, "AS010101")  # 일반수금
+        rows = self._cash_rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["order_no"], order_no)
+        self.assertIsNone(rows[1]["order_no"])
+        self.assertEqual(rows[0]["slip_no"], rows[1]["slip_no"])
+        self.assertIsNotNone(rows[0]["slip_no"])
 
 
 if __name__ == "__main__":

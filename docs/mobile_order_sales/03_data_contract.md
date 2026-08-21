@@ -151,8 +151,8 @@ migration 직전 운영 점검 필수 → §15.
 | 주문완료 | `t_order_master.status_cd='ST010400'` AND `stock_status='Y'` |
 | 수금완료 | `t_sales_master.tot_unpaid_amt = 0` |
 
-**현재 구현:** `core/order_ship_service.py`는 판매 INSERT 시 `tot_paid_amt=0`, `tot_unpaid_amt=판매금액`으로 넣는다. 선입금 적용은 아직 없다.  
-**확정 설계:** 출고 TX에서 선입금 적용액을 `tot_paid_amt`에 반영하고 `tot_unpaid_amt = tot_sales_amt − tot_paid_amt`로 맞춘다 (DEC-019).
+**현재 구현 (Stage4 feature):** 출고 TX에서 판매 INSERT 후 `SalesPaymentService.add_payment_in_tx`로 선입금 적용. `tot_paid_amt`/`tot_unpaid_amt`는 cash SUM 동기화 (DEC-019). main/운영 미반영.  
+**적용액:** `min(remaining_prepay, 이번 판매 tot_sales_amt)`. 기존 CONFIRMED 판매는 수정하지 않는다.
 
 ---
 
@@ -269,20 +269,27 @@ paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt,
 rmk, reg_id, reg_dt, slip_no, order_no
 ```
 
-PC `sales_page.py` INSERT·일반 추가수금 Core 모두 `order_no`를 **넣지 않는다**(NULL). 운영 기존 행도 NULL.
+PC `sales_page.py` INSERT·일반 추가수금 Core는 `order_no`를 **넣지 않는다**(NULL).
 
-`AccountManager._get_db_fingerprints`의 `SALE` 조회도 `pay_method_cd` / `paid_detail_no` / `pay_amt` + `sales_no` 기준이다.
-
-**OPEN (개발순서 4):** `order_no`로 선입금 적용분 vs 추가수금 구분 여부는 미확정. 임의 DDL 확장 금지.
+**DEC-019 provenance (CLOSED):** `t_cash_ledger.order_no`가 구분 SSOT이다.
+- `NULL` = 일반 추가수금 (Stage3)
+- 주문번호 = 출고 시 선입금 자동적용 (Stage4)
+- 신규 `payment_type`/`prepay_yn` 컬럼·DDL **없음**. `rmk`/`paid_detail_no` 패턴을 SSOT로 쓰지 않는다.
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 
 ```
-남은 선입금 = t_order_master.pre_pay_amt
-            − 그 주문의 CONFIRMED 판매에 적용된 선입금 합
+applied_prepay = SUM(c.pay_amt)
+  FROM t_cash_ledger c
+  JOIN t_sales_master s ON s.farm_cd=c.farm_cd AND s.sales_no=c.sales_no
+ WHERE c.farm_cd=? AND c.order_no=?
+   AND s.sales_status='CONFIRMED' AND s.order_no=c.order_no
+
+remaining_prepay = MAX(0, t_order_master.pre_pay_amt − applied_prepay)
+apply_amt = MIN(remaining_prepay, 이번 판매 tot_sales_amt)
 ```
 
-`prepay_balance` 컬럼은 **만들지 않는다.** 위 합계를 어떤 키로 집계할지는 §9 OPEN 확인 결과에 따른다.
+`prepay_balance` 컬럼은 **만들지 않는다.** master `tot_paid_amt` 합으로 역산하지 않는다.
 
 ### 9.2 트랜잭션 순서 (확정 설계)
 
@@ -345,7 +352,7 @@ t_order_master.stock_status  =  전량 출고 시만 Y
 | `t_order_master.prepay_balance` | **하지 않음** (계산. §9.1) |
 | 수금상태 컬럼 (`payment_status` 등) | **하지 않음** (금액 계산. DEC-029) |
 | `sales_status`에 PAID/UNPAID 추가 | **하지 않음** (DEC-029) |
-| `t_cash_ledger` 선입금 구분 컬럼 | **OPEN.** 실제 스키마 확인 전 제안하지 않음 (§9) |
+| `t_cash_ledger.order_no` provenance | **CLOSED.** NULL=일반수금, 주문번호=선입금 자동적용. 신규 컬럼 없음 (§9) |
 | `t_order_detail.allocated_qty` | **Stage 3A 로컬 DDL.** 운영 ALTER는 별도 승인 |
 | `unallocated_qty` / `shipped_qty` 컬럼 | **하지 않음** (계산) |
 | `t_sales_detail.stock_seq` | **Stage 5C 멱등 ALTER** (NULL). 운영 자동실행 금지 |
