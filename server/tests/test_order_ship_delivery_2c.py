@@ -591,6 +591,7 @@ class ShipDelivery2CTest(unittest.TestCase):
             ),
             user_id="T",
         )
+        OrderService(self.conn).confirm_order(FARM, order_no, user_id="T")
         OrderAllocationService(self.conn).allocate(
             FARM,
             order_no,

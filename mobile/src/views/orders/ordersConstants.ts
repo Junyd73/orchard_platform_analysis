@@ -20,11 +20,16 @@ export const LABEL_FAB_SALES = '직접 판매'
 export const LABEL_SHIP = '출고'
 export const LABEL_SHIP_BATCH = '일괄출고'
 export const LABEL_SHIP_SELECTED = '선택 출고'
-export const HINT_ORDER_NEXT_RESERVED = '예약접수 상태입니다.'
+export const LABEL_CONFIRM_ORDER = '주문확정'
+export const HINT_ORDER_NEXT_RESERVED =
+  '예약접수 상태입니다. 주문확정 후 출고할 수 있습니다.'
 export const HINT_ORDER_NEXT_CONFIRMED =
   '주문확정 상태입니다. 상품 수량은 잠겨 있고 출고할 수 있습니다.'
 export const HINT_ORDER_NEXT_PREP =
   '다음: 남은 상품을 이어서 출고합니다. 전량 출고 시 배송완료입니다.'
+export const MSG_ORDER_CONFIRM_CONFIRM = '이 주문을 확정하시겠습니까?'
+export const MSG_ORDER_CONFIRM_FAIL = '주문을 확정하지 못했습니다.'
+export const MSG_ORDER_CONFIRM_FORBIDDEN = '예약접수 상태에서만 주문확정할 수 있습니다.'
 export const ITEM_JUICE_MID = 'FR010200'
 export const ITEM_JUICE_DORAJI = 'FR010201'
 export const ITEM_JUICE_PLAIN = 'FR010202'
@@ -108,6 +113,9 @@ export const MSG_PARCEL_DEST_QTY = '배송수량은 0보다 커야 합니다.'
 export const MSG_PARCEL_DEST_INCOMPLETE =
   '택배 배송지의 수령인, 연락처, 주소를 입력해 주십시오.'
 export const MSG_PARCEL_QTY_MISMATCH = '택배 배송수량 합계가 주문수량과 같아야 합니다.'
+export const MSG_PARCEL_QTY_OVER = '택배 배송수량이 주문수량을 초과할 수 없습니다.'
+export const MSG_PARCEL_DEST_NONE = '배송지 미등록'
+export const LABEL_ASSIGNED = '배정'
 export const MSG_ORDER_LOCKED_DELIVERED = '배송완료된 주문은 수정할 수 없습니다.'
 export const MSG_ORDER_LOCKED_CANCEL = '취소된 주문은 수정할 수 없습니다.'
 export const MSG_ORDER_QTY_LOCKED = '주문확정 이후에는 상품/수량을 수정할 수 없습니다.'
@@ -291,14 +299,41 @@ export function formatOrderLineSpec(line: {
 export function formatOrderLineShip(line: {
   dlvry_tp: string
   dlvry_tp_nm?: string
+  qty?: number
   deliveries?: { qty?: number }[]
 }): string {
   const tpNm = line.dlvry_tp_nm || line.dlvry_tp
-  const n = line.deliveries?.length || 0
   if (isParcelDelivery(line.dlvry_tp)) {
-    return joinDot([tpNm, `배송지 ${n}${LABEL_DEST_COUNT_SUFFIX}`])
+    const orderQty = Number(line.qty) || 0
+    const assigned = (line.deliveries || []).reduce(
+      (sum, d) => sum + (Number(d.qty) || 0),
+      0,
+    )
+    if (assigned <= 1e-9) {
+      return joinDot([`배송 ${tpNm}`, MSG_PARCEL_DEST_NONE])
+    }
+    const rem = Math.max(0, orderQty - assigned)
+    if (rem > 1e-9) {
+      return joinDot([
+        `배송 ${tpNm}`,
+        `${formatOrderAmt(assigned)}/${formatOrderAmt(orderQty)} ${LABEL_ASSIGNED}`,
+        `${LABEL_UNASSIGNED} ${formatOrderAmt(rem)}`,
+      ])
+    }
+    return joinDot([
+      `배송 ${tpNm}`,
+      `${formatOrderAmt(assigned)}/${formatOrderAmt(orderQty)} ${LABEL_ASSIGNED}`,
+    ])
   }
-  return tpNm
+  return joinDot([`배송 ${tpNm}`])
+}
+
+export function canShipOrder(statusCd: string): boolean {
+  return statusCd === ORDER_STATUS_CONFIRMED || statusCd === ORDER_STATUS_PREP
+}
+
+export function canConfirmOrder(statusCd: string): boolean {
+  return statusCd === ORDER_STATUS_RESERVED
 }
 
 export function canCancelOrder(statusCd: string): boolean {

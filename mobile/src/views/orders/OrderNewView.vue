@@ -93,6 +93,7 @@ import {
   destQtySum,
   emptyDest,
   emptyLine,
+  effectiveDests,
   findSaveIssue as findFormSaveIssue,
   linesFromDetail,
   num,
@@ -193,7 +194,7 @@ function shipSummaryText(line: EditLine): string {
   }
   return joinDot([
     tpNm,
-    `${LABEL_DEST} ${line.dests.length}${LABEL_DEST_COUNT_SUFFIX}`,
+    `${LABEL_DEST} ${effectiveDests(line).length}${LABEL_DEST_COUNT_SUFFIX}`,
     `${formatOrderAmt(destQtySum(line))}/${formatOrderAmt(num(line.qty))}`,
   ])
 }
@@ -290,7 +291,7 @@ function visitDest(line: EditLine): EditDest {
 function lineDeliveries(line: EditLine): OrderCreatePayload['lines'][number]['deliveries'] {
   const tp = line.delivery_tp_cd || DELIVERY_TP_VISIT
   if (isParcelDelivery(tp)) {
-    return line.dests.map((d) => ({
+    return effectiveDests(line).map((d) => ({
       delivery_tp_cd: tp,
       qty: num(d.qty),
       planned_dt: orderDt.value,

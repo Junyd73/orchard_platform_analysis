@@ -23,6 +23,8 @@ MSG_ALLOC_OVER_SHIP = "배정 잔여수량을 초과해 출고할 수 없습니�
 MSG_STOCK_UNAVAILABLE = "출고 가능한 재고가 부족합니다."
 MSG_DATA_INTEGRITY = "재고/배정 정합성이 깨졌습니다."
 MSG_ORDER_LOCKED = "현재 상태에서는 출고할 수 없습니다."
+MSG_SHIP_ORDER_NOT_CONFIRMED = "주문확정 후 출고할 수 있습니다."
+CODE_SHIP_ORDER_NOT_CONFIRMED = "SHIP_ORDER_NOT_CONFIRMED"
 MSG_DETAIL_REQUIRED = "주문 상세번호가 필요합니다."
 MSG_REMARK_SALE_OUT = "판매출고"
 

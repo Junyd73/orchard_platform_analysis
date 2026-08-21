@@ -3,12 +3,13 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import { cancelOrder, fetchOrder } from '@/api/orders'
+import { cancelOrder, confirmOrder, fetchOrder } from '@/api/orders'
 import OrderDetailView from '@/views/orders/OrderDetailView.vue'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import {
   LABEL_CANCEL_ORDER,
   LABEL_CLOSE,
+  LABEL_CONFIRM_ORDER,
   LABEL_EDIT,
   LABEL_ORDER_DETAIL,
   LABEL_SHIP,
@@ -20,6 +21,7 @@ import {
 vi.mock('@/api/orders', () => ({
   fetchOrder: vi.fn(),
   cancelOrder: vi.fn(),
+  confirmOrder: vi.fn(),
 }))
 
 function detail(statusCd: string, statusNm: string) {
@@ -119,18 +121,27 @@ describe('OrderDetailView', () => {
   beforeEach(() => {
     vi.mocked(fetchOrder).mockReset()
     vi.mocked(cancelOrder).mockReset()
+    vi.mocked(confirmOrder).mockReset()
   })
 
-  it('T1 reserved hint is neutral and does not mention unused 주문확정 stage', async () => {
+  it('T1 reserved hint points to confirm-before-ship', async () => {
     const { wrapper } = await mountDetail()
-    expect(wrapper.text()).toContain('예약접수 상태입니다.')
-    expect(wrapper.text()).not.toContain('주문확정 단계는')
-    expect(wrapper.text()).not.toContain('주문확정 단계는 사용하지 않습니다')
+    expect(wrapper.text()).toContain('예약접수 상태입니다. 주문확정 후 출고할 수 있습니다.')
+    expect(wrapper.text()).toContain(LABEL_CONFIRM_ORDER)
     wrapper.unmount()
   })
 
-  it('shows 출고 action for reserved order lines', async () => {
-    const { wrapper, router } = await mountDetail()
+  it('hides ship actions for reserved orders', async () => {
+    const { wrapper } = await mountDetail()
+    const ship = wrapper.findAll('button').find((b) => b.text().includes(LABEL_SHIP))
+    expect(ship).toBeFalsy()
+    expect(wrapper.text()).not.toContain(LABEL_SHIP_BATCH)
+    expect(wrapper.text()).not.toContain('출고 선택')
+    wrapper.unmount()
+  })
+
+  it('shows ship action for confirmed orders', async () => {
+    const { wrapper, router } = await mountDetail('ST010200', '주문확정')
     const ship = wrapper.findAll('button').find((b) => b.text().includes(LABEL_SHIP))
     expect(ship).toBeTruthy()
     await ship?.trigger('click')
@@ -139,12 +150,32 @@ describe('OrderDetailView', () => {
     wrapper.unmount()
   })
 
+  it('confirms reserved order via dialog', async () => {
+    vi.mocked(confirmOrder).mockResolvedValue(detail('ST010200', '주문확정') as never)
+    const { wrapper } = await mountDetail()
+    const btn = wrapper
+      .findAll('.footer-actions button')
+      .find((b) => b.text().includes(LABEL_CONFIRM_ORDER))
+    expect(btn).toBeTruthy()
+    await btn?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('이 주문을 확정하시겠습니까?')
+    const ok = wrapper
+      .findAll('.dlg button')
+      .find((b) => b.text().includes(LABEL_CONFIRM_ORDER))
+    await ok?.trigger('click')
+    await flushPromises()
+    expect(confirmOrder).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('주문확정')
+    wrapper.unmount()
+  })
+
   it('shows code names and an edit action for reserved orders', async () => {
     const { wrapper } = await mountDetail()
     expect(wrapper.text()).toContain(LABEL_ORDER_DETAIL)
     expect(wrapper.text()).toContain('신고배 · 7.5kg · 특 · 25과 이내')
     expect(wrapper.text()).not.toContain('FR010101')
-    expect(wrapper.text()).toContain('배송 택배 · 배송지 10곳')
+    expect(wrapper.text()).toContain('배송 택배 · 10/10 배정')
     const edit = wrapper.findAll('.footer-actions button').find((b) => b.text().includes(LABEL_EDIT))
     expect(edit).toBeTruthy()
     expect(edit?.attributes('disabled')).toBeUndefined()
@@ -207,10 +238,10 @@ describe('OrderDetailView', () => {
   })
 
   it('상품이 두 줄이면 일괄출고가 보인다', async () => {
-    const two = detail('ST010100', '예약접수')
+    const two = detail('ST010200', '주문확정')
     const base = two.lines[0]
     two.lines = [base, { ...base, order_detail_id: 'ORD20260817-001-02' }]
-    const { wrapper } = await mountDetail('ST010100', '예약접수', two)
+    const { wrapper } = await mountDetail('ST010200', '주문확정', two)
     expect(wrapper.text()).toContain(LABEL_SHIP_BATCH)
     wrapper.unmount()
   })

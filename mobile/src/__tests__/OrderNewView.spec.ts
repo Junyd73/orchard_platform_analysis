@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { createCustomer, createOrder, fetchCustomers, fetchOrder, updateOrder } from '@/api/orders'
-import OrderNewView from '@/features/orders/OrderNewView.vue'
+import OrderNewView from '@/views/orders/OrderNewView.vue'
 import {
   LABEL_ALLOC,
   LABEL_CUSTOMER,
@@ -27,11 +27,11 @@ import {
   LABEL_VARIETY,
   LABEL_WEIGHT,
   MSG_LINE_REQUIRED,
-  MSG_PARCEL_QTY_MISMATCH,
+  MSG_PARCEL_QTY_OVER,
   formatOrderLineSpec,
   parseWeightFromCodeNm,
   pickDefaultWeightCd,
-} from '@/features/orders/ordersConstants'
+} from '@/views/orders/ordersConstants'
 
 vi.mock('@/api/orders', () => ({
   fetchCustomers: vi.fn().mockResolvedValue([
@@ -571,7 +571,7 @@ describe('OrderNewView', () => {
     wrapper.unmount()
   })
 
-  it('blocks parcel save when dest qty sum is 8 or 12', async () => {
+  it('allows partial parcel dest and blocks over-assignment', async () => {
     const wrapper = await mountNewOrder()
     await fieldByLabel(wrapper, LABEL_CUSTOMER)?.find('select').setValue('C001')
     await fieldByLabel(wrapper, LABEL_QTY)?.find('input').setValue('10')
@@ -584,8 +584,8 @@ describe('OrderNewView', () => {
       addr: '경기 하남시 A',
     })
     await clickSave(wrapper)
-    expect(wrapper.text()).toContain(MSG_PARCEL_QTY_MISMATCH)
-    expect(createOrder).not.toHaveBeenCalled()
+    expect(createOrder).toHaveBeenCalled()
+    createOrder.mockClear()
     await fillOpenDest(wrapper, {
       qty: '12',
       name: '이문자',
@@ -593,7 +593,7 @@ describe('OrderNewView', () => {
       addr: '경기 하남시 A',
     })
     await clickSave(wrapper)
-    expect(wrapper.text()).toContain(MSG_PARCEL_QTY_MISMATCH)
+    expect(wrapper.text()).toContain(MSG_PARCEL_QTY_OVER)
     expect(createOrder).not.toHaveBeenCalled()
     wrapper.unmount()
   })

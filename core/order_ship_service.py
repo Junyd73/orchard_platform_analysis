@@ -14,10 +14,12 @@ from core.order_constants import (
     ORDER_STATUS_CANCEL_CD,
     ORDER_STATUS_DELIVERED_CD,
     ORDER_STATUS_PREP_CD,
+    ORDER_STATUS_SHIPABLE,
     WAREHOUSE_CD_DEFAULT,
 )
 from core.order_service import OrderNotFoundError, OrderSaveError
 from core.order_ship_constants import (
+    CODE_SHIP_ORDER_NOT_CONFIRMED,
     IO_TYPE_OUT,
     MSG_ALLOC_OVER_SHIP,
     MSG_DATA_INTEGRITY,
@@ -36,6 +38,7 @@ from core.order_ship_constants import (
     MSG_SENDER_REQUIRED,
     MSG_SHIP_LINES_REQUIRED,
     MSG_SHIP_MODE_INVALID,
+    MSG_SHIP_ORDER_NOT_CONFIRMED,
     MSG_SHIP_QTY_INVALID,
     MSG_STOCK_REQUIRES_ORDER,
     MSG_STOCK_UNAVAILABLE,
@@ -541,6 +544,11 @@ class OrderShipService:
         status = str(_row_val(row, "status_cd", 2) or "")
         if status in {ORDER_STATUS_CANCEL_CD, ORDER_STATUS_DELIVERED_CD}:
             raise ShipValidationError(MSG_ORDER_LOCKED, code="SHIP_ORDER_LOCKED")
+        if status not in ORDER_STATUS_SHIPABLE:
+            raise ShipValidationError(
+                MSG_SHIP_ORDER_NOT_CONFIRMED,
+                code=CODE_SHIP_ORDER_NOT_CONFIRMED,
+            )
         return {
             "order_no": str(_row_val(row, "order_no", 0) or ""),
             "custm_id": _row_val(row, "custm_id", 1),

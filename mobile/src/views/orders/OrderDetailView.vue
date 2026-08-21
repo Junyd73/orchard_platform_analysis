@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { cancelOrder, fetchOrder } from '@/api/orders'
+import { cancelOrder, confirmOrder, fetchOrder } from '@/api/orders'
 import { ApiClientError } from '@/api/client'
 import iconEdit from '@/assets/ods/scr004/icon-edit.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
@@ -15,6 +15,7 @@ import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
 import {
   LABEL_CANCEL_ORDER,
   LABEL_CLOSE,
+  LABEL_CONFIRM_ORDER,
   LABEL_EDIT,
   LABEL_LINE,
   LABEL_ORDER_DETAIL,
@@ -23,6 +24,8 @@ import {
   LABEL_UNIT_PRICE,
   MSG_ORDER_CANCEL_CONFIRM,
   MSG_ORDER_CANCEL_FAIL,
+  MSG_ORDER_CONFIRM_CONFIRM,
+  MSG_ORDER_CONFIRM_FAIL,
   ORDER_STATUS_CANCEL,
   ORDER_STATUS_DELIVERED,
   ORDER_STATUS_PREP,
@@ -34,7 +37,9 @@ import {
   HINT_ORDER_NEXT_PREP,
   ORDER_STATUS_CONFIRMED,
   canCancelOrder,
+  canConfirmOrder,
   canEnterOrderEdit,
+  canShipOrder,
   formatOrderAmt,
   formatOrderLineShip,
   formatOrderLineSpec,
@@ -51,7 +56,9 @@ const { farmCd } = storeToRefs(useAppStore())
 const salesPrefill = useSalesPrefillStore()
 const loading = ref(true)
 const cancelling = ref(false)
+const confirming = ref(false)
 const confirmOpen = ref(false)
+const confirmOrderOpen = ref(false)
 const errorMsg = ref('')
 const detail = ref<OrderDetail | null>(null)
 
@@ -59,6 +66,7 @@ const orderNo = computed(() => String(route.params.orderNo || ''))
 const canEdit = computed(() => canEnterOrderEdit(detail.value?.status_cd || ''))
 const editLocked = computed(() => isOrderEditLocked(detail.value?.status_cd || ''))
 const canCancel = computed(() => canCancelOrder(detail.value?.status_cd || ''))
+const canConfirm = computed(() => canConfirmOrder(detail.value?.status_cd || ''))
 const lockHint = computed(() => orderEditLockMessage(detail.value?.status_cd || ''))
 const statusNm = computed(() => detail.value?.status_nm || detail.value?.status_cd || '')
 const statusTone = computed<'ok' | 'caution' | 'danger' | 'neutral'>(() => {
@@ -68,10 +76,7 @@ const statusTone = computed<'ok' | 'caution' | 'danger' | 'neutral'>(() => {
   if (cd === ORDER_STATUS_DELIVERED) return 'neutral'
   return 'ok'
 })
-const canShip = computed(() => {
-  const cd = detail.value?.status_cd || ''
-  return cd !== ORDER_STATUS_CANCEL && cd !== ORDER_STATUS_DELIVERED
-})
+const canShip = computed(() => canShipOrder(detail.value?.status_cd || ''))
 const totalAmt = computed(() =>
   formatOrderAmt(detail.value?.tot_order_amt || detail.value?.total_amt || 0),
 )
@@ -172,7 +177,7 @@ function goEdit() {
 }
 
 function openCancelConfirm() {
-  if (!canCancel.value || cancelling.value) return
+  if (!canCancel.value || cancelling.value || confirming.value) return
   errorMsg.value = ''
   confirmOpen.value = true
 }
@@ -193,6 +198,31 @@ async function confirmCancel() {
     errorMsg.value = err instanceof ApiClientError ? err.message : MSG_ORDER_CANCEL_FAIL
   } finally {
     cancelling.value = false
+  }
+}
+
+function openConfirmOrderDialog() {
+  if (!canConfirm.value || confirming.value || cancelling.value) return
+  errorMsg.value = ''
+  confirmOrderOpen.value = true
+}
+
+function closeConfirmOrderDialog() {
+  if (confirming.value) return
+  confirmOrderOpen.value = false
+}
+
+async function submitConfirmOrder() {
+  if (!canConfirm.value || !orderNo.value || confirming.value) return
+  confirming.value = true
+  errorMsg.value = ''
+  try {
+    detail.value = await confirmOrder(farmCd.value, orderNo.value)
+    confirmOrderOpen.value = false
+  } catch (err) {
+    errorMsg.value = err instanceof ApiClientError ? err.message : MSG_ORDER_CONFIRM_FAIL
+  } finally {
+    confirming.value = false
   }
 }
 
@@ -223,7 +253,7 @@ watch(orderNo, () => {
     <main class="content ods-page-content">
       <OdsAppBar :show-back="true" back-fallback="orders" />
       <OdsSkeleton v-if="loading" />
-      <p v-if="!loading && errorMsg && !confirmOpen" class="err" role="alert">{{ errorMsg }}</p>
+      <p v-if="!loading && errorMsg && !confirmOpen && !confirmOrderOpen" class="err" role="alert">{{ errorMsg }}</p>
       <template v-if="!loading && detail">
         <OdsCard class="hero" aria-label="주문 요약">
           <p class="hero__ctx">{{ LABEL_ORDER_DETAIL }}</p>
@@ -259,7 +289,7 @@ watch(orderNo, () => {
           <p class="spec">{{ formatOrderLineSpec(line) }}</p>
           <p class="meta">{{ lineQtyAmtText(line) }}</p>
           <p v-if="remainingText(line)" class="meta">{{ remainingText(line) }}</p>
-          <p class="meta">배송 {{ formatOrderLineShip(line) }}</p>
+          <p class="meta">{{ formatOrderLineShip(line) }}</p>
           <OdsButton
             v-if="canShip && remainingQty(line) > 0"
             type="button"
@@ -274,6 +304,17 @@ watch(orderNo, () => {
       </template>
     </main>
     <div v-if="detail && !loading" class="footer-actions">
+      <OdsButton
+        v-if="canConfirm"
+        class="footer-btn"
+        variant="primary"
+        type="button"
+        :block="false"
+        :disabled="confirming || cancelling"
+        @click="openConfirmOrderDialog"
+      >
+        {{ LABEL_CONFIRM_ORDER }}
+      </OdsButton>
       <OdsButton
         v-if="canShip && shipableLines().length > 1"
         class="footer-btn"
@@ -300,7 +341,7 @@ watch(orderNo, () => {
         variant="secondary"
         type="button"
         :block="false"
-        :disabled="editLocked || cancelling"
+        :disabled="editLocked || cancelling || confirming"
         @click="goEdit"
       >
         <span class="footer-btn__inner">
@@ -314,13 +355,47 @@ watch(orderNo, () => {
         variant="danger"
         type="button"
         :block="false"
-        :disabled="cancelling"
+        :disabled="cancelling || confirming"
         @click="openCancelConfirm"
       >
         {{ LABEL_CANCEL_ORDER }}
       </OdsButton>
     </div>
     <OdsBottomNav />
+    <div
+      v-if="confirmOrderOpen"
+      class="dlg"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="order-confirm-title"
+      @keydown.esc.prevent="closeConfirmOrderDialog"
+    >
+      <div class="dlg__panel">
+        <h2 id="order-confirm-title" class="dlg__title">{{ LABEL_CONFIRM_ORDER }}</h2>
+        <p class="dlg__lead">{{ MSG_ORDER_CONFIRM_CONFIRM }}</p>
+        <p v-if="errorMsg" class="dlg__err" role="alert">{{ errorMsg }}</p>
+        <div class="dlg__actions">
+          <OdsButton
+            variant="secondary"
+            type="button"
+            :block="false"
+            :disabled="confirming"
+            @click="closeConfirmOrderDialog"
+          >
+            {{ LABEL_CLOSE }}
+          </OdsButton>
+          <OdsButton
+            variant="primary"
+            type="button"
+            :block="false"
+            :busy="confirming"
+            @click="submitConfirmOrder"
+          >
+            {{ LABEL_CONFIRM_ORDER }}
+          </OdsButton>
+        </div>
+      </div>
+    </div>
     <div
       v-if="confirmOpen"
       class="dlg"

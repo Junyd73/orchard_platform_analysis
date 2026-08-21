@@ -343,14 +343,68 @@ class OrderServiceStage2Test(unittest.TestCase):
     def test_parcel_sum_mismatch_rejected(self) -> None:
         short = _sample_payload(qty=10)
         short.lines = [self._parcel_line([3, 2, 3], line_qty=10)]
-        with self.assertRaises(OrderValidationError):
-            self.svc.create_order(FARM, short, user_id="TEST")
+        order_no = self.svc.create_order(FARM, short, user_id="TEST")
+        n = self.conn.execute(
+            "SELECT COUNT(*) FROM t_order_delivery WHERE order_no = ?",
+            (order_no,),
+        ).fetchone()[0]
+        self.assertEqual(n, 3)
+        empty = _sample_payload(qty=10)
+        empty.lines = [self._parcel_line([], line_qty=10)]
+        empty_no = self.svc.create_order(FARM, empty, user_id="TEST")
+        n0 = self.conn.execute(
+            "SELECT COUNT(*) FROM t_order_delivery WHERE order_no = ?",
+            (empty_no,),
+        ).fetchone()[0]
+        self.assertEqual(n0, 0)
         over = _sample_payload(qty=10)
         over.lines = [self._parcel_line([3, 2, 7], line_qty=10)]
         with self.assertRaises(OrderValidationError):
             self.svc.create_order(FARM, over, user_id="TEST")
-        self.assertEqual(_counts(self.conn)["t_order_master"], 0)
-        self.assertEqual(_counts(self.conn)["t_order_delivery"], 0)
+        incomplete = _sample_payload(qty=10)
+        incomplete.lines = [
+            OrderLineInput(
+                variety_cd=VARIETY,
+                weight=15,
+                grade_cd="GR010100",
+                size_cd="SZ010100",
+                qty=10,
+                unit_price=25000,
+                harvest_year=2026,
+                warehouse_cd=WAREHOUSE_CD_DEFAULT,
+                dlvry_tp="LO010200",
+                deliveries=[
+                    OrderDeliveryInput(
+                        delivery_tp_cd="LO010200",
+                        qty=5,
+                        rcv_name="",
+                        rcv_tel="010",
+                        rcv_addr="addr",
+                    )
+                ],
+            )
+        ]
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(FARM, incomplete, user_id="TEST")
+
+    def test_confirm_order_reserved_only(self) -> None:
+        order_no = self.svc.create_order(FARM, _sample_payload(qty=2), user_id="TEST")
+        before = _counts(self.conn)
+        self.svc.confirm_order(FARM, order_no, user_id="TEST")
+        detail = self.svc.get_order(FARM, order_no)
+        self.assertEqual(detail["status_cd"], ORDER_STATUS_CONFIRMED_CD)
+        self.assertEqual(_counts(self.conn), before)
+        with self.assertRaises(OrderValidationError) as ctx:
+            self.svc.confirm_order(FARM, order_no, user_id="TEST")
+        self.assertEqual(ctx.exception.code, "ORDER_CONFIRM_FORBIDDEN")
+        self._set_status(order_no, ORDER_STATUS_DELIVERED_CD)
+        with self.assertRaises(OrderValidationError):
+            self.svc.confirm_order(FARM, order_no, user_id="TEST")
+        self._set_status(order_no, ORDER_STATUS_CANCEL_CD)
+        with self.assertRaises(OrderValidationError):
+            self.svc.confirm_order(FARM, order_no, user_id="TEST")
+        self.assertEqual(_counts(self.conn)["t_sales_master"], 0)
+        self.assertEqual(_counts(self.conn)["hold"], 0)
 
     def test_two_lines_independent_deliveries(self) -> None:
         payload = _sample_payload(qty=10)
@@ -452,8 +506,12 @@ class OrderServiceStage2Test(unittest.TestCase):
         self.assertEqual([float(r["dlvry_qty"]) for r in rows], [4.0, 6.0])
         short = _sample_payload(qty=10)
         short.lines = [self._parcel_line([3, 2, 3], line_qty=10)]
-        with self.assertRaises(OrderValidationError):
-            self.svc.replace_order(FARM, order_no, short, user_id="TEST")
+        self.svc.replace_order(FARM, order_no, short, user_id="TEST")
+        rows2 = self.conn.execute(
+            "SELECT dlvry_qty FROM t_order_delivery WHERE order_no = ? ORDER BY order_dlvry_id",
+            (order_no,),
+        ).fetchall()
+        self.assertEqual([float(r["dlvry_qty"]) for r in rows2], [3.0, 2.0, 3.0])
         over = _sample_payload(qty=10)
         over.lines = [self._parcel_line([3, 2, 7], line_qty=10)]
         with self.assertRaises(OrderValidationError):
@@ -462,7 +520,7 @@ class OrderServiceStage2Test(unittest.TestCase):
             "SELECT COUNT(*) FROM t_order_delivery WHERE order_no = ?",
             (order_no,),
         ).fetchone()[0]
-        self.assertEqual(kept, 2)
+        self.assertEqual(kept, 3)
 
     def test_replace_rejects_delivered_and_cancel(self) -> None:
         order_no = self.svc.create_order(FARM, _sample_payload(qty=1), user_id="TEST")

@@ -20,6 +20,7 @@ from core.order_constants import (
     DELIVERY_TP_VISIT_CD,
     ITEM_MID_SUFFIX,
     MSG_ORDER_CANCEL_FORBIDDEN,
+    MSG_ORDER_CONFIRM_FORBIDDEN,
     MSG_ORDER_ALLOC_QTY_BELOW,
     MSG_ORDER_ALLOC_SPEC_LOCKED,
     MSG_ORDER_CONFIRMED_LIMITED,
@@ -27,6 +28,9 @@ from core.order_constants import (
     MSG_ORDER_LOCKED_DELIVERED,
     MSG_ORDER_QTY_LOCKED,
     MSG_ORDER_SHIP_ONLY,
+    MSG_PARCEL_DEST_INCOMPLETE,
+    MSG_PARCEL_DEST_QTY,
+    MSG_PARCEL_QTY_OVER,
     ORDER_LIST_PAGE_DEFAULT,
     ORDER_LIST_PAGE_SIZE_DEFAULT,
     ORDER_LIST_PAGE_SIZE_MAX,
@@ -840,6 +844,56 @@ class OrderService:
         finally:
             cur.close()
 
+    def confirm_order(
+        self,
+        farm_cd: str,
+        order_no: str,
+        *,
+        user_id: str,
+    ) -> str:
+        """예약접수(ST010100) → 주문확정(ST010200). 판매·재고·allocation 없음."""
+        farm = str(farm_cd or "").strip()
+        no = str(order_no or "").strip()
+        if not farm or not no:
+            raise OrderValidationError("주문번호가 없습니다.")
+        now_dt = now_ops_str()
+        mod_id = str(user_id or "").strip() or "SYSTEM"
+        cur = self.conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                """
+                SELECT status_cd
+                FROM t_order_master
+                WHERE farm_cd = ? AND order_no = ?
+                """,
+                (farm, no),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise OrderNotFoundError()
+            status_cd = str(_row_val(row, "status_cd", 0) or "")
+            if status_cd != ORDER_STATUS_RESERVED_CD:
+                raise OrderValidationError(
+                    MSG_ORDER_CONFIRM_FORBIDDEN,
+                    code="ORDER_CONFIRM_FORBIDDEN",
+                )
+            cur.execute(
+                """
+                UPDATE t_order_master
+                SET status_cd = ?, mod_id = ?, mod_dt = ?
+                WHERE farm_cd = ? AND order_no = ?
+                """,
+                (ORDER_STATUS_CONFIRMED_CD, mod_id, now_dt, farm, no),
+            )
+            self.conn.commit()
+            return no
+        except Exception:
+            self.conn.rollback()
+            raise
+        finally:
+            cur.close()
+
     def _load_alloc_snapshot(
         self, cur: sqlite3.Cursor, farm: str, order_no: str
     ) -> list[dict[str, Any]]:
@@ -930,6 +984,38 @@ class OrderService:
             if not str(line.grade_cd or "").strip() or not str(line.size_cd or "").strip():
                 raise OrderValidationError(f"{idx}행 등급/크기를 선택해 주십시오.")
             deliveries = list(line.deliveries or [])
+            line_tp = (
+                str(line.dlvry_tp or "").strip()
+                or (
+                    str(deliveries[0].delivery_tp_cd or "").strip()
+                    if deliveries
+                    else ""
+                )
+                or DELIVERY_TP_VISIT_CD
+            )
+            if line_tp == DELIVERY_TP_PARCEL_CD:
+                dlv_sum = sum(_as_float(d.qty) for d in deliveries)
+                if dlv_sum - _as_float(line.qty) > _QTY_EPS:
+                    raise OrderValidationError(
+                        f"{idx}행 {MSG_PARCEL_QTY_OVER}",
+                        code="PARCEL_QTY_OVER",
+                    )
+                for d in deliveries:
+                    if _as_float(d.qty) <= 0:
+                        raise OrderValidationError(
+                            f"{idx}행 {MSG_PARCEL_DEST_QTY}",
+                            code="PARCEL_DEST_QTY",
+                        )
+                    if (
+                        not str(d.rcv_name or "").strip()
+                        or not str(d.rcv_tel or "").strip()
+                        or not str(d.rcv_addr or "").strip()
+                    ):
+                        raise OrderValidationError(
+                            f"{idx}행 {MSG_PARCEL_DEST_INCOMPLETE}",
+                            code="PARCEL_DEST_INCOMPLETE",
+                        )
+                continue
             if not deliveries:
                 raise OrderValidationError(f"{idx}행 배송 정보가 없습니다.")
             dlv_sum = sum(_as_float(d.qty) for d in deliveries)
