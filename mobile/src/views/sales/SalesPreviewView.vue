@@ -1547,6 +1547,7 @@ onMounted(async () => {
 .dest-sheet__title {
   margin: 0;
   font: var(--ods-font-title-3);
+  font-weight: 700;
 }
 .dest-sheet__product {
   min-width: 0;
