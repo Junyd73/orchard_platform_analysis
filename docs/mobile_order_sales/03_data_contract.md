@@ -38,33 +38,21 @@
 | status_cd | Stage 2 신규 `ST010100` | **주문상태만** (DEC-013). 운영 ST01 SSOT (DEC-011 CLOSED) | 표시 | PC `'10'`/`'20'` 폐기 |
 | stock_status | `'N'` | 출고완료 플래그. `'Y'` 전환 없음 | 이행 계산에 사용 | 출고 TX에서 Y |
 | tot_order_amt / tot_ship_fee / tot_pay_amt / pre_pay_amt | 금액 | 선입금은 전표 없음 (DEC-009) | 표시 | 유지 |
-| **pre_pay_method_cd** | **컬럼 없음 (제안)** | 선입금 결제수단. `pre_pay_amt=0`이면 NULL, `>0`이면 필수 (DEC-028) | 선입금>0일 때만 입력 | **제안: `TEXT NULL` ALTER. 이번 작업 미실행** |
+| **pre_pay_method_cd** | **TEXT NULL (운영 반영)** | 선입금 결제수단. `pre_pay_amt=0`이면 NULL, `>0`이면 필수 (DEC-028) | 선입금>0일 때만 입력 | **완료 · 운영** |
 | season_type_cd | SS01 | 시즌 | 콤보 | 유지 |
 | sales_no | Stage 2 신규는 빈 값 | **legacy/reference.** 출고 전 비움. 이후 최초 출고 판매번호만. **주문 전체 판매 조회는 반드시 `t_sales_master.order_no` 기준.** | | DEC-005 · **017 APPROVED** |
 | rmk, reg_id, reg_dt, mod_* | 감사 | `now_ops_str` | 동일 | 유지 |
 
 출고예정일 마스터 컬럼 **추가하지 않음.** `MIN(t_order_delivery.planned_dt)`.
 
-### 1.1 선입금 결제수단 설계 (DEC-028 APPROVED · DDL 미실행)
+### 1.1 선입금 결제수단 (DEC-028 APPROVED · **완료 · 운영**)
 
 | 항목 | 내용 |
 |------|------|
-| 제안 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` |
-| 값 도메인 | **현금성 자산 계정**만. 판정 SSOT = `m_account_code.parent_cd='AS0101'` AND `acct_level=4` AND `use_yn='Y'`. 운영 조사(2026-08-21): `AS010101` 현금 · `AS010102` 농협 · `AS010103` 국민. 채권(`AS02…`) 제외. 카드 계정 **현재 없음**(신규 코드 생성 금지). **모바일 전용 결제수단 코드 하드코딩 금지** |
-| 목록 조회 | 기존 `GET .../masters/account-codes?prefix=AS0101&level=4` 재사용 (`use_yn=Y`만). `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 **확정하지 않음** |
-| 규칙 | `pre_pay_amt = 0` → NULL · `pre_pay_amt > 0` → 필수 |
-| 회계 | 주문 저장 시 전표·수금줄 **없음** (DEC-009). 판매확정 시 이 결제수단으로 선입금 적용분을 회계 반영 |
-| 신규 테이블 | 없음 |
-
-**이번 작업에서 ALTER 하지 않는다.** 구현 착수 전 확인:
-
-```sql
--- 동일 목적 컬럼이 이미 있는지
-PRAGMA table_info(t_order_master);
-
--- 실제 사용 중인 결제수단 코드 분포
-SELECT pay_method_cd, COUNT(*) FROM t_cash_ledger GROUP BY 1 ORDER BY 2 DESC;
-```
+| 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` |
+| 값 도메인 | **현금성** `parent_cd='AS0101'` · level4 · `use_yn='Y'`. 운영: AS010101/102/103. 채권 제외 |
+| 규칙 | `pre_pay_amt = 0` → NULL · `> 0` → 필수 |
+| 회계 | 주문 저장 시 전표 **없음** (DEC-009) |
 
 `prepay_balance` 같은 잔액 컬럼은 **만들지 않는다** (DEC-019, §9.1 계산식).
 
@@ -137,9 +125,9 @@ migration 직전 운영 점검 필수 → §15.
 | sales_dt | YYYY-MM-DD | 판매화면 ISO / **주문경로 YYYYMMDD** | 신규 ISO (DEC-012). 과거 변환 없음 |
 | sales_tp | RETAIL/WHOLE | 주문 `'NORMAL'` | 정리 제안, 1차 비범위 가능 |
 | sales_status / sales_source | 문서 없음 | ALTER 후 사용 | **`DRAFT`/`CONFIRMED` 두 값만** (DEC-029). ORDER/AUCTION_RT 유지 |
-| tot_sales_amt / tot_paid_amt / tot_unpaid_amt | 있음 (`kpi_detail_page`·`sales_page`·`order_ship_service` 사용 확인) | 판매금액 / 수금액 / 미수금 | **수금상태 계산 근거** (§4.1) |
+| tot_sales_amt / tot_paid_amt / tot_unpaid_amt | 있음 | 판매금액 / 수금액 / 미수금 | **수금 SSOT는 `t_cash_ledger` SUM.** master `tot_paid_amt`/`tot_unpaid_amt`는 동기화·조회용 (개발순서 3 `SalesPaymentService`) |
 | order_no | 문서 없음 | 주문 INSERT만. **재저장 시 누락**. UNIQUE 없음 | 출고마다 동일 `order_no` 가능 → **주문 1:N 판매 SSOT** (DEC-017). 재저장 보존 |
-| slip_no | 문서 있음 | 판매 INSERT 없음 | 전표는 `t_ledger` |
+| slip_no / pay_method_cd | 문서 있음 | 판매 INSERT 일부 | **N회·복수 결제수단 수금의 SSOT 아님.** Core는 이 두 필드를 수금으로 갱신하지 않음 |
 
 채번: `generate_sales_no` vs 주문 `get_next_seq` 이중 → P0 공통화.
 
@@ -147,11 +135,13 @@ migration 직전 운영 점검 필수 → §15.
 
 **수금상태 컬럼을 만들지 않는다.** `sales_status`에 수금 의미를 넣지 않는다.
 
-| 수금상태 | 조건 |
+| 수금상태 | 조건 (조회 시 **cash SUM 기준** paid / unpaid) |
 |----------|------|
-| 미수 | `tot_paid_amt == 0` |
-| 부분수금 | `0 < tot_paid_amt < tot_sales_amt` |
-| 수금완료 | `tot_unpaid_amt == 0` |
+| 미수 | `paid == 0` |
+| 부분수금 | `0 < paid < tot_sales_amt` |
+| 수금완료 | `unpaid == 0` |
+
+`paid = SUM(t_cash_ledger.pay_amt WHERE farm_cd·sales_no)`. `unpaid = tot_sales_amt − paid`. master 컬럼은 동기화 값.
 
 완료 개념 3종은 서로 다른 값에서 나온다.
 
@@ -253,9 +243,12 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
 ---
 
-## 9. `t_cash_ledger` / `t_ledger` — 회계 SSOT
+## 9. `t_cash_ledger` / `t_ledger` — 수금·회계 SSOT
 
 판매 **CONFIRMED** 수금만. 문서명 `t_sales_pay_detail`과 다름. **코드 테이블명 우선.**
+
+**수금 SSOT = `t_cash_ledger`.** master `tot_paid_amt`/`tot_unpaid_amt`는 Core가 cash SUM으로 동기화한다.  
+master `pay_method_cd` / `slip_no`는 N회 수금 SSOT가 아니다.
 
 **주문 단계에는 아무 행도 넣지 않는다** (DEC-009). 주문에 선입금 금액·결제수단을 저장해도 전표는 생기지 않는다 (DEC-028).
 
@@ -263,10 +256,11 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
 | 대상 | 사용 |
 |------|------|
-| 수금 상세 | `t_cash_ledger` |
+| 수금 상세 (SSOT) | `t_cash_ledger` |
 | 전표 | `t_ledger` (+ `t_ledger_history`) |
 | 전표 생성 | `AccountManager.sync_ledger_by_basket('SALE', sales_no, work_date, basket, user_id)` |
-| 계정코드 | 수금·선입금 **결제수단** = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`)은 결제수단이 아님. 매출채권 등 상대계정은 `AccountManager` 전표 쪽에서 기존 규칙대로 처리 |
+| 공용 Core | `core/sales_payment_service.py` `SalesPaymentService` (개발순서 3 · append 추가수금). HTTP는 6단계 |
+| 계정코드 | 결제수단 = **현금성** `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권(`AS02…`) 금지 |
 
 **확인된 `t_cash_ledger` 컬럼** (운영 PRAGMA 2026-08-21):
 
@@ -275,11 +269,11 @@ paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt,
 rmk, reg_id, reg_dt, slip_no, order_no
 ```
 
-PC `sales_page.py` INSERT는 `order_no`를 **넣지 않는다**. 운영 기존 행도 `order_no` NULL.
+PC `sales_page.py` INSERT·일반 추가수금 Core 모두 `order_no`를 **넣지 않는다**(NULL). 운영 기존 행도 NULL.
 
 `AccountManager._get_db_fingerprints`의 `SALE` 조회도 `pay_method_cd` / `paid_detail_no` / `pay_amt` + `sales_no` 기준이다.
 
-**OPEN (개발순서 3·4):** `order_no` 컬럼은 있으나 **현재 미사용**. 선입금 적용분 vs 이후 추가수금을 구분하는 **전용 플래그/유형 컬럼은 없음**. 임의 DDL 확장 금지. 구분 규칙은 3·4단계에서 별도 설계.
+**OPEN (개발순서 4):** `order_no`로 선입금 적용분 vs 추가수금 구분 여부는 미확정. 임의 DDL 확장 금지.
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 
@@ -347,7 +341,7 @@ t_order_master.stock_status  =  전량 출고 시만 Y
 
 | 제안 | 상태 |
 |------|------|
-| **`t_order_master.pre_pay_method_cd TEXT NULL`** | **설계 제안 (DEC-028 APPROVED).** DDL **미실행**. 운영 PRAGMA 확인 후 별도 승인 |
+| **`t_order_master.pre_pay_method_cd TEXT NULL`** | **완료 · 운영** (DEC-028) |
 | `t_order_master.prepay_balance` | **하지 않음** (계산. §9.1) |
 | 수금상태 컬럼 (`payment_status` 등) | **하지 않음** (금액 계산. DEC-029) |
 | `sales_status`에 PAID/UNPAID 추가 | **하지 않음** (DEC-029) |
