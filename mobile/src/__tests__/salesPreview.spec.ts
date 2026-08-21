@@ -733,19 +733,20 @@ describe('SalesPreviewView 2B', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="sales-preview-parcel-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="sales-preview-sender-bar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sales-preview-submit"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="sales-preview-sender"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sales-preview-sender-setup"]').text()).toContain('설정')
+    expect(wrapper.find('[data-testid="sales-preview-sender-summary"]').text()).toContain('미설정')
 
     await wrapper.find('[data-testid="sales-preview-sender-setup"]').trigger('click')
     await flushPromises()
     const sheet = document.querySelector('[data-testid="sales-preview-sender-sheet"]')!
     expect(sheet).toBeTruthy()
     expect(sheet.textContent || '').toContain('판매 전체 공통 적용')
+    expect(sheet.textContent || '').not.toContain('수령 주소')
     expect(
-      (sheet.querySelector('[data-testid="sales-preview-sender-farm-addr"]') as HTMLElement)
-        .textContent || '',
+      (sheet.querySelector('[data-testid="sales-preview-sender-addr"]') as HTMLInputElement).value,
     ).toContain('경기도 화성시')
 
     await new DOMWrapper(
@@ -765,6 +766,8 @@ describe('SalesPreviewView 2B', () => {
     expect(store.senderTel).toBe('010-1234-5678')
     expect(store.senderAddr).toBe('경기도 화성시 테스트로 1')
     expect(wrapper.find('[data-testid="sales-preview-sender-setup"]').text()).toContain('편집')
+    expect(wrapper.find('[data-testid="sales-preview-sender-summary"]').text()).toContain('삼육농원')
+    expect(wrapper.find('[data-testid="sales-preview-sender-bar"]').text()).not.toContain('미지정')
 
     await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
     await flushPromises()

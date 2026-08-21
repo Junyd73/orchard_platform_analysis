@@ -1316,8 +1316,8 @@ const salesFabStyle = {
   position: fixed;
   left: 50%;
   right: auto;
-  width: 70%;
-  max-width: 336px; /* 480 * 0.7 */
+  width: min(92vw, 360px);
+  max-width: min(92vw, 360px);
   transform: translateX(-50%);
   /* OdsBottomNav: min-height 56 + padding 8+8 + safe-area */
   bottom: calc(
@@ -1330,23 +1330,23 @@ const salesFabStyle = {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: var(--stock-batch-bar-h, 50px);
+  min-height: 40px;
   box-sizing: border-box;
-  /* 좌우 여백 확대 (12 → 20) */
-  padding: var(--ods-space-8) 20px;
+  padding: var(--ods-space-4) var(--ods-space-8) var(--ods-space-4) var(--ods-space-12);
   background: var(--ods-color-primary-subtle, #e8f5ee);
   border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
   box-shadow: 0 2px 10px rgba(46, 125, 50, 0.12);
 }
 .stock-view__batch-count {
-  font: var(--ods-font-body-2);
-  font-weight: 600;
+  font: var(--ods-font-caption);
+  font-weight: 700;
   color: var(--ods-color-text);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1 1 auto;
 }
 /* OdsButton 전역(headline/큰 min-height)을 Floating Bar에서만 compact override */
 :deep(button.stock-view__preview-btn.ods-btn) {
@@ -1358,6 +1358,7 @@ const salesFabStyle = {
   line-height: 1.2;
   white-space: nowrap;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* ── 이력 bottom sheet ────────────────────────────────────────────── */

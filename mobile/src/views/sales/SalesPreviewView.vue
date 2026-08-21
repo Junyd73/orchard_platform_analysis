@@ -61,6 +61,7 @@ const LABEL_DLVRY_METHOD = '배송방법'
 const LABEL_DLVRY_SHORT = '배송'
 const LABEL_SENDER = '보내는 사람'
 const LABEL_SENDER_TEL = '전화번호'
+const LABEL_SENDER_UNSET = '미설정'
 const LABEL_SENDER_SETUP = '설정 ›'
 const LABEL_SENDER_EDIT = '편집 ›'
 const LABEL_SENDER_SHEET = '보내는 사람 설정'
@@ -110,7 +111,6 @@ const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요
 const MSG_DEST_QTY_OVER = '주문량을 초과할 수 없습니다.'
 const MSG_DEST_ADD_OVER = '주문량이 모두 지정되어 배송지를 추가할 수 없습니다.'
 const DEST_TIP_MS = 1800
-const HINT_PARCEL_DONE = '배송지 지정 완료'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -170,42 +170,24 @@ const farmAddress = computed(() => String(farm.value?.address || '').trim())
 const senderConfigured = computed(() => {
   const name = String(prefill.senderName || '').trim()
   const tel = String(prefill.senderTel || '').trim()
-  return Boolean(name && tel)
+  const addr = String(prefill.senderAddr || '').trim()
+  return Boolean(name && tel && addr)
+})
+const senderSummary = computed(() => {
+  if (!senderConfigured.value) return ''
+  return joinDot([prefill.senderName, prefill.senderTel])
 })
 const senderIssue = computed(() => {
   if (!isParcel.value) return ''
-  const name = String(prefill.senderName || '').trim()
-  const tel = String(prefill.senderTel || '').trim()
-  const addr = String(prefill.senderAddr || '').trim()
-  if (!name || !tel || !addr) return MSG_NEED_SENDER
+  if (!senderConfigured.value) return MSG_NEED_SENDER
   return ''
 })
 const unitHint = computed(() =>
   lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
 )
 
-/** 택배 상단 보조 안내 — 미지정/초과 합계만 짧게 */
-const parcelHeaderHint = computed(() => {
-  if (!isParcel.value || !lines.value.length) return ''
-  let unassigned = 0
-  let over = 0
-  let incomplete = false
-  for (const ln of lines.value) {
-    const sale = Math.floor(Number(ln.qty) || 0)
-    const got = Math.floor(allocQtySum(ln))
-    if (got < sale) {
-      unassigned += sale - got
-      incomplete = true
-    } else if (got > sale) {
-      over += got - sale
-      incomplete = true
-    }
-  }
-  if (!incomplete) return HINT_PARCEL_DONE
-  if (unassigned > 0) return `미지정 ${unassigned}${unitHint.value}`
-  if (over > 0) return `초과 ${over}${unitHint.value}`
-  return '미지정'
-})
+/** 택배 상단 — 보내는 사람만 (배송 미지정 합계는 품목별 상세에만) */
+const showSenderBar = computed(() => isParcel.value && lines.value.length > 0)
 
 function normalizeShipFee(raw: unknown): number {
   const n = Number(String(raw ?? '').replace(/,/g, ''))
@@ -353,26 +335,22 @@ function onSenderAddrMode(raw: string) {
   }
 }
 
+function onSenderAddrInput(raw: string) {
+  senderDraftAddr.value = String(raw || '')
+  if (senderSheetErr.value) senderSheetErr.value = ''
+}
+
 function commitSenderSheet() {
   const name = String(senderDraftName.value || '').trim()
   const tel = formatPhoneKr(senderDraftTel.value).trim()
-  let addr = ''
-  if (senderAddrMode.value === SENDER_ADDR_ORCHARD) {
-    addr = farmAddress.value
-    if (!addr) {
-      senderAddrMode.value = SENDER_ADDR_CUSTOM
-      senderSheetErr.value = MSG_NEED_SENDER_ADDR
-      return
-    }
-  } else {
-    addr = String(senderDraftAddr.value || '').trim()
-  }
+  const addr = String(senderDraftAddr.value || '').trim()
   if (!name || !tel || !addr) {
     senderSheetErr.value = MSG_NEED_SENDER
     return
   }
   prefill.setSender({ name, tel, addr })
-  closeSenderSheet()
+  senderSheetErr.value = ''
+  senderSheetOpen.value = false
 }
 
 function cancelSalePrep() {
@@ -787,15 +765,18 @@ onBeforeUnmount(() => {
               </OdsSelect>
             </div>
             <div
-              v-if="isParcel && parcelHeaderHint"
+              v-if="showSenderBar"
               class="header-hint"
               :class="{
-                'header-hint--ok': !parcelIssue,
-                'header-hint--warn': Boolean(parcelIssue),
+                'header-hint--ok': senderConfigured,
+                'header-hint--warn': !senderConfigured,
               }"
-              data-testid="sales-preview-parcel-hint"
+              data-testid="sales-preview-sender-bar"
             >
-              <span class="header-hint__txt">{{ parcelHeaderHint }}</span>
+              <span class="header-hint__txt" data-testid="sales-preview-sender-summary">
+                <template v-if="senderSummary">{{ LABEL_SENDER }} · {{ senderSummary }}</template>
+                <template v-else>{{ LABEL_SENDER }} · {{ LABEL_SENDER_UNSET }}</template>
+              </span>
               <button
                 type="button"
                 class="header-hint__act"
@@ -1341,38 +1322,38 @@ onBeforeUnmount(() => {
               />
             </OdsFormField>
             <OdsFormField :label="LABEL_SENDER_ADDR">
-              <OdsSelect
-                :model-value="senderAddrMode"
-                variant="form"
-                data-testid="sales-preview-sender-addr-mode"
-                :aria-label="LABEL_SENDER_ADDR"
-                @update:model-value="onSenderAddrMode(String($event))"
-              >
-                <option
-                  v-for="opt in SENDER_ADDR_OPTIONS"
-                  :key="opt.value"
-                  :value="opt.value"
+              <div class="sender-addr-row" data-testid="sales-preview-sender-addr-row">
+                <OdsSelect
+                  :model-value="senderAddrMode"
+                  variant="form"
+                  class="sender-addr-row__mode"
+                  data-testid="sales-preview-sender-addr-mode"
+                  :aria-label="LABEL_SENDER_ADDR"
+                  @update:model-value="onSenderAddrMode(String($event))"
                 >
-                  {{ opt.label }}
-                </option>
-              </OdsSelect>
-            </OdsFormField>
-            <p
-              v-if="senderAddrMode === SENDER_ADDR_ORCHARD"
-              class="dest-sheet__farm-addr"
-              data-testid="sales-preview-sender-farm-addr"
-            >
-              {{ farmAddress || MSG_NEED_SENDER_ADDR }}
-            </p>
-            <OdsFormField v-else :label="LABEL_RCV_ADDR">
-              <OdsInput
-                :model-value="senderDraftAddr"
-                variant="form"
-                bare
-                data-testid="sales-preview-sender-addr"
-                :aria-label="LABEL_RCV_ADDR"
-                @update:model-value="senderDraftAddr = String($event)"
-              />
+                  <option
+                    v-for="opt in SENDER_ADDR_OPTIONS"
+                    :key="opt.value"
+                    :value="opt.value"
+                  >
+                    {{ opt.label }}
+                  </option>
+                </OdsSelect>
+                <OdsInput
+                  :model-value="senderDraftAddr"
+                  variant="form"
+                  bare
+                  class="sender-addr-row__input"
+                  data-testid="sales-preview-sender-addr"
+                  :aria-label="LABEL_SENDER_ADDR"
+                  :placeholder="
+                    senderAddrMode === SENDER_ADDR_ORCHARD
+                      ? LABEL_SENDER_ADDR_ORCHARD
+                      : LABEL_SENDER_ADDR_CUSTOM
+                  "
+                  @update:model-value="onSenderAddrInput(String($event))"
+                />
+              </div>
             </OdsFormField>
             <p v-if="senderSheetErr" class="dest-sheet__err" data-testid="sales-preview-sender-err">
               {{ senderSheetErr }}
@@ -1384,7 +1365,7 @@ onBeforeUnmount(() => {
               type="button"
               class="dest-sheet__cta"
               data-testid="sales-preview-sender-apply"
-              @click="commitSenderSheet"
+              @click.stop="commitSenderSheet"
             >
               {{ LABEL_SENDER_APPLY }}
             </OdsButton>
@@ -1403,7 +1384,7 @@ onBeforeUnmount(() => {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 9.5rem;
+  --sales-preview-footer-h: 8.25rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   --sales-preview-inline: var(--ods-page-padding-x, var(--ods-space-16));
@@ -1767,26 +1748,27 @@ onBeforeUnmount(() => {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-6, 6px);
+  gap: var(--ods-space-4);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-6, 6px) var(--sales-preview-inline) var(--ods-space-8);
+  padding: var(--ods-space-4) var(--sales-preview-inline) var(--ods-space-6, 6px);
   background: var(--ods-color-bg-muted, #f5f5f5);
   border-top: 1px solid var(--ods-color-border);
 }
 .footer__panel {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
   box-sizing: border-box;
-  padding: var(--ods-space-8) var(--ods-space-12);
+  padding: var(--ods-space-6, 6px) var(--ods-space-10, 10px);
   background: var(--ods-color-primary-subtle, #e8f5ee);
   border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
   box-shadow: none;
+  line-height: 1.25;
 }
 .footer__top {
   margin: 0;
@@ -1794,19 +1776,20 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 22px;
+  min-height: 0;
   min-width: 0;
+  padding: 1px 0;
 }
 .footer__count {
   margin: 0;
-  font: var(--ods-font-body-2);
-  font-weight: 600;
+  font: var(--ods-font-caption);
+  font-weight: 700;
   color: var(--ods-color-text);
   white-space: nowrap;
 }
 .footer__item-amt {
-  font: var(--ods-font-body-2);
-  font-weight: 600;
+  font: var(--ods-font-caption);
+  font-weight: 700;
   color: var(--ods-color-text);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1821,9 +1804,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 22px;
+  min-height: 0;
+  padding: 1px 0;
   font: var(--ods-font-caption);
-  line-height: 1.35;
+  line-height: 1.25;
   color: var(--ods-color-text-secondary);
 }
 .footer__lbl {
@@ -1842,7 +1826,7 @@ onBeforeUnmount(() => {
 .footer__divider {
   height: 1px;
   width: 100%;
-  margin: var(--ods-space-4) 0;
+  margin: 3px 0;
   background: color-mix(in srgb, var(--ods-color-secondary, #66bb6a) 40%, white);
 }
 .footer__total {
@@ -1851,36 +1835,38 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 24px;
-  font: var(--ods-font-body);
+  min-height: 0;
+  padding: 1px 0;
+  font: var(--ods-font-caption);
   font-weight: 700;
   color: var(--ods-color-text);
 }
 .footer__total strong {
-  font: var(--ods-font-title-2);
+  font: var(--ods-font-body);
+  font-weight: 800;
   color: var(--ods-color-primary);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 .footer__fee {
   display: inline-block;
-  width: 72px;
+  width: 64px;
   vertical-align: middle;
 }
 .footer :deep(.footer__fee.ods-input),
 .footer :deep(input.footer__fee) {
-  width: 72px;
-  height: 28px;
-  min-height: 28px;
+  width: 64px;
+  height: 24px;
+  min-height: 24px;
   padding: 0 var(--ods-space-4);
   text-align: right;
-  font: var(--ods-font-form-value);
+  font: var(--ods-font-caption);
   background: var(--ods-color-white);
   box-sizing: border-box;
 }
 .footer__go {
   width: 100%;
-  min-height: var(--ods-button-height, 48px);
+  min-height: 44px;
   flex-shrink: 0;
   margin: 0;
 }
@@ -1911,7 +1897,7 @@ onBeforeUnmount(() => {
 .dest-overlay {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 200;
   background: rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: flex-end;
@@ -2161,13 +2147,34 @@ onBeforeUnmount(() => {
   font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
-.dest-sheet__farm-addr {
-  margin: calc(var(--ods-space-8) * -1) 0 var(--ods-space-8);
-  padding: 0 var(--ods-space-4);
-  font: var(--ods-font-body);
-  color: var(--ods-color-text-secondary);
-  line-height: 1.4;
-  word-break: keep-all;
+.sender-addr-row {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 6.75rem) minmax(0, 1fr);
+  gap: var(--ods-space-4);
+  align-items: center;
+  min-width: 0;
+}
+.sender-addr-row__mode {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  padding-inline: var(--ods-space-4);
+  box-sizing: border-box;
+}
+.sender-addr-row__input {
+  min-width: 0;
+  width: 100%;
+}
+.dest-sheet--sender .sender-addr-row :deep(input.ods-input),
+.dest-sheet--sender .sender-addr-row :deep(.sender-addr-row__input.ods-input) {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 var(--ods-space-8);
+  box-sizing: border-box;
 }
 .dest-sheet--sender .dest-sheet__body {
   display: flex;
