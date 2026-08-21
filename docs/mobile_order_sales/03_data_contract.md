@@ -272,9 +272,15 @@ rmk, reg_id, reg_dt, slip_no, order_no
 PC `sales_page.py` INSERT·일반 추가수금 Core는 `order_no`를 **넣지 않는다**(NULL).
 
 **DEC-019 provenance (CLOSED):** `t_cash_ledger.order_no`가 구분 SSOT이다.
-- `NULL` = 일반 추가수금 (Stage3)
+- `NULL` = 일반 추가수금 (Stage3 · PC 신규 수금)
 - 주문번호 = 출고 시 선입금 자동적용 (Stage4)
 - 신규 `payment_type`/`prepay_yn` 컬럼·DDL **없음**. `rmk`/`paid_detail_no` 패턴을 SSOT로 쓰지 않는다.
+
+**PC 재저장 보존 (Stage4-P1):** `execute_full_save` DELETE→INSERT 시
+- `t_sales_master.order_no` = DELETE 전 DB값 보존 (UI/역산 금지)
+- 기존 cash 행(ORG/MOD) = 행별 `orig_data.order_no` 보존 (master 상속 금지)
+- 신규 PC 수금(INS) = 항상 `NULL`
+- `t_sales_detail.order_detail_id` 재저장 유실은 **별도 OPEN P1** (이번 범위 아님)
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 

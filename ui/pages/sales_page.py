@@ -12,6 +12,10 @@ from core.stock_constants import ITEM_JUICE, JUICE_STOCK_ITEM_CDS, PARENT_PEAR_V
 from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
+from core.pc_sales_provenance import (
+    cash_order_no_on_resave,
+    fetch_master_order_no,
+)
 from ui.ops_qdate import qdate_today_ops
 
 # 배송 리스트 팝업
@@ -2699,6 +2703,11 @@ class SalesPage(QWidget):
             queries = []
             queries.extend(ledger_queries) # 전표 90/80/10 쿼리 선삽입
 
+            # Stage4-P1: DELETE 전 master.order_no 보존 (UI/역산 금지)
+            existing_master_order_no = fetch_master_order_no(
+                self.db.conn.cursor(), self.farm_cd, s_no
+            )
+
             # -----------------------------------------------------------------
             # [Step 2] 기존 내역 삭제 (FK 제약 조건 준수: 자식부터 삭제)
             # -----------------------------------------------------------------
@@ -2715,8 +2724,9 @@ class SalesPage(QWidget):
                     sales_no, farm_cd, sales_dt, sales_tp, custm_id,
                     tot_sales_amt, tot_ship_fee, tot_item_amt, tot_paid_amt, tot_unpaid_amt,
                     auction_fee, extra_cost, bill_yn, bill_dt, bill_no, 
-                    pay_method_cd, status_cd, rmk, reg_id, reg_dt, sales_status, sales_source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pay_method_cd, status_cd, rmk, reg_id, reg_dt,
+                    order_no, sales_status, sales_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             queries.append((sql_master, (
                 s_no, self.farm_cd, sales_date_str, self.sales_tp.currentData(), getattr(self, 'custm_id', None),
@@ -2724,6 +2734,7 @@ class SalesPage(QWidget):
                 get_amt(self.auction_fee), get_amt(self.extra_cost),
                 ui_bill_yn, ui_bill_dt, ui_bill_no, ui_pay_method, ui_status_cd, ui_master_rmk, self.user_id,
                 now_ops_str(),
+                existing_master_order_no,
                 sales_status, sales_source
             )))
 
@@ -2778,8 +2789,8 @@ class SalesPage(QWidget):
             sql_pay = """
                 INSERT INTO t_cash_ledger (
                     paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, 
-                    pay_amt, slip_no, rmk, reg_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pay_amt, slip_no, rmk, reg_id, order_no
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             for i, item in enumerate(pay_basket):
                 if item.get('status') == 'DEL':
@@ -2789,11 +2800,17 @@ class SalesPage(QWidget):
                 pd_no = f"{s_no}-P{i+1:02d}"
                 s_key = f"{item['acct_cd']}_{item['method']}"
                 slip_no = slip_map.get(s_key)
+                # Stage4-P1: ORG/MOD는 행별 orig order_no, INS는 NULL (master 상속 금지)
+                preserved_cash_order_no = cash_order_no_on_resave(
+                    status=str(item.get("status") or ""),
+                    orig_data=item.get("orig_data"),
+                )
                 queries.append((sql_pay, (
                     pd_no, s_no, self.farm_cd, sales_date_str, item['method'], 
                     item['amt'], slip_no, 
                     item.get('rmk', ''), # 안전하게 get 사용
-                    self.user_id
+                    self.user_id,
+                    preserved_cash_order_no,
                 )))
 
             # -----------------------------------------------------------------
