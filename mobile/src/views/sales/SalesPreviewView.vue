@@ -369,20 +369,12 @@ function destSheetRemainLabel(): string {
   return '지정 완료'
 }
 
-/** Sheet 상품 카드 1행 — 품종축약 / 판매수량 / 미지정 */
-function formatDestProductShort(ln: (typeof lines.value)[number]): string {
-  if (isJuiceItemCd(ln.item_cd)) {
-    return juiceItemLabel(ln.item_cd, ln.item_nm)
-  }
-  return String(ln.variety_nm || ln.variety_cd || ln.item_nm || '').trim() || '상품'
-}
-
+/** Sheet 상품 카드 1행 — 품종·중량·등급·크기(대분류 제외) / 판매수량 / 미지정 */
 function destSheetProductSummary(): string {
   const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
   if (!ln) return ''
-  const short = formatDestProductShort(ln)
   const qty = `${Number(ln.qty)}${lineUnit(ln)}`
-  return `${short} / ${qty} / ${destSheetRemainLabel()}`
+  return `${formatPreviewLineSpec(ln)} / ${qty} / ${destSheetRemainLabel()}`
 }
 
 function commitDestSheet() {
