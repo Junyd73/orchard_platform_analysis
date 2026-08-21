@@ -24,7 +24,7 @@
 | SalesService | 직접판매 저장, 경매 DRAFT, PUT 시 `order_no` 보존 | sales |
 | SalesConfirmService | 가락 DRAFT 확정+출고 **단일 TX** | confirm |
 | CustomerService | 검색·등록 | customers |
-| AccountManager | `sync_ledger_by_basket` (기존) | payment / 출고 시 선입금 복사 |
+| AccountManager | `sync_ledger_by_basket` (**기존 엔진 그대로**. 모바일 전용 회계 엔진 금지) | payment / 출고 시 선입금 적용 |
 | DBManager | `generate_sales_no` + **신설** `generate_order_no` | 채번 |
 
 FastAPI 라우터는 위 함수만 호출.
@@ -69,7 +69,7 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 | PUT | `/farms/{farm_cd}/orders/{order_no}` | Stage 2 구현. Stage 3A: allocated 규격 잠금, qty≥allocated |
 | POST | `/farms/{farm_cd}/orders/{order_no}/cancel` | Stage 2 구현. Stage 3A: 미출고 배정 동일 TX 해제 |
 
-POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, lines(규격+`qty`), deliveries.
+POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, **`pre_pay_method_cd`**, lines(규격+`qty`), deliveries.
 
 검증: 고객, 줄≥1, 줄 qty=배송 합, 방문 외 주소. **`available < qty`여도 200.** `warnings[]` 선택.
 
@@ -79,6 +79,21 @@ POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, lines(규격
 
 PUT: `stock_status=Y` → 409. 부분출고(`shipped_qty>0`) 후 주문 헤더/줄 수정은 1차 거부 권고.  
 cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t_order_alloc` 행 단위** (DEC-018). 이미 출고된 allocation은 단순 취소 금지.
+
+### 3.1 선입금 결제수단 (DEC-028 APPROVED · 설계)
+
+POST / PUT 공통 필드. **컬럼 ALTER 전이므로 구현 상태 아님.**
+
+| 필드 | 타입 | 규칙 |
+|------|------|------|
+| `pre_pay_amt` | number | 기본 0. 음수 거부 |
+| `pre_pay_method_cd` | string \| null | `pre_pay_amt = 0` → **null 강제**(값이 오면 400). `pre_pay_amt > 0` → **필수**(누락/공백이면 400) |
+
+값 도메인은 **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 선입금은 실제 받은 돈이므로 **채권계정(외상·미수 `AS02…`)을 결제수단으로 쓰지 않는다.** `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 확정하지 않는다. **API·클라이언트에 결제수단 코드 하드코딩 금지.** 모바일 전용 결제수단 코드 정의 금지.
+
+**주문 API는 회계를 만들지 않는다.** 결제수단을 받아도 `t_cash_ledger` / `t_ledger` INSERT·전표 채번은 **금지** (DEC-009). 회계는 판매확정에서만.
+
+검증은 Core(`core/order_service.py`)가 SSOT. FastAPI에 같은 검증을 복제하지 않는다 (DEC-007).
 
 ---
 
@@ -164,6 +179,22 @@ FIFO가 stock Nrow면 **`t_sales_detail` N행** (`stock_seq`마다 1행). 연결
 allocation/`shipped_qty` **미갱신**. 가용 FIFO로 stock row 선택. 결과 Nrow면 판매상세 N행. `stock_seq` 기록은 STOCK과 동일.  
 주문 있으면 주문 잔여만 검증. 주문 없으면 직접판매. STOCK의 `ship_qty <= alloc 잔여`를 DIRECT에 적용하지 않음.
 
+### 6.C 선입금 순차 배분 (DEC-019 APPROVED · 확정 설계)
+
+confirm이 판매를 CONFIRMED로 만든 **같은 TX 안에서** 처리한다.
+
+1. 그 주문의 남은 선입금 계산 = `t_order_master.pre_pay_amt − 그 주문 CONFIRMED 판매에 적용된 선입금 합`
+2. 이번 회차 적용액 = `min(남은 선입금, 이번 판매금액)` — **판매금액 초과 금지**
+3. 적용액 > 0이면 주문의 `pre_pay_method_cd`로 `t_cash_ledger` 기록 → `AccountManager.sync_ledger_by_basket('SALE', …)` → `t_ledger`
+4. `tot_paid_amt` = 적용액, `tot_unpaid_amt` = 판매금액 − 적용액
+5. 남은 선입금은 **다음 출고 confirm**에 순차 적용
+
+**금지:** 이미 CONFIRMED 된 판매·전표를 이번 confirm에서 수정 · 첫 판매에 선입금 전액 부착 · `sales_status`를 수금 의미로 변경 (DEC-029).
+
+예: 주문 30만 · 선입금 15만 → confirm①(판매 10만) 적용 10만·미수 0 → confirm②(판매 20만) 적용 5만·미수 15만.
+
+**현재 구현:** `OrderShipService.confirm()`은 `tot_paid_amt=0`, `tot_unpaid_amt=판매금액`으로 판매를 INSERT하며 선입금 배분·회계 연동이 없다. 위 1~5는 **확정 설계**이며 단계 4에서 구현한다. 응답 필드(적용액·잔액) 이름은 구현 시 확정.
+
 부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017). Core·HTTP confirm **구현**. Mobile UI **후속**.
 
 요청 요약: `ship_mode`, `sales_dt`, `order_no`(nullable), `custm_id`(nullable), `lines[]` (`order_detail_id` nullable, 규격, `qty>0`, `unit_price`).  
@@ -191,18 +222,32 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 ---
 
-## 8. payment — 판매확정 기준 수금/회계
+## 8. payment — 판매확정 기준 수금/회계 (**설계. 미구현**)
 
-| method | path |
-|--------|------|
-| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` |
-| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` |
+> **상태: 설계 단계.** 아래 경로는 아직 구현되지 않았다. `구현 완료`로 읽지 말 것.
 
-검증: `CONFIRMED`만. DRAFT 409.  
-TX: cash + ledger + 마스터 tot_paid/unpaid.  
-주문 API에서 전표 생성 금지.
+| method | path | 용도 |
+|--------|------|------|
+| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 그 판매의 수금 내역 + 판매금액/수금액/미수금/수금상태 |
+| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 등록/갱신 |
 
-출고 TX에 선입금을 이미 넣었으면 이중 전표 주의 — 수금 서비스가 기존 줄을 바구니로 동기화.
+**검증 (DEC-029):**
+
+| 항목 | 규칙 |
+|------|------|
+| 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT는 409** |
+| 수금액 | `> 0`. **그 판매의 미수금(`tot_unpaid_amt`) 초과 금지** → 400/409 |
+| 결제수단 | **필수**. **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 금지. 모바일 전용 코드 하드코딩 금지 |
+| 수금상태 | 응답 계산값 — `미수` / `부분수금` / `수금완료` ([03 §4.1](./03_data_contract.md)). DB 컬럼 아님 |
+
+**단일 트랜잭션:** `t_cash_ledger` → `AccountManager.sync_ledger_by_basket('SALE', …)` → `t_ledger` → 판매마스터 `tot_paid_amt` / `tot_unpaid_amt`. 실패 시 전체 rollback.
+
+`sales_status`는 수금으로 **변경되지 않는다** (`PAID` 등 금지, DEC-029).  
+**주문 API에서 전표 생성 금지** (DEC-009).
+
+출고 TX가 선입금 적용분을 이미 넣었으면 이중 전표 주의 — 수금 서비스가 기존 줄을 포함한 **바구니 전체**를 `sync_ledger_by_basket`으로 동기화한다 (기존 엔진 재사용, 신규 회계 로직 금지).
+
+**구현 전 확인:** `t_cash_ledger`에서 선입금 적용분과 추가수금을 구분할 실제 컬럼 유무 ([03 §9](./03_data_contract.md) OPEN).
 
 ---
 
@@ -225,11 +270,11 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 | 주문 접수 | order 3테이블. 재고·판매·전표 없음 |
 | 배정 | 줄 allocated + `t_order_alloc` + 지정 stock row reserved + HOLD + 그 row 가용 재검증 |
 | 배정해제 | release ≤ reserved_unshipped. LIFO alloc 감소 + reserved − + allocated − + CANCEL_HOLD |
-| 소매 출고 STOCK | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + 출고분 배송 + 선입금(DEC-019) |
+| 소매 출고 STOCK | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + 출고분 배송 + 선입금 순차 적용 + cash/ledger + paid·unpaid (DEC-019 · 설계) |
 | 소매 출고 DIRECT | allocation 없이 가용 FIFO + 판매상세 stock_seq 분할 (DEC-027). Core 후속 |
 | 주문 취소(출고 전) | 상태. 미출고 `t_order_alloc`이 있으면 reserved 복구. 없으면 상태만 |
 | 가락 확정 | status + out/log + 선택 전표 |
-| 수금만 | cash + ledger + totals |
+| 수금만 (CONFIRMED 판매) | cash + `AccountManager` + ledger + `tot_paid_amt`/`tot_unpaid_amt`. DRAFT 금지 (DEC-029) |
 
 ---
 
@@ -245,3 +290,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 재고 조정: `POST /farms/{farm_cd}/fruit-stock/adjust` — `io_type` IN/OUT, `reason_cd`(중분류 `AD010100` 하위: 폐기·파손·증정·반품·실사차이·기타). 폐기/파손/증정은 OUT만, 반품은 IN만, 실사차이·기타는 IN/OUT. `t_ledger` 없음. 감액은 가용재고(`in-out-reserved`) 이하.
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
+
+**미구현 (설계만):** `sales/{sales_no}/payments` GET/PUT (§8) · 주문 `pre_pay_method_cd` (§3.1) · confirm 선입금 순차 배분 (§6.C).

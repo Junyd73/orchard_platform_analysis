@@ -37,6 +37,9 @@
 | 12 | 신규 날짜 YYYY-MM-DD | 주문 YYYYMMDD | DEC-012 |
 | 13 | 채번 공통화 | `get_next_seq` vs `generate_sales_no` | core만 |
 | 14 | 재고행 allocation | MIN(storage_dt) + 로그에 row키 없음 | 가칭 `t_order_alloc` (DEC-018). FIFO 배정/출고, LIFO 해제 |
+| 15 | 수금/회계 공용화 | `sales_page.execute_full_save` 안에 `t_cash_ledger` INSERT + slip 매핑이 페이지에 있음 | PC와 모바일이 **같은 AccountManager Core 경로**를 쓴다 (DEC-007 · DEC-029). 페이지별 회계 SQL 복제 금지 |
+| 16 | 수금상태 표현 | 미수 표시가 화면 로컬 계산·색상 로직 | `tot_paid_amt`/`tot_unpaid_amt` 기준 계산 규칙 통일 (DEC-029). `sales_status`에 수금 의미 넣지 않음 |
+| 17 | 선입금 결제수단 | `t_order_master`에 컬럼 없음 | `pre_pay_method_cd` 제안 (DEC-028). **DDL 미실행** |
 
 P1: 판매 삭제 시 `t_ledger` (1차는 삭제 비활성).  
 P2: 배송 팝업 키 `delivery_qty` vs `dlvry_qty`, `load_existing_data` 주석화.
@@ -105,6 +108,19 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 
 모바일 1차와 독립 가능.
 
+### A13. PC SalesPage 수금/회계 공용화 — P1 (DEC-019 · 028 · 029)
+
+| | |
+|--|--|
+| 현재 | `ui/pages/sales_page.py`가 수금 바구니 구성 · `t_cash_ledger` INSERT SQL · `slip_map` 매핑 · 미수 표시 로직을 **페이지 안에** 갖고 있다. 확인된 INSERT 컬럼: `paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt, slip_no, rmk, reg_id` |
+| 문제 | 모바일 수금이 생기면 같은 회계 로직이 두 벌이 된다. 규칙이 다시 갈라진다 (DEC-001 · DEC-007) |
+| 확정 설계 | PC와 모바일이 **동일한 AccountManager Core 경로**를 공유한다. 수금 저장은 Core 한 곳: 수금액+결제수단 → `t_cash_ledger` → `AccountManager.sync_ledger_by_basket('SALE', …)` → `t_ledger` → `tot_paid_amt`/`tot_unpaid_amt`. 한 TX |
+| 금지 | 화면·라우터별 회계 SQL 복제 · **모바일 전용 회계 엔진** · 모바일 전용 결제수단 코드 하드코딩 · DRAFT 판매 수금 (DEC-029) |
+| 계정코드 | 결제수단 = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`)은 결제수단 아님. 신규 코드 정의·모바일 하드코딩 없음 |
+| 수금상태 | 컬럼 신설 없음. `tot_paid_amt`/`tot_unpaid_amt`에서 미수/부분수금/수금완료 계산 (DEC-029) |
+| 선입금 | 출고확정 TX에서 `min(선입금 잔액, 판매금액)` 순차 적용 (DEC-019). PC 출고 경로도 동일 규칙 |
+| 비범위 | **PC SalesPage 전면 재작성**. 화면 레이아웃·기존 판매 저장 UX는 유지하고 회계 호출부만 Core로 위임 |
+
 ---
 
 ## B. 공용화 권장 (가칭)
@@ -120,7 +136,7 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 | 판매생성 | 주문 루프 / `execute_full_save` | SalesService / OrderShip |
 | DRAFT 저장 | `save_realtime_auction_draft` | SalesService |
 | DRAFT 확정 | 없음 | SalesConfirmService |
-| 수금/전표 | `execute_full_save` + AccountManager | AccountManager 그대로 |
+| 수금/전표 | `execute_full_save` + AccountManager | **AccountManager 그대로.** PC·모바일 공용 Core 경로 1곳 (A13) |
 | 재고 매트릭스 | `StockMatrixPopup.get_stock_map` | StockQueryService |
 | 채번 | 이중 | DBManager |
 | 고객 | 팝업 | CustomerService |
@@ -129,7 +145,8 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 
 ## C. 이번 개발에서 건드리지 않음
 
-- PC 주문/판매 **화면 전면** 재설계
+- PC 주문/판매 **화면 전면** 재설계 (**PC `SalesPage` 전면 재작성 포함**. A13은 회계 호출부 위임만)
+- `t_order_master.pre_pay_method_cd` ALTER (DEC-028 설계만. 운영 PRAGMA 확인 후 별도 승인)
 - `t_stock_master_old` / backup 정리, `t_stock_status` 활용
 - 과거 주문·판매·날짜 **일괄** 변환
 - 저장관리 UX 전면 교체 (원물 UPDATE variety 누락은 후속 티켓)
