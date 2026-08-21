@@ -383,7 +383,8 @@ class OrderShipService:
 
         snd_name = str(getattr(payload, "snd_name", "") or "").strip()
         snd_tel = str(getattr(payload, "snd_tel", "") or "").strip()
-        if not (snd_name and snd_tel):
+        snd_addr = str(getattr(payload, "snd_addr", "") or "").strip()
+        if not (snd_name and snd_tel and snd_addr):
             raise ShipValidationError(MSG_SENDER_REQUIRED, code="SENDER_REQUIRED")
 
         fee_total = 0.0

@@ -295,6 +295,43 @@ class ShipDelivery2CTest(unittest.TestCase):
             )
         self.assertEqual(getattr(ctx.exception, "code", ""), "SENDER_REQUIRED")
 
+    def test_c1c_sender_addr_required(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        with self.assertRaises(ShipValidationError) as ctx:
+            OrderShipService(self.conn).confirm(
+                ShipConfirmIn(
+                    farm_cd=FARM,
+                    ship_mode=SHIP_MODE_DIRECT,
+                    sales_dt="2026-08-20",
+                    custm_id=CUST,
+                    user_id="T",
+                    dlvry_tp="LO010200",
+                    ship_fee=0,
+                    snd_name="삼육농원",
+                    snd_tel="010-0000-0000",
+                    snd_addr="",
+                    lines=[
+                        ShipLineIn(
+                            qty=1,
+                            item_cd=ITEM,
+                            variety_cd=VARIETY,
+                            grade_cd=GRADE,
+                            size_cd=SIZE,
+                            weight=WEIGHT,
+                            harvest_year=YEAR,
+                            wh_cd=WH,
+                            unit_price=1000,
+                            delivery_allocations=[_alloc(1, name="홍")],
+                        )
+                    ],
+                )
+            )
+        self.assertEqual(getattr(ctx.exception, "code", ""), "SENDER_REQUIRED")
+        self._assert_no_sale_side_effects(seq)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_sales_delivery").fetchone()[0], 0
+        )
+
     def test_c2_a2_b1_success(self) -> None:
         _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)
         out = _confirm_direct(
