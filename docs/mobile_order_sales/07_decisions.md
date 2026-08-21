@@ -463,7 +463,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | 상태 | **APPROVED** (설계). **이번 작업 DDL 없음** |
 | 결정 | 선입금에는 **결제수단**을 함께 받는다. `pre_pay_amt = 0` → 결제수단 **NULL**(입력 UI 노출 안 함). `pre_pay_amt > 0` → 결제수단 **필수**. |
 | 전표 | 주문 저장 시 전표·수금줄 **생성 없음** (DEC-009 유지). 판매확정(CONFIRMED) 시 그 결제수단으로 선입금 적용분을 회계 반영. |
-| 계정코드 | 선입금은 **실제 받은 돈**이다. 결제수단은 **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정)만 허용. **외상매출금·미수금 등 채권계정(`AS02…` 계열)은 선입금 결제수단이 아니다.** `AccountManager` / `m_account_code`를 재사용하되, `get_account_codes('AS', target_level=4)` 전체를 모바일 결제수단 목록 SSOT로 **확정하지 않는다**. 모바일 전용 결제수단 코드 **하드코딩 금지**. |
+| 계정코드 | 선입금은 **실제 받은 돈**이다. 결제수단은 **현금성 자산 계정**만. 판정: `m_account_code.parent_cd='AS0101'` AND `acct_level=4` AND `use_yn='Y'` (운영: AS010101/102/103). **외상매출금·미수금 등 채권계정(`AS02…`)은 선입금 결제수단이 아니다.** `get_account_codes('AS', target_level=4)` 전체를 모바일 결제수단 목록 SSOT로 **확정하지 않는다**. 목록 API는 `prefix=AS0101&level=4` 재사용. 모바일 전용 결제수단 코드 **하드코딩 금지**. |
 | 제안 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` (권장안. 신규 테이블 없음) |
 | 구현 전 확인 (2단계 착수 직전) | ① 운영 `PRAGMA table_info(t_order_master)`로 동일 목적 컬럼 유무 ② 운영 `m_account_code` ③ PC 실제 수금계정 사용분포 → **현금성 계정 범위 확정** 후 ALTER 여부 결정. **이번 문서 작업에서 ALTER·범위 확정하지 않는다.** |
 | UI 용어 | 「**결제수단**」 (「수금방법」 금지) |

@@ -50,8 +50,8 @@
 | 항목 | 내용 |
 |------|------|
 | 제안 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` |
-| 값 도메인 | **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 선입금은 실제 받은 돈이므로 **채권계정(외상·미수 `AS02…`)은 허용하지 않음**. `AccountManager` / `m_account_code` 재사용. **모바일 전용 결제수단 코드 신설·하드코딩 금지** |
-| 목록 조회 | 구현 2단계 착수 전: 운영 `m_account_code` + PC 수금계정 사용분포로 현금성 범위를 확정한 뒤 그 범위만 노출. `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 **확정하지 않음**. 화면에 코드 리터럴 하드코딩 금지 |
+| 값 도메인 | **현금성 자산 계정**만. 판정 SSOT = `m_account_code.parent_cd='AS0101'` AND `acct_level=4` AND `use_yn='Y'`. 운영 조사(2026-08-21): `AS010101` 현금 · `AS010102` 농협 · `AS010103` 국민. 채권(`AS02…`) 제외. 카드 계정 **현재 없음**(신규 코드 생성 금지). **모바일 전용 결제수단 코드 하드코딩 금지** |
+| 목록 조회 | 기존 `GET .../masters/account-codes?prefix=AS0101&level=4` 재사용 (`use_yn=Y`만). `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 **확정하지 않음** |
 | 규칙 | `pre_pay_amt = 0` → NULL · `pre_pay_amt > 0` → 필수 |
 | 회계 | 주문 저장 시 전표·수금줄 **없음** (DEC-009). 판매확정 시 이 결제수단으로 선입금 적용분을 회계 반영 |
 | 신규 테이블 | 없음 |
@@ -268,15 +268,18 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 | 전표 생성 | `AccountManager.sync_ledger_by_basket('SALE', sales_no, work_date, basket, user_id)` |
 | 계정코드 | 수금·선입금 **결제수단** = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`)은 결제수단이 아님. 매출채권 등 상대계정은 `AccountManager` 전표 쪽에서 기존 규칙대로 처리 |
 
-**확인된 `t_cash_ledger` INSERT 컬럼** (`ui/pages/sales_page.py` 판매 저장 경로):
+**확인된 `t_cash_ledger` 컬럼** (운영 PRAGMA 2026-08-21):
 
 ```
-paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt, slip_no, rmk, reg_id
+paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt,
+rmk, reg_id, reg_dt, slip_no, order_no
 ```
+
+PC `sales_page.py` INSERT는 `order_no`를 **넣지 않는다**. 운영 기존 행도 `order_no` NULL.
 
 `AccountManager._get_db_fingerprints`의 `SALE` 조회도 `pay_method_cd` / `paid_detail_no` / `pay_amt` + `sales_no` 기준이다.
 
-**OPEN — 구현 전 재확인:** 위 컬럼만으로는 **선입금 적용분과 이후 추가수금을 구분하는 값이 없다.** `order_no`나 선입금 플래그 성격의 컬럼도 확인되지 않았다. 단계 4 착수 전 운영 `PRAGMA table_info(t_cash_ledger)`로 실제 컬럼을 확인한다. **없는 컬럼을 가정하지 않는다.** 구분·연결 키가 없으면 OPEN으로 남기고, `pre_pay_method_cd` 제안 외에 임의로 DDL을 확장하지 않는다.
+**OPEN (개발순서 3·4):** `order_no` 컬럼은 있으나 **현재 미사용**. 선입금 적용분 vs 이후 추가수금을 구분하는 **전용 플래그/유형 컬럼은 없음**. 임의 DDL 확장 금지. 구분 규칙은 3·4단계에서 별도 설계.
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 

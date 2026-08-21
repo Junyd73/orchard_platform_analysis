@@ -74,6 +74,10 @@ def _schema_sql() -> str:
             rmk TEXT, reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT,
             season_type_cd TEXT, pre_pay_amt REAL, sales_no TEXT
         );
+        CREATE TABLE m_account_code (
+            acct_cd TEXT PRIMARY KEY, acct_nm TEXT, acct_level INTEGER,
+            parent_cd TEXT, use_yn TEXT DEFAULT 'Y'
+        );
         CREATE TABLE t_order_detail (
             order_detail_id TEXT, order_no TEXT, farm_cd TEXT,
             item_cd TEXT, variety_cd TEXT, grade_cd TEXT, size_cd TEXT,
@@ -130,6 +134,13 @@ def _schema_sql() -> str:
             ('OR001', 'SZ010200', '7.5kg', 'SZ01'),
             ('OR001', 'LO010100', '방문수령', 'LO01'),
             ('OR001', 'LO010200', '택배', 'LO01');
+        INSERT INTO m_account_code (acct_cd, acct_nm, acct_level, parent_cd, use_yn)
+        VALUES
+            ('AS010101', '현금 (시재)', 4, 'AS0101', 'Y'),
+            ('AS010102', '농협은행', 4, 'AS0101', 'Y'),
+            ('AS010103', '국민은행', 4, 'AS0101', 'Y'),
+            ('AS020101', '외상매출금', 4, 'AS0102', 'Y'),
+            ('AS010199', '비활성현금', 4, 'AS0101', 'N');
     """
 
 
@@ -140,16 +151,29 @@ def _open_tmp() -> tuple[Path, sqlite3.Connection]:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(_schema_sql())
+    from core.order_prepay_method_schema import ensure_order_prepay_method_schema
+
+    ensure_order_prepay_method_schema(conn)
     conn.commit()
     return path, conn
 
 
-def _sample_payload(*, qty: float = 100, pre_pay: float = 30000) -> OrderSaveInput:
+def _sample_payload(
+    *,
+    qty: float = 100,
+    pre_pay: float = 30000,
+    pre_pay_method_cd: str | None | object = ...,
+) -> OrderSaveInput:
+    if pre_pay_method_cd is ...:
+        method: str | None = "AS010101" if pre_pay > 0 else None
+    else:
+        method = pre_pay_method_cd  # type: ignore[assignment]
     return OrderSaveInput(
         custm_id=CUST,
         order_dt=None,
         season_type_cd="SS010100",
         pre_pay_amt=pre_pay,
+        pre_pay_method_cd=method,
         rmk="재고0 선주문",
         lines=[
             OrderLineInput(
@@ -897,6 +921,179 @@ class OrderListCompactTest(unittest.TestCase):
         self.assertAlmostEqual(float(by_no[mixed]["confirmed_shipped_qty"]), 0)
         self.assertAlmostEqual(float(by_no[mixed]["remaining_order_qty"]), 10)
         self.assertEqual(by_no[mixed]["delivery_tp_count"], 2)
+
+
+class OrderPrepayMethodStage2Test(unittest.TestCase):
+    """DEC-028 — 선입금 결제수단 저장. 회계 테이블 무변경."""
+
+    def setUp(self) -> None:
+        self.path, self.conn = _open_tmp()
+        self.svc = OrderService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _assert_no_accounting(self, before: dict[str, int]) -> None:
+        after = _counts(self.conn)
+        self.assertEqual(after["t_cash_ledger"], before["t_cash_ledger"])
+        self.assertEqual(after["t_ledger"], before["t_ledger"])
+        self.assertEqual(after["t_sales_master"], before["t_sales_master"])
+
+    def test_prepay_zero_method_null_ok(self) -> None:
+        before = _counts(self.conn)
+        no = self.svc.create_order(
+            FARM, _sample_payload(pre_pay=0, pre_pay_method_cd=None), user_id="t"
+        )
+        detail = self.svc.get_order(FARM, no)
+        self.assertEqual(detail["pre_pay_amt"], 0)
+        self.assertIsNone(detail["pre_pay_method_cd"])
+        self._assert_no_accounting(before)
+
+    def test_prepay_zero_with_method_rejected(self) -> None:
+        with self.assertRaises(OrderValidationError) as ctx:
+            self.svc.create_order(
+                FARM,
+                _sample_payload(pre_pay=0, pre_pay_method_cd="AS010101"),
+                user_id="t",
+            )
+        self.assertIn("0원", str(ctx.exception.message))
+
+    def test_prepay_positive_method_null_rejected(self) -> None:
+        with self.assertRaises(OrderValidationError) as ctx:
+            self.svc.create_order(
+                FARM,
+                _sample_payload(pre_pay=10000, pre_pay_method_cd=None),
+                user_id="t",
+            )
+        self.assertIn("결제수단", str(ctx.exception.message))
+
+    def test_prepay_cash_bank_ok(self) -> None:
+        before = _counts(self.conn)
+        for method in ("AS010101", "AS010102", "AS010103"):
+            no = self.svc.create_order(
+                FARM,
+                _sample_payload(pre_pay=5000, pre_pay_method_cd=method),
+                user_id="t",
+            )
+            detail = self.svc.get_order(FARM, no)
+            self.assertEqual(detail["pre_pay_method_cd"], method)
+        self._assert_no_accounting(before)
+
+    def test_receivable_rejected(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(
+                FARM,
+                _sample_payload(pre_pay=5000, pre_pay_method_cd="AS020101"),
+                user_id="t",
+            )
+
+    def test_unknown_account_rejected(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(
+                FARM,
+                _sample_payload(pre_pay=5000, pre_pay_method_cd="AS019999"),
+                user_id="t",
+            )
+
+    def test_inactive_account_rejected(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(
+                FARM,
+                _sample_payload(pre_pay=5000, pre_pay_method_cd="AS010199"),
+                user_id="t",
+            )
+
+    def test_legacy_prepay_without_method_get_ok(self) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO t_order_master (
+                order_no, farm_cd, order_dt, custm_id, status_cd, stock_status,
+                tot_order_amt, tot_ship_fee, tot_pay_amt, pre_pay_amt, pre_pay_method_cd,
+                sales_no, rmk
+            ) VALUES (?, ?, ?, ?, ?, 'N', 1000, 0, 5000, 5000, NULL, '', 'legacy')
+            """,
+            ("ORD20260821-099", FARM, today_ops_iso(), CUST, ORDER_STATUS_RESERVED_CD),
+        )
+        self.conn.commit()
+        detail = self.svc.get_order(FARM, "ORD20260821-099")
+        self.assertEqual(detail["pre_pay_amt"], 5000)
+        self.assertIsNone(detail["pre_pay_method_cd"])
+
+    def test_legacy_prepay_without_method_update_rejected(self) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO t_order_master (
+                order_no, farm_cd, order_dt, custm_id, status_cd, stock_status,
+                tot_order_amt, tot_ship_fee, tot_pay_amt, pre_pay_amt, pre_pay_method_cd,
+                sales_no, rmk
+            ) VALUES (?, ?, ?, ?, ?, 'N', 2500000, 0, 5000, 5000, NULL, '', 'legacy')
+            """,
+            ("ORD20260821-098", FARM, today_ops_iso(), CUST, ORDER_STATUS_RESERVED_CD),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO t_order_detail (
+                order_detail_id, order_no, farm_cd, item_cd, variety_cd, grade_cd, size_cd,
+                weight, qty, unit_price, item_amt, wh_cd, dlvry_tp, harvest_year
+            ) VALUES (?, ?, ?, 'FR010100', ?, ?, ?, 15, 100, 25000, 2500000, ?, ?, 2026)
+            """,
+            (
+                "ORD20260821-098-01",
+                "ORD20260821-098",
+                FARM,
+                VARIETY,
+                GRADE,
+                SPEC,
+                WAREHOUSE_CD_DEFAULT,
+                DLVRY_VISIT,
+            ),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO t_order_delivery (
+                order_dlvry_id, order_no, farm_cd, order_detail_id,
+                delivery_tp_cd, dlvry_qty, planned_dt
+            ) VALUES (?, ?, ?, ?, ?, 100, ?)
+            """,
+            (
+                "ORD20260821-098-01-001",
+                "ORD20260821-098",
+                FARM,
+                "ORD20260821-098-01",
+                DLVRY_VISIT,
+                today_ops_iso(),
+            ),
+        )
+        self.conn.commit()
+        payload = _sample_payload(pre_pay=5000, pre_pay_method_cd=None)
+        with self.assertRaises(OrderValidationError):
+            self.svc.replace_order(FARM, "ORD20260821-098", payload, user_id="t")
+
+    def test_clear_prepay_clears_method(self) -> None:
+        before = _counts(self.conn)
+        no = self.svc.create_order(
+            FARM,
+            _sample_payload(pre_pay=8000, pre_pay_method_cd="AS010102"),
+            user_id="t",
+        )
+        self.svc.replace_order(
+            FARM,
+            no,
+            _sample_payload(pre_pay=0, pre_pay_method_cd=None),
+            user_id="t",
+        )
+        detail = self.svc.get_order(FARM, no)
+        self.assertEqual(detail["pre_pay_amt"], 0)
+        self.assertIsNone(detail["pre_pay_method_cd"])
+        self._assert_no_accounting(before)
+
+    def test_schema_helper_idempotent(self) -> None:
+        from core.order_prepay_method_schema import ensure_order_prepay_method_schema
+
+        again = ensure_order_prepay_method_schema(self.conn)
+        self.assertTrue(again["ok"])
+        self.assertEqual(again["columns"], [])
 
 
 if __name__ == "__main__":

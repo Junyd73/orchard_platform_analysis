@@ -416,14 +416,14 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | 7 | **PC 정합성** | PC `SalesPage` 회계 호출부를 공용 Core로 위임 ([08 A13](./08_pc_change_scope.md)). 전면 재작성 아님 | 3·4 |
 | 8 | **가락 DRAFT→CONFIRMED** | confirm TX + 선택 수금 (DEC-010). DEC-016 OPEN 선결 | 3·7 |
 
-**스키마 확인 대기 (DDL 미실행):**
+**스키마 확인 결과 (2026-08-21 조사 · 운영 ALTER 미실행):**
 
-| 항목 | 확인 내용 | 단계 |
+| 항목 | 확인 내용 | 상태 |
 |------|-----------|------|
-| `t_order_master.pre_pay_method_cd` | 동일 목적 컬럼 유무 → ALTER 여부 (**OPEN** · 임의 확정 금지) | 2 전 |
-| `t_cash_ledger` 실제 컬럼 | 선입금 적용분 vs 추가수금 **구분·연결 키** 존재 여부. 없으면 OPEN 유지, 임의 DDL 금지 | 3·4 전 |
-| 선입금·수금 **결제수단** 계정 범위 | **현금성 자산 계정**만. 운영 `m_account_code` + PC 수금 사용분포 확인 후 범위 확정. 채권(`AS02…`) 제외. `get_account_codes('AS', target_level=4)` 전체를 SSOT로 두지 않음 | 2 전 |
-| DEC-016 가락 배송 | 가락 확정 시 `t_sales_delivery` — **OPEN** 유지 | 8 전 |
+| `t_order_master.pre_pay_method_cd` | 운영에 **없음**. helper `ensure_order_prepay_method_schema` 로컬/테스트용. **운영 ALTER는 별도 승인** | 2단계 구현 중(로컬) |
+| 현금성 결제수단 범위 | `parent_cd='AS0101'` · level4 · `use_yn=Y` → AS010101/102/103. 채권 AS02 제외. 카드 계정 없음 | **확정** |
+| `t_cash_ledger.order_no` | 컬럼 **존재**하나 PC INSERT·운영 데이터 **미사용**. 선입금/추가수금 전용 구분키 **없음** | **OPEN** (3·4) |
+| DEC-016 가락 배송 | 가락 확정 시 `t_sales_delivery` | **OPEN** |
 
 DEC-016(가락 배송행)은 계속 **OPEN**이며 2026-08-21에 승인하지 않았다.
 

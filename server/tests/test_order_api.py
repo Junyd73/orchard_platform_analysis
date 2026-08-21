@@ -53,6 +53,9 @@ def _tmp_db() -> Path:
     path = Path(name)
     conn = sqlite3.connect(str(path))
     conn.executescript(_schema_sql())
+    from core.order_prepay_method_schema import ensure_order_prepay_method_schema
+
+    ensure_order_prepay_method_schema(conn)
     conn.commit()
     conn.close()
     return path
@@ -73,6 +76,7 @@ class OrderApiStage2Test(unittest.TestCase):
         return {
             "custm_id": "C001",
             "pre_pay_amt": 10000,
+            "pre_pay_method_cd": "AS010101",
             "rmk": "api",
             "lines": [
                 {
