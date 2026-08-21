@@ -840,7 +840,7 @@ onMounted(async () => {
     var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8)
       + env(safe-area-inset-bottom, 0px)
   );
-  --sales-preview-footer-h: 10rem;
+  --sales-preview-footer-h: 11rem;
   --sales-preview-footer-gap: var(--ods-space-8);
   --sales-preview-frame-max: var(--ods-page-content-max, 480px);
   --sales-preview-inline: var(--ods-page-padding-x, var(--ods-space-16));
@@ -886,7 +886,7 @@ onMounted(async () => {
   --line-col-qty: 42px;
   --line-col-price: 100px;
   --line-col-actions: 80px;
-  --line-gap: var(--ods-space-6);
+  --line-gap: var(--ods-space-8);
   --line-pad-x: var(--ods-space-16);
 }
 .header-fields {
@@ -1188,8 +1188,9 @@ onMounted(async () => {
   border-top: 1px solid var(--ods-color-border);
 }
 
-/* 재고 판매예정 floating 계열 + 전체폭 primary CTA
- * fixed는 viewport 기준이므로 .ods-page-content와 동일 inline token으로 카드 좌우선 맞춤 */
+/* sticky summary + full-width CTA
+ * fixed는 viewport 기준 — page inset과 동일 좌우선
+ */
 .footer {
   position: fixed;
   left: 0;
@@ -1198,32 +1199,34 @@ onMounted(async () => {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-4);
+  gap: var(--ods-space-8);
   width: 100%;
   max-width: var(--sales-preview-frame-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--ods-space-6) var(--sales-preview-inline);
+  padding: var(--ods-space-8) var(--sales-preview-inline);
   background: var(--ods-color-bg-muted, #f5f5f5);
   border-top: 1px solid var(--ods-color-border);
 }
 .footer__panel {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: var(--ods-space-4);
   min-width: 0;
-  padding: var(--ods-space-6) var(--ods-space-12);
+  box-sizing: border-box;
+  padding: var(--ods-space-12);
   background: var(--ods-color-primary-subtle, #e8f5ee);
   border: 1px solid var(--ods-color-secondary, #66bb6a);
   border-radius: var(--ods-radius-card);
   box-shadow: none;
 }
 .footer__top {
-  margin: 0 0 var(--ods-space-4);
+  margin: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
+  min-height: 24px;
   min-width: 0;
 }
 .footer__count {
@@ -1234,7 +1237,7 @@ onMounted(async () => {
   white-space: nowrap;
 }
 .footer__item-amt {
-  font: var(--ods-font-caption);
+  font: var(--ods-font-body-2);
   font-weight: 600;
   color: var(--ods-color-text);
   font-variant-numeric: tabular-nums;
@@ -1250,8 +1253,9 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  font: var(--ods-font-caption);
-  line-height: 1.3;
+  min-height: 28px;
+  font: var(--ods-font-body-2);
+  line-height: 1.35;
   color: var(--ods-color-text-secondary);
 }
 .footer__lbl {
@@ -1268,15 +1272,17 @@ onMounted(async () => {
 }
 .footer__divider {
   height: 1px;
+  width: 100%;
   margin: var(--ods-space-4) 0;
-  background: color-mix(in srgb, var(--ods-color-secondary, #66bb6a) 45%, white);
+  background: color-mix(in srgb, var(--ods-color-secondary, #66bb6a) 40%, white);
 }
 .footer__total {
   margin: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
+  min-height: 28px;
   font: var(--ods-font-headline);
   color: var(--ods-color-text);
 }
@@ -1299,6 +1305,7 @@ onMounted(async () => {
   text-align: right;
   font: var(--ods-font-form-value);
   background: var(--ods-color-white);
+  box-sizing: border-box;
 }
 .footer__go {
   width: 100%;
