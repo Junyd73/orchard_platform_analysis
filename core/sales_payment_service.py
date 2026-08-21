@@ -41,7 +41,7 @@ from core.sales_payment_constants import (
 
 _REF_TYPE_SALE = "SALE"
 _PAID_DETAIL_RE = re.compile(
-    rf"^.+-{re.escape(PAID_DETAIL_SUFFIX)}(\d{{{PAID_DETAIL_SEQ_LEN}}})$"
+    rf"^.+-{re.escape(PAID_DETAIL_SUFFIX)}(\d+)$"
 )
 
 
@@ -180,7 +180,7 @@ class SalesPaymentService:
         now_dt = now_ops_str()
 
         existing = self._load_cash_raw(cur, farm, sales_no)
-        new_paid_detail_no = self._next_paid_detail_no(sales_no, existing)
+        new_paid_detail_no = self._next_paid_detail_no(cur, sales_no)
         basket = self._build_basket(existing, new_item={
             "paid_detail_no": new_paid_detail_no,
             "pay_method_cd": method,
@@ -393,14 +393,22 @@ class SalesPaymentService:
         }
 
     @staticmethod
-    def _next_paid_detail_no(sales_no: str, existing: list[dict[str, Any]]) -> str:
+    def _next_paid_detail_no(cur: sqlite3.Cursor, sales_no: str) -> str:
+        """형식은 {sales_no}-PNN 유지. seq는 동일 sales_no 전역 PK 충돌 방지."""
+        cur.execute(
+            "SELECT paid_detail_no FROM t_cash_ledger WHERE sales_no = ?",
+            (sales_no,),
+        )
         max_seq = 0
-        for row in existing:
-            pd = _norm_text(row.get("paid_detail_no"))
+        for row in cur.fetchall():
+            pd = _norm_text(row[0] if not isinstance(row, sqlite3.Row) else row[0])
             m = _PAID_DETAIL_RE.match(pd)
             if m:
                 max_seq = max(max_seq, int(m.group(1)))
-        return f"{sales_no}-{PAID_DETAIL_SUFFIX}{max_seq + 1:0{PAID_DETAIL_SEQ_LEN}d}"
+        return (
+            f"{sales_no}-{PAID_DETAIL_SUFFIX}"
+            f"{max_seq + 1:0{PAID_DETAIL_SEQ_LEN}d}"
+        )
 
     @staticmethod
     def _build_basket(

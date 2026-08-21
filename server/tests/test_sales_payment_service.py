@@ -170,16 +170,17 @@ class SalesPaymentServiceTests(unittest.TestCase):
             (farm_cd, sales_no),
         ).fetchall()
 
-    def _ledger_active(self, sales_no: str = SALES_A):
+    def _ledger_active(self, sales_no: str = SALES_A, farm_cd: str = FARM):
         return self.conn.execute(
             """
-            SELECT slip_no, acct_cd, trans_amt, trans_type_cd, trans_st, ref_id
+            SELECT slip_no, acct_cd, trans_amt, trans_type_cd, trans_st, ref_id, farm_cd
               FROM t_ledger
              WHERE ref_id LIKE ?
+               AND farm_cd = ?
                AND trans_st = '10'
              ORDER BY slip_no
             """,
-            (f"SALE-{sales_no}-%",),
+            (f"SALE-{sales_no}-%", farm_cd),
         ).fetchall()
 
     def _master(self, sales_no: str = SALES_A, farm_cd: str = FARM):
@@ -506,6 +507,97 @@ class SalesPaymentServiceTests(unittest.TestCase):
         m = self._master()
         self.assertEqual(m["pay_method_cd"], "KEEP")
         self.assertEqual(m["slip_no"], "KEEP")
+
+    def test_multi_farm_paid_detail_and_ledger_isolation(self):
+        """동일 sales_no · 다른 farm: PK 충돌 없이 채번 · cash/ledger 완전 격리."""
+        cur = self.conn.cursor()
+        _insert_sales(cur, sales_no=SALES_A, farm_cd=FARM, tot=300000)
+        _insert_sales(cur, sales_no=SALES_A, farm_cd=FARM_B, tot=300000)
+        self.conn.commit()
+
+        self._add(100000, "AS010102", sales_no=SALES_A, farm_cd=FARM)
+        self._add(100000, "AS010102", sales_no=SALES_A, farm_cd=FARM_B)
+
+        a_rows = self._cash_rows(SALES_A, FARM)
+        b_rows = self._cash_rows(SALES_A, FARM_B)
+        self.assertEqual([r["paid_detail_no"] for r in a_rows], [f"{SALES_A}-P01"])
+        self.assertEqual([r["paid_detail_no"] for r in b_rows], [f"{SALES_A}-P02"])
+        self.assertEqual(float(self._master(SALES_A, FARM)["tot_paid_amt"]), 100000)
+        self.assertEqual(float(self._master(SALES_A, FARM_B)["tot_paid_amt"]), 100000)
+
+        b_slip = b_rows[0]["slip_no"]
+        self.assertNotEqual(a_rows[0]["slip_no"], b_slip)
+
+        # A 동일 method 재수금 → A만 remap, B ledger untouched
+        self._add(50000, "AS010102", sales_no=SALES_A, farm_cd=FARM)
+        a_rows = self._cash_rows(SALES_A, FARM)
+        b_rows = self._cash_rows(SALES_A, FARM_B)
+        self.assertEqual(
+            [r["paid_detail_no"] for r in a_rows],
+            [f"{SALES_A}-P01", f"{SALES_A}-P03"],
+        )
+        self.assertEqual([r["paid_detail_no"] for r in b_rows], [f"{SALES_A}-P02"])
+        self.assertEqual(a_rows[0]["slip_no"], a_rows[1]["slip_no"])
+        self.assertEqual(b_rows[0]["slip_no"], b_slip)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT trans_st FROM t_ledger WHERE slip_no=?", (b_slip,)
+            ).fetchone()["trans_st"],
+            "10",
+        )
+        self.assertEqual(
+            float(
+                self.conn.execute(
+                    "SELECT trans_amt FROM t_ledger WHERE slip_no=? AND farm_cd=?",
+                    (b_slip, FARM_B),
+                ).fetchone()["trans_amt"]
+            ),
+            100000,
+        )
+        a_active = self._ledger_active(SALES_A, FARM)
+        self.assertEqual(len(a_active), 1)
+        self.assertEqual(float(a_active[0]["trans_amt"]), 150000)
+        self.assertEqual(float(self._master(SALES_A, FARM)["tot_paid_amt"]), 150000)
+        self.assertEqual(float(self._master(SALES_A, FARM_B)["tot_paid_amt"]), 100000)
+
+    def test_paid_detail_seq_beyond_p100(self):
+        """P99/P100 존재 시 다음 번호는 P101 (최소 2자리 폭 유지)."""
+        cur = self.conn.cursor()
+        _insert_sales(cur, tot=1_000_000, paid=0, unpaid=1_000_000)
+        for seq in (99, 100):
+            cur.execute(
+                """
+                INSERT INTO t_cash_ledger(
+                    paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                    pay_amt, slip_no, reg_id, order_no
+                ) VALUES (?,?,?,?,?,?,NULL,'t',NULL)
+                """,
+                (
+                    f"{SALES_A}-P{seq}",
+                    SALES_A,
+                    FARM,
+                    SALES_DT,
+                    "AS010101",
+                    1000,
+                ),
+            )
+        cur.execute(
+            """
+            UPDATE t_sales_master
+               SET tot_paid_amt=2000, tot_unpaid_amt=?
+             WHERE sales_no=? AND farm_cd=?
+            """,
+            (1_000_000 - 2000, SALES_A, FARM),
+        )
+        self.conn.commit()
+        AccountManager._shared_seq_cache.clear()
+        self._add(1000, "AS010101")
+        ids = {r["paid_detail_no"] for r in self._cash_rows()}
+        self.assertEqual(
+            ids,
+            {f"{SALES_A}-P99", f"{SALES_A}-P100", f"{SALES_A}-P101"},
+        )
+        self.assertIn(f"{SALES_A}-P101", ids)
 
 
 if __name__ == "__main__":
