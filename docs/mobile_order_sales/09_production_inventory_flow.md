@@ -230,7 +230,7 @@ PROCESS 생산: `save_production_log`와 동일 패턴으로 `item_cd=FR010200` 
 | 유형 | 의미 | PC 근사 |
 |------|------|---------|
 | **PACK** | 포장배 생산 | `ProductionService` / `save_production_log` |
-| **PROCESS** | 배즙 가공 (박스). 완제품 선택: 일반배즙 `FR010202` / 도라지배즙 `FR010201`. PROCESS 유형은 1개. 도라지 원료·BOM 없음 | `ProductionService` (RAW_STOCK만) |
+| **PROCESS** | 배즙 가공 (박스). 완제품 선택: 일반배즙 `FR010202` / 도라지배즙 `FR010201`. PROCESS 유형은 1개. 도라지 원료·BOM 없음. 출고 **표시**는 제품명만(내부 weight/size/grade placeholder는 숨김) | `ProductionService` (RAW_STOCK만) |
 
 **투입 출처:**
 

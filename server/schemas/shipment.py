@@ -1,11 +1,22 @@
 # -*- coding: utf-8 -*-
-"""판매출고 confirm REST 스키마 (Stage 5C)."""
+"""판매출고 confirm REST 스키마 (Stage 5C + 보완 2C)."""
 
 from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ShipDeliveryAllocRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    qty: float = Field(..., gt=0)
+    rcv_name: str
+    rcv_tel: str
+    rcv_addr: str
+    dlvry_msg: str = ""
+    ship_fee: float = Field(0.0, ge=0)
 
 
 class ShipLineRequest(BaseModel):
@@ -21,6 +32,8 @@ class ShipLineRequest(BaseModel):
     harvest_year: int = 0
     wh_cd: str = ""
     unit_price: float = Field(0.0, ge=0)
+    # null/미전송 = legacy. list = 2C 명시.
+    delivery_allocations: list[ShipDeliveryAllocRequest] | None = None
 
 
 class ShipConfirmRequest(BaseModel):
@@ -31,7 +44,16 @@ class ShipConfirmRequest(BaseModel):
     order_no: str | None = None
     custm_id: str | None = None
     rmk: str = ""
+    dlvry_tp: str = ""
+    ship_fee: float = Field(0.0, ge=0)
+    rcv_name: str = ""
+    rcv_tel: str = ""
+    rcv_addr: str = ""
+    dlvry_msg: str = ""
     lines: list[ShipLineRequest] = Field(min_length=1)
+    snd_name: str = ""
+    snd_tel: str = ""
+    snd_addr: str = ""
 
 
 class ShipDetailOut(BaseModel):

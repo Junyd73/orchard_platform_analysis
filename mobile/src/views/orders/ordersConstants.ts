@@ -18,6 +18,21 @@ export const LABEL_SEGMENT_ARIA = '포장·생산, 재고, 주문, 판매'
 export const LABEL_FAB_ORDER = '신규 주문'
 export const LABEL_FAB_SALES = '직접 판매'
 export const LABEL_SHIP = '출고'
+export const LABEL_SHIP_BATCH = '일괄출고'
+export const LABEL_SHIP_SELECTED = '선택 출고'
+export const HINT_ORDER_NEXT_RESERVED = '예약접수 상태입니다.'
+export const HINT_ORDER_NEXT_CONFIRMED =
+  '주문확정 상태입니다. 상품 수량은 잠겨 있고 출고할 수 있습니다.'
+export const HINT_ORDER_NEXT_PREP =
+  '다음: 남은 상품을 이어서 출고합니다. 전량 출고 시 배송완료입니다.'
+export const ITEM_JUICE_MID = 'FR010200'
+export const ITEM_JUICE_DORAJI = 'FR010201'
+export const ITEM_JUICE_PLAIN = 'FR010202'
+const JUICE_ITEM_LABEL: Record<string, string> = {
+  [ITEM_JUICE_PLAIN]: '일반배즙',
+  [ITEM_JUICE_DORAJI]: '도라지배즙',
+  [ITEM_JUICE_MID]: '배즙',
+}
 export const MSG_STAGE_LATER = '다음 단계에서 구현합니다.'
 export const MSG_ORDER_EMPTY_TITLE = '등록된 주문이 없습니다'
 export const MSG_ORDER_EMPTY_DESC = '우측 하단 버튼으로 신규 주문을 등록하세요.'
@@ -162,6 +177,8 @@ export const ITEM_MID_SUFFIX = '00'
 
 export const DELIVERY_TP_VISIT = 'LO010100'
 export const DELIVERY_TP_PARCEL = 'LO010200'
+export const DELIVERY_TP_CARGO = 'LO010300'
+export const DELIVERY_TP_DIRECT = 'LO010400'
 export const DEFAULT_WAREHOUSE_CD = 'WH01'
 
 const WEIGHT_NUM_RE = /(\d+(?:\.\d+)?)/
@@ -208,6 +225,21 @@ export function formatOrderAmt(n: number): string {
   return v.toLocaleString('ko-KR')
 }
 
+/** 국내 전화 하이픈 — PC sales_page 정책과 동일 */
+export function formatPhoneKr(raw: string): string {
+  const numbers = String(raw || '').replace(/[^0-9]/g, '')
+  const length = numbers.length
+  if (length < 4) return numbers
+  if (numbers.startsWith('02')) {
+    if (length < 6) return `${numbers.slice(0, 2)}-${numbers.slice(2)}`
+    if (length < 10) return `${numbers.slice(0, 2)}-${numbers.slice(2, 5)}-${numbers.slice(5)}`
+    return `${numbers.slice(0, 2)}-${numbers.slice(2, 6)}-${numbers.slice(6, 10)}`
+  }
+  if (length < 7) return `${numbers.slice(0, 3)}-${numbers.slice(3)}`
+  if (length < 11) return `${numbers.slice(0, 3)}-${numbers.slice(3, 6)}-${numbers.slice(6)}`
+  return `${numbers.slice(0, 3)}-${numbers.slice(3, 7)}-${numbers.slice(7, 11)}`
+}
+
 export function isParcelDelivery(codeCd: string): boolean {
   return String(codeCd || '').trim() === DELIVERY_TP_PARCEL
 }
@@ -223,7 +255,18 @@ export function formatWeightLabel(weight: number): string {
   return `${n}kg`
 }
 
+export function isJuiceItemCd(itemCd: string | undefined | null): boolean {
+  const cd = String(itemCd || '').trim()
+  return cd === ITEM_JUICE_MID || cd === ITEM_JUICE_PLAIN || cd === ITEM_JUICE_DORAJI
+}
+
+export function juiceItemLabel(itemCd: string | undefined | null, itemNm?: string): string {
+  const cd = String(itemCd || '').trim()
+  return JUICE_ITEM_LABEL[cd] || itemNm || cd
+}
+
 export function formatOrderLineSpec(line: {
+  item_cd?: string
   item_nm?: string
   variety_nm?: string
   variety_cd: string
@@ -233,6 +276,9 @@ export function formatOrderLineSpec(line: {
   size_cd: string
   weight: number
 }): string {
+  if (isJuiceItemCd(line.item_cd)) {
+    return juiceItemLabel(line.item_cd, line.item_nm)
+  }
   return joinDot([
     line.item_nm,
     line.variety_nm || line.variety_cd,

@@ -27,18 +27,26 @@ from core.order_ship_service import (  # noqa: E402
     ShipLineIn,
     ShipValidationError,
 )
+from core.order_ship_delivery import ShipDeliveryAllocIn  # noqa: E402
 
 
 def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfirmIn:
-    return ShipConfirmIn(
-        farm_cd=farm_cd,
-        ship_mode=body.ship_mode,
-        order_no=body.order_no,
-        sales_dt=body.sales_dt,
-        custm_id=body.custm_id,
-        user_id=user_id,
-        rmk=body.rmk,
-        lines=[
+    lines: list[ShipLineIn] = []
+    for ln in body.lines:
+        allocs = None
+        if ln.delivery_allocations is not None:
+            allocs = [
+                ShipDeliveryAllocIn(
+                    qty=float(a.qty),
+                    rcv_name=a.rcv_name or "",
+                    rcv_tel=a.rcv_tel or "",
+                    rcv_addr=a.rcv_addr or "",
+                    dlvry_msg=a.dlvry_msg or "",
+                    ship_fee=float(a.ship_fee or 0),
+                )
+                for a in ln.delivery_allocations
+            ]
+        lines.append(
             ShipLineIn(
                 qty=ln.qty,
                 order_detail_id=ln.order_detail_id,
@@ -50,9 +58,27 @@ def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfir
                 harvest_year=ln.harvest_year,
                 wh_cd=ln.wh_cd,
                 unit_price=ln.unit_price,
+                delivery_allocations=allocs,
             )
-            for ln in body.lines
-        ],
+        )
+    return ShipConfirmIn(
+        farm_cd=farm_cd,
+        ship_mode=body.ship_mode,
+        order_no=body.order_no,
+        sales_dt=body.sales_dt,
+        custm_id=body.custm_id,
+        user_id=user_id,
+        rmk=body.rmk,
+        dlvry_tp=getattr(body, "dlvry_tp", "") or "",
+        ship_fee=float(getattr(body, "ship_fee", 0) or 0),
+        rcv_name=getattr(body, "rcv_name", "") or "",
+        rcv_tel=getattr(body, "rcv_tel", "") or "",
+        rcv_addr=getattr(body, "rcv_addr", "") or "",
+        dlvry_msg=getattr(body, "dlvry_msg", "") or "",
+        snd_name=getattr(body, "snd_name", "") or "",
+        snd_tel=getattr(body, "snd_tel", "") or "",
+        snd_addr=getattr(body, "snd_addr", "") or "",
+        lines=lines,
     )
 
 

@@ -235,11 +235,13 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 ## 11. FastAPI 현황 (재확인)
 
-`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers, fruit-stock, production, shipments**.
+`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers, fruit-stock, fruit-stock/adjust, production, shipments**.
 
 **Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock. **sales HTTP 없음.** 운영 DDL 미적용.
 
 **Stage P (구현 완료 · 로컬):** GET harvest-records, GET raw-stock, POST production/confirm.  
 PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` 도라지배즙. 중분류 `FR010200` 거부. PACK은 해당 필드 무시. 응답 `prefill_lines[].item_nm`. 도라지 원료/BOM 없음.
+
+재고 조정: `POST /farms/{farm_cd}/fruit-stock/adjust` — `io_type` IN/OUT, `reason_cd`(중분류 `AD010100` 하위: 폐기·파손·증정·반품·실사차이·기타). 폐기/파손/증정은 OUT만, 반품은 IN만, 실사차이·기타는 IN/OUT. `t_ledger` 없음. 감액은 가용재고(`in-out-reserved`) 이하.
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.

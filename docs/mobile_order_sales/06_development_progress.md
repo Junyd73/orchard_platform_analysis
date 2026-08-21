@@ -2,6 +2,7 @@
 
 > **Stage 6 로컬 완료** (DIRECT+STOCK+allocation). main 반영 · 운영 이관 별도.  
 > 배즙 완제품 2종(일반/도라지)은 Stage 6 운영 보완. PROCESS 유형은 1개 유지.  
+> 출고 UX: 재고 다건 판매 · 주문 일괄/부분 출고. 배즙 출고 표시는 제품명만. 재고 조정은 stock+log만(전표 없음).  
 > OPEN-PROD-01~03 **CLOSED**. DEC-026 harvest_year **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 

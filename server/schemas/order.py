@@ -89,6 +89,8 @@ class OrderLineOut(BaseModel):
     allocated_qty: float = 0
     unallocated_qty: float = 0
     reserved_unshipped_qty: float = 0
+    confirmed_shipped_qty: float = 0
+    remaining_order_qty: float = 0
     deliveries: list[OrderDeliveryOut]
 
 

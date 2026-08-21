@@ -26,6 +26,13 @@ import {
   ORDER_STATUS_CANCEL,
   ORDER_STATUS_DELIVERED,
   ORDER_STATUS_PREP,
+  ORDER_STATUS_RESERVED,
+  LABEL_SHIP_BATCH,
+  LABEL_SHIP_SELECTED,
+  HINT_ORDER_NEXT_RESERVED,
+  HINT_ORDER_NEXT_CONFIRMED,
+  HINT_ORDER_NEXT_PREP,
+  ORDER_STATUS_CONFIRMED,
   canCancelOrder,
   canEnterOrderEdit,
   formatOrderAmt,
@@ -69,15 +76,81 @@ const totalAmt = computed(() =>
   formatOrderAmt(detail.value?.tot_order_amt || detail.value?.total_amt || 0),
 )
 
+function remainingQty(line: OrderLine): number {
+  if (line.remaining_order_qty != null && !Number.isNaN(Number(line.remaining_order_qty))) {
+    return Number(line.remaining_order_qty)
+  }
+  const row = salesPrefill.remainingFor(line.order_detail_id)
+  if (row) return Number(row.remaining_order_qty)
+  return Number(line.qty)
+}
+
 function remainingText(line: OrderLine): string {
+  const shipped =
+    line.confirmed_shipped_qty != null && !Number.isNaN(Number(line.confirmed_shipped_qty))
+      ? Number(line.confirmed_shipped_qty)
+      : null
+  const rem = remainingQty(line)
+  if (shipped != null && (shipped > 1e-9 || rem > 1e-9)) {
+    return `출고 ${formatOrderAmt(shipped)} / 잔여 ${formatOrderAmt(rem)}`
+  }
   const row = salesPrefill.remainingFor(line.order_detail_id)
   if (!row) return ''
   return `출고 ${formatOrderAmt(row.confirmed_shipped_qty)} / 잔여 ${formatOrderAmt(row.remaining_order_qty)}`
 }
 
+const nextStepHint = computed(() => {
+  const cd = detail.value?.status_cd || ''
+  if (cd === ORDER_STATUS_RESERVED) return HINT_ORDER_NEXT_RESERVED
+  if (cd === ORDER_STATUS_CONFIRMED) return HINT_ORDER_NEXT_CONFIRMED
+  if (cd === ORDER_STATUS_PREP) return HINT_ORDER_NEXT_PREP
+  return ''
+})
+const selectedIds = ref<string[]>([])
+
+function shipableLines(): OrderLine[] {
+  return (detail.value?.lines || []).filter((ln) => remainingQty(ln) > 1e-9)
+}
+
+function applyRemaining(lines: OrderLine[]) {
+  if (!detail.value) return
+  salesPrefill.setFromOrderLines(detail.value, lines)
+  for (const d of salesPrefill.shipLines) {
+    const src = lines.find((ln) => ln.order_detail_id === d.order_detail_id)
+    if (!src) continue
+    const rem = remainingQty(src)
+    d.qty = rem
+    d.remaining_qty = rem
+  }
+}
+
 function goShip(line: OrderLine) {
   if (!canShip.value || !detail.value) return
-  salesPrefill.setFromOrder(detail.value, line)
+  applyRemaining([line])
+  void router.push({ name: 'ship-confirm' })
+}
+
+function toggleSelect(id: string) {
+  if (selectedIds.value.includes(id)) {
+    selectedIds.value = selectedIds.value.filter((x) => x !== id)
+    return
+  }
+  selectedIds.value = [...selectedIds.value, id]
+}
+
+function goShipSelected() {
+  if (!canShip.value || !detail.value) return
+  const lines = shipableLines().filter((ln) => selectedIds.value.includes(ln.order_detail_id))
+  if (!lines.length) return
+  applyRemaining(lines)
+  void router.push({ name: 'ship-confirm' })
+}
+
+function goShipBatch() {
+  if (!canShip.value || !detail.value) return
+  const lines = shipableLines()
+  if (!lines.length) return
+  applyRemaining(lines)
   void router.push({ name: 'ship-confirm' })
 }
 
@@ -169,17 +242,26 @@ watch(orderNo, () => {
           <p v-if="detail.rmk" class="hero__rmk">{{ detail.rmk }}</p>
         </OdsCard>
         <p v-if="lockHint" class="hint" role="status">{{ lockHint }}</p>
+        <p v-else-if="nextStepHint" class="hint" role="status">{{ nextStepHint }}</p>
         <OdsCard
           v-for="(line, idx) in detail.lines"
           :key="line.order_detail_id"
           :title="lineTitle(idx)"
         >
+          <label v-if="canShip && remainingQty(line) > 0" class="pick">
+            <input
+              type="checkbox"
+              :checked="selectedIds.includes(line.order_detail_id)"
+              @change="toggleSelect(line.order_detail_id)"
+            >
+            출고 선택
+          </label>
           <p class="spec">{{ formatOrderLineSpec(line) }}</p>
           <p class="meta">{{ lineQtyAmtText(line) }}</p>
           <p v-if="remainingText(line)" class="meta">{{ remainingText(line) }}</p>
           <p class="meta">배송 {{ formatOrderLineShip(line) }}</p>
           <OdsButton
-            v-if="canShip"
+            v-if="canShip && remainingQty(line) > 0"
             type="button"
             variant="secondary"
             :block="false"
@@ -192,6 +274,26 @@ watch(orderNo, () => {
       </template>
     </main>
     <div v-if="detail && !loading" class="footer-actions">
+      <OdsButton
+        v-if="canShip && shipableLines().length > 1"
+        class="footer-btn"
+        variant="secondary"
+        type="button"
+        :block="false"
+        @click="goShipBatch"
+      >
+        {{ LABEL_SHIP_BATCH }}
+      </OdsButton>
+      <OdsButton
+        v-if="canShip && selectedIds.length"
+        class="footer-btn"
+        variant="secondary"
+        type="button"
+        :block="false"
+        @click="goShipSelected"
+      >
+        {{ LABEL_SHIP_SELECTED }}
+      </OdsButton>
       <OdsButton
         v-if="canEdit || editLocked"
         class="footer-btn"
@@ -321,6 +423,13 @@ watch(orderNo, () => {
   margin: 0;
   font: var(--ods-font-form-help);
   color: var(--ods-color-text-secondary);
+}
+.pick {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  margin: 0 0 var(--ods-space-8);
+  font: var(--ods-font-form-help);
 }
 .err {
   margin: 0;

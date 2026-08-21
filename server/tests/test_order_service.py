@@ -256,6 +256,15 @@ class OrderServiceStage2Test(unittest.TestCase):
         self.assertEqual(detail["lines"][0]["variety_nm"], "신고배")
         self.assertEqual(detail["lines"][0]["grade_nm"], "특")
         self.assertEqual(detail["lines"][0]["dlvry_tp_nm"] or detail["lines"][0]["deliveries"][0]["delivery_tp_nm"], "방문수령")
+        self.assertAlmostEqual(float(detail["lines"][0]["confirmed_shipped_qty"]), 0)
+        self.assertAlmostEqual(float(detail["lines"][0]["remaining_order_qty"]), 2)
+
+    def test_a6_get_order_unshipped_remaining_equals_qty(self) -> None:
+        order_no = self.svc.create_order(FARM, _sample_payload(qty=10), user_id="TEST")
+        detail = self.svc.get_order(FARM, order_no)
+        line = detail["lines"][0]
+        self.assertAlmostEqual(float(line["confirmed_shipped_qty"]), 0)
+        self.assertAlmostEqual(float(line["remaining_order_qty"]), 10)
 
     def test_replace_rejects_sales_linked_order(self) -> None:
         order_no = self.svc.create_order(FARM, _sample_payload(qty=1), user_id="TEST")

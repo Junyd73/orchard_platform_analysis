@@ -403,8 +403,7 @@ onUnmounted(() => {
 <style scoped>
 .page {
   min-height: 100dvh;
-  /* 시안4: 페이지·AppBar 영역은 흰색 바탕 */
-  background: var(--ods-color-bg);
+  background: var(--ods-color-bg-muted);
   padding-bottom: calc(140px + env(safe-area-inset-bottom));
 }
 

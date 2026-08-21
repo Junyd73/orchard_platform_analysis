@@ -1,17 +1,23 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { ProductionPrefillLine } from '@/api/production'
 import type { StockItem } from '@/api/stock'
 import {
   SHIP_MODE_DIRECT,
+  canUseStockMode,
   defaultShipMode,
+  stockDraftKey,
+  stockSaleSpecKey,
   type ShipDraftLine,
   type ShipEntrySource,
 } from '@/views/sales/shipConfirmModel'
 import type { ShipMode } from '@/types/shipment'
 import type { OrderDetail, OrderLine } from '@/types/order'
-import { DEFAULT_WAREHOUSE_CD } from '@/views/orders/ordersConstants'
+import {
+  DEFAULT_WAREHOUSE_CD,
+  DELIVERY_TP_VISIT,
+} from '@/views/orders/ordersConstants'
 import type { RemainingOrderLine, ShipConfirmResponse } from '@/types/shipment'
 
 export type ShipReturnTo = 'sales' | 'order-detail' | 'stock'
@@ -39,7 +45,7 @@ function draftFromProduction(ln: ProductionPrefillLine): ShipDraftLine {
 
 function draftFromOrderLine(line: OrderLine): ShipDraftLine {
   const alloc = Number(line.reserved_unshipped_qty ?? 0)
-  const remaining = Number(line.qty)
+  const remaining = Number(line.remaining_order_qty ?? line.qty)
   return {
     order_detail_id: line.order_detail_id,
     item_cd: line.item_cd,
@@ -60,6 +66,7 @@ function draftFromOrderLine(line: OrderLine): ShipDraftLine {
 }
 
 function draftFromStock(row: StockItem): ShipDraftLine {
+  const available = Number(row.available_qty) || 0
   return {
     order_detail_id: null,
     item_cd: row.item_cd,
@@ -69,7 +76,10 @@ function draftFromStock(row: StockItem): ShipDraftLine {
     weight: Number(row.weight) || 0,
     harvest_year: Number(row.harvest_year) || 0,
     wh_cd: row.wh_cd || DEFAULT_WAREHOUSE_CD,
-    qty: Number(row.available_qty) || 0,
+    // 판매 식별에 storage_dt 미사용 — OUT은 Core DIRECT FIFO
+    storage_dt: '',
+    available_qty: available,
+    qty: available > 0 ? 1 : 0,
     unit_price: 0,
     remaining_qty: null,
     alloc_remaining: 0,
@@ -80,7 +90,7 @@ function draftFromStock(row: StockItem): ShipDraftLine {
   }
 }
 
-/** 생산확정 → 판매 탭 prefill + Stage 6 출고 초안 */
+/** 생산확정 → 판매 탭 prefill + Stage 6 출고 초안 + Stage2 판매 draft */
 export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   const lines = ref<ProductionPrefillLine[]>([])
   const source = ref<'production' | ShipEntrySource | null>(null)
@@ -94,6 +104,29 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   const lastResult = ref<ShipConfirmResponse | null>(null)
   const lastRemaining = ref<RemainingOrderLine[]>([])
 
+  /** 판매 미리보기 공통 헤더 (1고객·1배송) */
+  const dlvryTp = ref(DELIVERY_TP_VISIT)
+  const shipFee = ref(0)
+  const rcvName = ref('')
+  const rcvTel = ref('')
+  const rcvAddr = ref('')
+  const dlvryMsg = ref('')
+  /** 판매 전체 공통 — 보내는 사람 (택배) */
+  const senderName = ref('')
+  const senderTel = ref('')
+  const senderAddr = ref('')
+
+  const draftCount = computed(() => shipLines.value.length)
+  /** STOCK 판매는 규격키, 그 외는 기존 draft key */
+  const draftKeys = computed(
+    () =>
+      new Set(
+        shipLines.value.map((ln) =>
+          source.value === 'STOCK' ? stockSaleSpecKey(ln) : stockDraftKey(ln),
+        ),
+      ),
+  )
+
   function setFromProduction(prefill: ProductionPrefillLine[]) {
     lines.value = prefill.map((ln) => ({ ...ln }))
     source.value = 'PRODUCTION'
@@ -105,33 +138,211 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     returnTo.value = 'sales'
     allowModeChange.value = true
     lastResult.value = null
+    resetDelivery()
   }
 
   function setFromOrder(detail: OrderDetail, line: OrderLine) {
-    const draft = draftFromOrderLine(line)
+    setFromOrderLines(detail, [line])
+  }
+
+  function setFromOrderLines(detail: OrderDetail, orderLines: OrderLine[]) {
+    const drafts = orderLines.map(draftFromOrderLine)
     source.value = 'ORDER'
     lines.value = []
-    shipLines.value = [draft]
+    shipLines.value = drafts
     orderNo.value = detail.order_no
     custmId.value = detail.custm_id
     customerNm.value = detail.customer || detail.custm_id
-    shipMode.value = defaultShipMode(draft.alloc_remaining, true)
+    const allStock = canUseStockMode(drafts)
+    shipMode.value = defaultShipMode(allStock ? 1 : 0, true)
     returnTo.value = 'order-detail'
     allowModeChange.value = true
     lastResult.value = null
+    resetDelivery()
   }
 
   function setFromStock(row: StockItem) {
-    source.value = 'STOCK'
-    lines.value = []
-    shipLines.value = [draftFromStock(row)]
-    shipMode.value = SHIP_MODE_DIRECT
-    orderNo.value = null
+    setFromStockRows([row])
+  }
+
+  /** 재고 직접판매 헤더(고객·배송) 초기화 — 최초 STOCK 진입용 */
+  function resetStockSaleHeader() {
     custmId.value = null
     customerNm.value = ''
+    resetDelivery()
+  }
+
+  /**
+   * STOCK 판매 세션 여부.
+   * shipLines 가 비어도 source===STOCK 이면 동일 세션으로 유지한다.
+   */
+  function isStockSaleSession(): boolean {
+    return source.value === 'STOCK'
+  }
+
+  /** 재고 선택으로 draft를 교체(기존 동작). 항상 신규 판매 시작으로 취급. */
+  function setFromStockRows(rows: StockItem[]) {
+    source.value = 'STOCK'
+    lines.value = []
+    shipLines.value = rows.map(draftFromStock)
+    shipMode.value = SHIP_MODE_DIRECT
+    orderNo.value = null
     returnTo.value = 'stock'
     allowModeChange.value = false
     lastResult.value = null
+    resetStockSaleHeader()
+  }
+
+  /**
+   * 재고 판매 세션 보장.
+   * 이미 STOCK이면 헤더/라인 유지. 다른 source에서 전환 시에만 초기화.
+   */
+  function ensureStockSaleSession() {
+    if (isStockSaleSession()) {
+      shipMode.value = SHIP_MODE_DIRECT
+      orderNo.value = null
+      returnTo.value = 'stock'
+      allowModeChange.value = false
+      lastResult.value = null
+      return
+    }
+    source.value = 'STOCK'
+    lines.value = []
+    shipLines.value = []
+    shipMode.value = SHIP_MODE_DIRECT
+    orderNo.value = null
+    returnTo.value = 'stock'
+    allowModeChange.value = false
+    lastResult.value = null
+    resetStockSaleHeader()
+  }
+
+  function getStockLine(key: string): ShipDraftLine | undefined {
+    return shipLines.value.find((ln) => stockSaleSpecKey(ln) === key)
+  }
+
+  function hasStockLine(key: string): boolean {
+    return Boolean(getStockLine(key))
+  }
+
+  function clampStockQty(qty: number, available: number): number {
+    const max = Math.max(1, Math.floor(Number(available) || 0))
+    const n = Math.floor(Number(qty))
+    if (!Number.isFinite(n) || n < 1) return 1
+    return Math.min(n, max)
+  }
+
+  /** 미등록 상품 담기. 동일 판매규격 중복 line 금지(있으면 qty만 갱신). */
+  function addStockLine(row: StockItem, qty: number) {
+    ensureStockSaleSession()
+    const draft = draftFromStock(row)
+    const key = stockSaleSpecKey(draft)
+    const available = Number(row.available_qty) || 0
+    draft.qty = clampStockQty(qty, available)
+    draft.available_qty = available
+    const idx = shipLines.value.findIndex((ln) => stockSaleSpecKey(ln) === key)
+    if (idx >= 0) {
+      shipLines.value = shipLines.value.map((ln, i) =>
+        i === idx ? { ...ln, qty: draft.qty, available_qty: available } : ln,
+      )
+      return
+    }
+    shipLines.value = [...shipLines.value, draft]
+  }
+
+  function updateStockLineQty(key: string, qty: number) {
+    const idx = shipLines.value.findIndex((ln) => stockSaleSpecKey(ln) === key)
+    if (idx < 0) return
+    const cur = shipLines.value[idx]
+    const available = cur.available_qty != null ? Number(cur.available_qty) : Number(qty)
+    const nextQty = clampStockQty(qty, available > 0 ? available : qty)
+    shipLines.value = shipLines.value.map((ln, i) =>
+      i === idx ? { ...ln, qty: nextQty } : ln,
+    )
+  }
+
+  function removeStockLineByKey(key: string) {
+    shipLines.value = shipLines.value.filter((ln) => stockSaleSpecKey(ln) !== key)
+  }
+
+  const stockDraftTotalQty = computed(() =>
+    source.value === 'STOCK'
+      ? shipLines.value.reduce((s, ln) => s + Number(ln.qty || 0), 0)
+      : 0,
+  )
+
+  /** 동일 판매규격 중복 line 금지, 기존 qty 유지. 신규만 추가(호환용). */
+  function mergeFromStockRows(rows: StockItem[]) {
+    ensureStockSaleSession()
+    const next = [...shipLines.value]
+    const seen = new Set(next.map((ln) => stockSaleSpecKey(ln)))
+    for (const row of rows) {
+      const draft = draftFromStock(row)
+      const key = stockSaleSpecKey(draft)
+      if (seen.has(key)) continue
+      seen.add(key)
+      next.push(draft)
+    }
+    shipLines.value = next
+  }
+
+  function removeShipLine(index: number) {
+    if (index < 0 || index >= shipLines.value.length) return
+    shipLines.value = shipLines.value.filter((_, i) => i !== index)
+  }
+
+  function updateShipLine(
+    index: number,
+    patch: Partial<Pick<ShipDraftLine, 'qty' | 'unit_price' | 'delivery_allocations'>>,
+  ) {
+    const cur = shipLines.value[index]
+    if (!cur) return
+    const next = { ...cur, ...patch }
+    shipLines.value = shipLines.value.map((ln, i) => (i === index ? next : ln))
+  }
+
+  /** 수량 변경 시 allocations는 유지(자동 축소/삭제 금지). */
+  function setShipLineDeliveries(index: number, allocations: ShipDraftLine['delivery_allocations']) {
+    updateShipLine(index, { delivery_allocations: allocations })
+  }
+
+  function setCustomer(id: string | null, name = '') {
+    custmId.value = id
+    customerNm.value = name
+  }
+
+  function setDelivery(input: {
+    dlvryTp?: string
+    shipFee?: number
+    rcvName?: string
+    rcvTel?: string
+    rcvAddr?: string
+    dlvryMsg?: string
+  }) {
+    if (input.dlvryTp != null) dlvryTp.value = input.dlvryTp
+    if (input.shipFee != null) shipFee.value = Number(input.shipFee) || 0
+    if (input.rcvName != null) rcvName.value = input.rcvName
+    if (input.rcvTel != null) rcvTel.value = input.rcvTel
+    if (input.rcvAddr != null) rcvAddr.value = input.rcvAddr
+    if (input.dlvryMsg != null) dlvryMsg.value = input.dlvryMsg
+  }
+
+  function setSender(input: { name?: string; tel?: string; addr?: string }) {
+    if (input.name != null) senderName.value = String(input.name || '').trim()
+    if (input.tel != null) senderTel.value = String(input.tel || '').trim()
+    if (input.addr != null) senderAddr.value = String(input.addr || '').trim()
+  }
+
+  function resetDelivery() {
+    dlvryTp.value = DELIVERY_TP_VISIT
+    shipFee.value = 0
+    rcvName.value = ''
+    rcvTel.value = ''
+    rcvAddr.value = ''
+    dlvryMsg.value = ''
+    senderName.value = ''
+    senderTel.value = ''
+    senderAddr.value = ''
   }
 
   function consume(): ProductionPrefillLine[] {
@@ -164,6 +375,11 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange.value = true
     lastResult.value = null
     lastRemaining.value = []
+    resetDelivery()
+  }
+
+  function hasDraftKey(key: string): boolean {
+    return draftKeys.value.has(key)
   }
 
   return {
@@ -178,12 +394,42 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange,
     lastResult,
     lastRemaining,
+    dlvryTp,
+    shipFee,
+    rcvName,
+    rcvTel,
+    rcvAddr,
+    dlvryMsg,
+    senderName,
+    senderTel,
+    senderAddr,
+    draftCount,
+    draftKeys,
+    stockDraftTotalQty,
     setFromProduction,
     setFromOrder,
+    setFromOrderLines,
     setFromStock,
+    setFromStockRows,
+    mergeFromStockRows,
+    ensureStockSaleSession,
+    getStockLine,
+    hasStockLine,
+    addStockLine,
+    updateStockLineQty,
+    removeStockLineByKey,
+    removeShipLine,
+    updateShipLine,
+    setShipLineDeliveries,
+    setCustomer,
+    setDelivery,
+    setSender,
+    resetDelivery,
     consume,
     rememberResult,
     remainingFor,
     clear,
+    hasDraftKey,
+    isStockSaleSession,
   }
 })

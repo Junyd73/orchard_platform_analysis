@@ -1823,7 +1823,7 @@ onMounted(async () => {
 <style scoped>
 .page {
   min-height: 100dvh;
-  background: var(--ods-color-bg);
+  background: var(--ods-color-bg-muted);
   padding-bottom: calc(160px + env(safe-area-inset-bottom));
 }
 

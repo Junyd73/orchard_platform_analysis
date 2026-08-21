@@ -64,6 +64,8 @@ export type OrderLine = {
   allocated_qty?: number
   unallocated_qty?: number
   reserved_unshipped_qty?: number
+  confirmed_shipped_qty?: number
+  remaining_order_qty?: number
   deliveries: OrderDelivery[]
 }
 

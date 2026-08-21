@@ -69,6 +69,18 @@ def _schema_sql() -> str:
         );
         INSERT INTO m_customer (custm_id, farm_cd, custm_nm, mobile, use_yn)
         VALUES ('{CUST}', '{FARM}', '테스트', '010-0000-0000', 'Y');
+        CREATE TABLE m_common_code (
+            farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT, use_yn TEXT DEFAULT 'Y'
+        );
+        INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
+            ('{FARM}', 'ST010100', '예약접수', 'ST01'),
+            ('{FARM}', 'ST010200', '주문확정', 'ST01'),
+            ('{FARM}', 'ST010300', '배송준비', 'ST01'),
+            ('{FARM}', 'ST010400', '배송완료', 'ST01'),
+            ('{FARM}', 'FR010101', '신고', 'FR010100'),
+            ('{FARM}', '{GRADE}', '특', 'GR01'),
+            ('{FARM}', '{SIZE}', '15kg', 'FR020100'),
+            ('{FARM}', 'LO010100', '방문', 'LO01');
         CREATE TABLE t_order_master (
             order_no TEXT PRIMARY KEY, farm_cd TEXT, order_dt TEXT, custm_id TEXT,
             status_cd TEXT, stock_status TEXT,
@@ -100,10 +112,19 @@ def _schema_sql() -> str:
         CREATE TABLE t_sales_detail (
             sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
             item_cd TEXT, variety_cd TEXT, grade_cd TEXT, size_cd TEXT,
-            qty REAL, unit_price REAL, tot_item_amt REAL, tot_sale_amt REAL,
-            order_detail_id TEXT, wh_cd TEXT, stock_seq INTEGER,
+            qty REAL, unit_price REAL, tot_item_amt REAL, ship_fee REAL DEFAULT 0,
+            tot_sale_amt REAL, tot_paid_amt REAL, tot_unpaid_amt REAL,
+            dlvry_tp TEXT, order_detail_id TEXT, wh_cd TEXT, stock_seq INTEGER,
             reg_id TEXT, reg_dt TEXT,
             PRIMARY KEY (sale_detail_no, farm_cd)
+        );
+        CREATE TABLE t_sales_delivery (
+            dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+            snd_name TEXT, snd_tel TEXT, snd_addr TEXT,
+            rcv_name TEXT, rcv_tel TEXT, rcv_addr TEXT,
+            dlvry_qty REAL, dlvry_msg TEXT, ship_no TEXT, ship_dt TEXT,
+            reg_id TEXT, reg_dt TEXT,
+            PRIMARY KEY (dlvry_no, farm_cd)
         );
         CREATE TABLE t_stock_master (
             stock_seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -510,6 +531,16 @@ class OrderShipServiceTests(unittest.TestCase):
         self.assertAlmostEqual(float(out["remaining_order"][0]["confirmed_shipped_qty"]), 6)
         self.assertAlmostEqual(float(out["remaining_order"][0]["remaining_order_qty"]), 4)
 
+    def test_a1_get_order_remaining_after_partial_ship(self) -> None:
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=20)
+        order_no = _order(self.conn, 10)
+        det = f"{order_no}-01"
+        _ship(self.conn, mode=SHIP_MODE_DIRECT, qty=6, order_no=order_no, det=det)
+        detail = OrderService(self.conn).get_order(FARM, order_no)
+        line = detail["lines"][0]
+        self.assertAlmostEqual(float(line["confirmed_shipped_qty"]), 6)
+        self.assertAlmostEqual(float(line["remaining_order_qty"]), 4)
+
     def test_t_ship_ssot_03_allocated_kept(self) -> None:
         _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)
         order_no = _order(self.conn, 10)
@@ -670,6 +701,86 @@ class OrderShipServiceTests(unittest.TestCase):
         _ship(self.conn, mode=SHIP_MODE_DIRECT, qty=3, item_cd=ITEM_JUICE_DORAJI)
         self.assertEqual(_stock_row(self.conn, plain_seq)["out_qty"], 0)
         self.assertEqual(_stock_row(self.conn, doraji_seq)["out_qty"], 3)
+
+    def test_direct_parcel_persists_ship_fee_and_delivery(self) -> None:
+        """T18~T23: 운영 schema 컬럼 기준 배송비·배송상세 저장."""
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)
+        _insert_stock(self.conn, storage_dt="2026-01-02", in_qty=10)
+        out = OrderShipService(self.conn).confirm(
+            ShipConfirmIn(
+                farm_cd=FARM,
+                ship_mode=SHIP_MODE_DIRECT,
+                sales_dt="2026-08-19",
+                custm_id="C1",
+                user_id="T",
+                dlvry_tp="LO010200",
+                ship_fee=4000,
+                rcv_name="홍길동",
+                rcv_tel="010-1111-2222",
+                rcv_addr="서울시 테스트구 1",
+                dlvry_msg="문 앞",
+                lines=[
+                    ShipLineIn(
+                        qty=2,
+                        item_cd=ITEM,
+                        variety_cd=VARIETY,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        weight=WEIGHT,
+                        harvest_year=YEAR,
+                        wh_cd=WH,
+                        unit_price=1000,
+                    ),
+                    ShipLineIn(
+                        qty=3,
+                        item_cd=ITEM,
+                        variety_cd=VARIETY,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        weight=WEIGHT,
+                        harvest_year=YEAR,
+                        wh_cd=WH,
+                        unit_price=2000,
+                    ),
+                ],
+            )
+        )
+        sales_no = out["sales_no"]
+        master = self.conn.execute(
+            "SELECT tot_ship_fee, tot_item_amt, tot_sales_amt FROM t_sales_master WHERE sales_no=?",
+            (sales_no,),
+        ).fetchone()
+        self.assertAlmostEqual(float(master["tot_ship_fee"]), 4000)
+        self.assertAlmostEqual(float(master["tot_item_amt"]), 2 * 1000 + 3 * 2000)
+        self.assertAlmostEqual(float(master["tot_sales_amt"]), float(master["tot_item_amt"]) + 4000)
+
+        details = self.conn.execute(
+            """
+            SELECT sale_detail_no, qty, ship_fee, dlvry_tp
+            FROM t_sales_detail WHERE sales_no=? ORDER BY sale_detail_no
+            """,
+            (sales_no,),
+        ).fetchall()
+        self.assertEqual(len(details), 2)
+        self.assertEqual(str(details[0]["dlvry_tp"]), "LO010200")
+        self.assertEqual(str(details[1]["dlvry_tp"]), "LO010200")
+        self.assertAlmostEqual(float(details[0]["ship_fee"]), 4000)
+        self.assertAlmostEqual(float(details[1]["ship_fee"]), 0)
+        fee_sum = sum(float(r["ship_fee"] or 0) for r in details)
+        self.assertAlmostEqual(fee_sum, 4000)
+
+        deliveries = self.conn.execute(
+            """
+            SELECT rcv_name, rcv_tel, rcv_addr, dlvry_msg, sale_detail_no
+            FROM t_sales_delivery WHERE sales_no=? ORDER BY sale_detail_no
+            """,
+            (sales_no,),
+        ).fetchall()
+        self.assertEqual(len(deliveries), 2)
+        self.assertEqual(deliveries[0]["rcv_name"], "홍길동")
+        self.assertEqual(deliveries[0]["rcv_tel"], "010-1111-2222")
+        self.assertEqual(deliveries[0]["rcv_addr"], "서울시 테스트구 1")
+        self.assertEqual(deliveries[0]["dlvry_msg"], "문 앞")
 
 
 if __name__ == "__main__":
