@@ -19,12 +19,16 @@ from core.order_constants import (
 )
 from core.order_service import OrderNotFoundError, OrderSaveError
 from core.order_ship_constants import (
+    CODE_ORDER_DELIVERY_LINK_INVALID,
+    CODE_ORDER_DELIVERY_OVER_SHIP,
     CODE_SHIP_ORDER_NOT_CONFIRMED,
     IO_TYPE_OUT,
     MSG_ALLOC_OVER_SHIP,
     MSG_DATA_INTEGRITY,
     MSG_DELIVERY_SCHEMA,
     MSG_DETAIL_REQUIRED,
+    MSG_ORDER_DELIVERY_LINK_INVALID,
+    MSG_ORDER_DELIVERY_OVER_SHIP,
     MSG_ORDER_LOCKED,
     MSG_ORDER_OVER_SHIP,
     MSG_PARCEL_DEST_INCOMPLETE,
@@ -55,7 +59,11 @@ from core.order_ship_delivery import (
     alloc_ship_fee_sum,
     bridge_allocs_to_fifo_details,
 )
-from core.order_ship_qty import confirmed_shipped_qty, order_line_ship_remainder
+from core.order_ship_qty import (
+    confirmed_shipped_by_order_dlvry,
+    confirmed_shipped_qty,
+    order_line_ship_remainder,
+)
 from core.sales_stock_trace_schema import REF_TYPE_SALE
 
 _QTY_EPS = 1e-9
@@ -242,6 +250,9 @@ class OrderShipService:
 
         # 재고 차감 전 배송배분 검증 (실패 시 OUT/sales 0건)
         multi_delivery = self._validate_and_normalize_delivery(payload)
+        self._validate_order_delivery_links(
+            cur, farm=farm, order_no=order_no, payload=payload
+        )
 
         splits: list[dict[str, Any]] = []
         for line_idx, line in enumerate(payload.lines):
@@ -432,6 +443,73 @@ class OrderShipService:
             )
         payload.ship_fee = fee_total
         return True
+
+    def _validate_order_delivery_links(
+        self,
+        cur: sqlite3.Cursor,
+        *,
+        farm: str,
+        order_no: str | None,
+        payload: ShipConfirmIn,
+    ) -> None:
+        """allocation.order_dlvry_id가 있으면 farm/order/line 소유 + 잔여수량 검증.
+
+        NULL/blank ID는 신규 실제배송지로 허용(Stage6 STOCK 직접판매 회귀 금지).
+        수령인 문자열 비교 없음. t_order_delivery UPDATE 없음.
+        """
+        requested: dict[str, float] = {}
+        planned_by_id: dict[str, float] = {}
+
+        for line in payload.lines:
+            det_id = str(line.order_detail_id or "").strip()
+            for alloc in line.delivery_allocations or []:
+                oid = str(getattr(alloc, "order_dlvry_id", "") or "").strip()
+                if not oid:
+                    continue
+                if not order_no or not det_id:
+                    raise ShipValidationError(
+                        MSG_ORDER_DELIVERY_LINK_INVALID,
+                        code=CODE_ORDER_DELIVERY_LINK_INVALID,
+                    )
+                cur.execute(
+                    """
+                    SELECT dlvry_qty
+                    FROM t_order_delivery
+                    WHERE farm_cd = ?
+                      AND order_no = ?
+                      AND order_detail_id = ?
+                      AND order_dlvry_id = ?
+                    LIMIT 1
+                    """,
+                    (farm, order_no, det_id, oid),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ShipValidationError(
+                        MSG_ORDER_DELIVERY_LINK_INVALID,
+                        code=CODE_ORDER_DELIVERY_LINK_INVALID,
+                    )
+                planned = _as_float(_row_val(row, "dlvry_qty", 0))
+                if oid in planned_by_id and not _qty_eq(planned_by_id[oid], planned):
+                    raise ShipValidationError(
+                        MSG_ORDER_DELIVERY_LINK_INVALID,
+                        code=CODE_ORDER_DELIVERY_LINK_INVALID,
+                    )
+                planned_by_id[oid] = planned
+                requested[oid] = requested.get(oid, 0.0) + _as_float(alloc.qty)
+
+        if not requested:
+            return
+
+        shipped_map = confirmed_shipped_by_order_dlvry(cur, farm, order_no or "")
+        for oid, req_qty in requested.items():
+            confirmed = float(shipped_map.get(oid, 0.0))
+            planned = float(planned_by_id[oid])
+            if confirmed + req_qty > planned + _QTY_EPS:
+                raise ShipValidationError(
+                    MSG_ORDER_DELIVERY_OVER_SHIP,
+                    code=CODE_ORDER_DELIVERY_OVER_SHIP,
+                )
 
     def _persist_multi_deliveries(
         self,

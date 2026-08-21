@@ -454,5 +454,338 @@ class Step3DeliveryLinkTest(unittest.TestCase):
         self.assertAlmostEqual(dests[oids[1]]["remaining_qty"], 20.0)
 
 
+class Step3OrderDeliveryLinkGateTest(unittest.TestCase):
+    """order_dlvry_id 소유권·잔여수량 Gate (TX 내 검증, side effect 0)."""
+
+    def setUp(self) -> None:
+        self.path, self.conn = _open()
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _create_parcel_order(self, *qtys: float) -> tuple[str, str, list[str]]:
+        svc = OrderService(self.conn)
+        order_no = svc.create_order(
+            FARM,
+            OrderSaveInput(
+                custm_id=CUST,
+                order_dt=None,
+                season_type_cd="SS010100",
+                pre_pay_amt=0,
+                lines=[
+                    OrderLineInput(
+                        variety_cd=VARIETY,
+                        weight=WEIGHT,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        qty=sum(qtys),
+                        unit_price=UNIT_PRICE,
+                        harvest_year=YEAR,
+                        warehouse_cd=WH,
+                        item_cd=ITEM,
+                        dlvry_tp=DELIVERY_TP_PARCEL_CD,
+                        deliveries=[
+                            OrderDeliveryInput(
+                                delivery_tp_cd=DELIVERY_TP_PARCEL_CD,
+                                qty=q,
+                                planned_dt=today_ops_iso(),
+                                rcv_name=f"수령{i}",
+                                rcv_tel="010-0000-0000",
+                                rcv_addr=f"서울 {i}",
+                                **SND,
+                            )
+                            for i, q in enumerate(qtys, start=1)
+                        ],
+                    )
+                ],
+            ),
+            user_id="T",
+        )
+        svc.confirm_order(FARM, order_no, user_id="T")
+        det_id = f"{order_no}-01"
+        return order_no, det_id, [f"{det_id}-P{i:02d}" for i in range(1, len(qtys) + 1)]
+
+    def _create_two_line_parcel(self) -> tuple[str, str, str, str, str]:
+        """2 line 택배 주문 → (order_no, det1, oid1, det2, oid2)."""
+        svc = OrderService(self.conn)
+        order_no = svc.create_order(
+            FARM,
+            OrderSaveInput(
+                custm_id=CUST,
+                order_dt=None,
+                season_type_cd="SS010100",
+                pre_pay_amt=0,
+                lines=[
+                    OrderLineInput(
+                        variety_cd=VARIETY,
+                        weight=WEIGHT,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        qty=10,
+                        unit_price=UNIT_PRICE,
+                        harvest_year=YEAR,
+                        warehouse_cd=WH,
+                        item_cd=ITEM,
+                        dlvry_tp=DELIVERY_TP_PARCEL_CD,
+                        deliveries=[
+                            OrderDeliveryInput(
+                                delivery_tp_cd=DELIVERY_TP_PARCEL_CD,
+                                qty=10,
+                                planned_dt=today_ops_iso(),
+                                rcv_name="L1",
+                                rcv_tel="010-0000-0000",
+                                rcv_addr="서울 1",
+                                **SND,
+                            )
+                        ],
+                    ),
+                    OrderLineInput(
+                        variety_cd=VARIETY,
+                        weight=WEIGHT,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        qty=5,
+                        unit_price=UNIT_PRICE,
+                        harvest_year=YEAR,
+                        warehouse_cd=WH,
+                        item_cd=ITEM,
+                        dlvry_tp=DELIVERY_TP_PARCEL_CD,
+                        deliveries=[
+                            OrderDeliveryInput(
+                                delivery_tp_cd=DELIVERY_TP_PARCEL_CD,
+                                qty=5,
+                                planned_dt=today_ops_iso(),
+                                rcv_name="L2",
+                                rcv_tel="010-0000-0000",
+                                rcv_addr="서울 2",
+                                **SND,
+                            )
+                        ],
+                    ),
+                ],
+            ),
+            user_id="T",
+        )
+        svc.confirm_order(FARM, order_no, user_id="T")
+        det1, det2 = f"{order_no}-01", f"{order_no}-02"
+        return order_no, det1, f"{det1}-P01", det2, f"{det2}-P01"
+
+    def _ship(
+        self,
+        *,
+        order_no: str,
+        det_id: str,
+        qty: float,
+        allocs: list[ShipDeliveryAllocIn],
+    ) -> dict:
+        fee = sum(float(a.ship_fee or 0) for a in allocs)
+        return OrderShipService(self.conn).confirm(
+            ShipConfirmIn(
+                farm_cd=FARM,
+                ship_mode=SHIP_MODE_DIRECT,
+                order_no=order_no,
+                sales_dt="2026-08-20",
+                custm_id=CUST,
+                user_id="T",
+                dlvry_tp=DELIVERY_TP_PARCEL_CD,
+                ship_fee=fee,
+                lines=[
+                    ShipLineIn(
+                        qty=qty,
+                        order_detail_id=det_id,
+                        item_cd=ITEM,
+                        variety_cd=VARIETY,
+                        grade_cd=GRADE,
+                        size_cd=SIZE,
+                        weight=WEIGHT,
+                        harvest_year=YEAR,
+                        wh_cd=WH,
+                        unit_price=UNIT_PRICE,
+                        delivery_allocations=allocs,
+                    )
+                ],
+                **SND,
+            )
+        )
+
+    def _assert_clean(self, stock_seq: int) -> None:
+        for table in ("t_sales_master", "t_sales_detail", "t_stock_log"):
+            self.assertEqual(
+                self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                0,
+                table,
+            )
+        row = self.conn.execute(
+            "SELECT out_qty FROM t_stock_master WHERE stock_seq = ?", (stock_seq,)
+        ).fetchone()
+        self.assertEqual(float(row["out_qty"]), 0)
+
+    def test_g1_valid_current_line_id_succeeds(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=30)
+        order_no, det_id, oids = self._create_parcel_order(10, 20)
+        out = self._ship(
+            order_no=order_no,
+            det_id=det_id,
+            qty=10,
+            allocs=[_alloc(10, name="A", order_dlvry_id=oids[0])],
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT order_dlvry_id FROM t_sales_delivery WHERE sales_no=?",
+                (out["sales_no"],),
+            ).fetchone()[0],
+            oids[0],
+        )
+        _ = seq  # stock used; success path may have OUT
+
+    def test_g2_missing_id_blocked(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=30)
+        order_no, det_id, _oids = self._create_parcel_order(10, 20)
+        with self.assertRaises(ShipValidationError) as ctx:
+            self._ship(
+                order_no=order_no,
+                det_id=det_id,
+                qty=10,
+                allocs=[_alloc(10, name="X", order_dlvry_id=f"{det_id}-P99")],
+            )
+        self.assertEqual(ctx.exception.code, "ORDER_DELIVERY_LINK_INVALID")
+        self._assert_clean(seq)
+
+    def test_g3_other_order_id_blocked(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=30)
+        order_a, det_a, oids_a = self._create_parcel_order(10, 20)
+        order_b, det_b, oids_b = self._create_parcel_order(5)
+        with self.assertRaises(ShipValidationError) as ctx:
+            self._ship(
+                order_no=order_a,
+                det_id=det_a,
+                qty=5,
+                allocs=[_alloc(5, name="B", order_dlvry_id=oids_b[0])],
+            )
+        self.assertEqual(ctx.exception.code, "ORDER_DELIVERY_LINK_INVALID")
+        self._assert_clean(seq)
+        self.assertNotEqual(order_a, order_b)
+        self.assertNotEqual(det_a, det_b)
+        self.assertNotEqual(oids_a[0], oids_b[0])
+
+    def test_g4_other_line_id_same_order_blocked(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=30)
+        order_no, det1, oid1, det2, oid2 = self._create_two_line_parcel()
+        with self.assertRaises(ShipValidationError) as ctx:
+            self._ship(
+                order_no=order_no,
+                det_id=det1,
+                qty=5,
+                allocs=[_alloc(5, name="L2", order_dlvry_id=oid2)],
+            )
+        self.assertEqual(ctx.exception.code, "ORDER_DELIVERY_LINK_INVALID")
+        self._assert_clean(seq)
+        self.assertNotEqual(oid1, oid2)
+
+    def test_g5_over_planned_after_full_ship_blocked(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=40)
+        order_no, det_id, oids = self._create_parcel_order(10, 20)
+        self._ship(
+            order_no=order_no,
+            det_id=det_id,
+            qty=10,
+            allocs=[_alloc(10, name="A", order_dlvry_id=oids[0])],
+        )
+        sales_before = self.conn.execute(
+            "SELECT COUNT(*) FROM t_sales_master"
+        ).fetchone()[0]
+        out_before = float(
+            self.conn.execute(
+                "SELECT out_qty FROM t_stock_master WHERE stock_seq=?", (seq,)
+            ).fetchone()[0]
+        )
+        with self.assertRaises(ShipValidationError) as ctx:
+            self._ship(
+                order_no=order_no,
+                det_id=det_id,
+                qty=1,
+                allocs=[_alloc(1, name="A", order_dlvry_id=oids[0])],
+            )
+        self.assertEqual(ctx.exception.code, "ORDER_DELIVERY_OVER_SHIP")
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM t_sales_master").fetchone()[0],
+            sales_before,
+        )
+        self.assertEqual(
+            float(
+                self.conn.execute(
+                    "SELECT out_qty FROM t_stock_master WHERE stock_seq=?", (seq,)
+                ).fetchone()[0]
+            ),
+            out_before,
+        )
+
+    def test_g6_partial_then_remainder_succeeds(self) -> None:
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=40)
+        order_no, det_id, oids = self._create_parcel_order(10, 20)
+        self._ship(
+            order_no=order_no,
+            det_id=det_id,
+            qty=4,
+            allocs=[_alloc(4, name="A", order_dlvry_id=oids[0])],
+        )
+        out = self._ship(
+            order_no=order_no,
+            det_id=det_id,
+            qty=6,
+            allocs=[_alloc(6, name="A", order_dlvry_id=oids[0])],
+        )
+        self.assertTrue(out["ok"])
+        total_a = self.conn.execute(
+            """
+            SELECT COALESCE(SUM(dlvry_qty),0) FROM t_sales_delivery
+            WHERE order_dlvry_id = ?
+            """,
+            (oids[0],),
+        ).fetchone()[0]
+        self.assertAlmostEqual(float(total_a), 10.0)
+
+    def test_g7_same_request_duplicate_id_over_planned_blocked(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=40)
+        order_no, det_id, oids = self._create_parcel_order(10, 20)
+        with self.assertRaises(ShipValidationError) as ctx:
+            self._ship(
+                order_no=order_no,
+                det_id=det_id,
+                qty=11,
+                allocs=[
+                    _alloc(4, name="A1", order_dlvry_id=oids[0]),
+                    _alloc(7, name="A2", order_dlvry_id=oids[0]),
+                ],
+            )
+        self.assertEqual(ctx.exception.code, "ORDER_DELIVERY_OVER_SHIP")
+        self._assert_clean(seq)
+
+    def test_g8_null_id_new_destination_ok(self) -> None:
+        """신규 실제배송지(order_dlvry_id blank)는 Gate 통과."""
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=30)
+        order_no, det_id, oids = self._create_parcel_order(10, 20)
+        out = self._ship(
+            order_no=order_no,
+            det_id=det_id,
+            qty=10,
+            allocs=[
+                _alloc(10, name="신규", order_dlvry_id=""),
+            ],
+        )
+        self.assertTrue(out["ok"])
+        row = self.conn.execute(
+            "SELECT order_dlvry_id FROM t_sales_delivery WHERE sales_no=?",
+            (out["sales_no"],),
+        ).fetchone()
+        self.assertIsNone(row["order_dlvry_id"])
+        # 예정 A 잔여는 그대로(추적 안 됨)
+        dest = OrderService(self.conn).get_order(FARM, order_no)["lines"][0]["deliveries"]
+        by_id = {d["order_dlvry_id"]: d for d in dest}
+        self.assertAlmostEqual(by_id[oids[0]]["remaining_qty"], 10.0)
+
+
 if __name__ == "__main__":
     unittest.main()

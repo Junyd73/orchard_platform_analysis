@@ -37,3 +37,8 @@ MSG_PARCEL_SHIP_FEE_NEG = "배송비는 0 이상이어야 합니다."
 MSG_PARCEL_SHIP_FEE_MISMATCH = "배송비 합계가 일치하지 않습니다."
 MSG_SENDER_REQUIRED = "보내는 사람 정보를 입력해 주세요."
 MSG_DELIVERY_SCHEMA = "배송 다건 저장에 필요한 컬럼이 없습니다."
+# Step3 보완 — 주문 예정배송지 링크 무결성
+MSG_ORDER_DELIVERY_LINK_INVALID = "출고 배송지가 현재 주문 상품의 예정 배송지와 일치하지 않습니다."
+MSG_ORDER_DELIVERY_OVER_SHIP = "예정 배송수량을 초과해 출고할 수 없습니다."
+CODE_ORDER_DELIVERY_LINK_INVALID = "ORDER_DELIVERY_LINK_INVALID"
+CODE_ORDER_DELIVERY_OVER_SHIP = "ORDER_DELIVERY_OVER_SHIP"
