@@ -1,4 +1,10 @@
-import type { ShipConfirmLine, ShipConfirmRequest, ShipMode } from '@/types/shipment'
+import type {
+  ShipConfirmLine,
+  ShipConfirmRequest,
+  ShipDeliveryAllocation,
+  ShipMode,
+} from '@/types/shipment'
+import { orderStatusLabelOf } from '@/views/orders/ordersConstants'
 import { ApiClientError } from '@/api/client'
 
 export const SHIP_MODE_STOCK: ShipMode = 'STOCK'
@@ -11,7 +17,7 @@ export const HINT_SHIP_PRODUCTION =
 export const HINT_SHIP_STOCK =
   '주문 없이 선택한 재고를 바로 판매합니다. 여러 상품을 한 번에 담을 수 있습니다.'
 export const HINT_SHIP_ORDER =
-  '예약주문 출고입니다. 출고하면 잔량이 있으면 배송준비, 전량이면 배송완료입니다.'
+  '예약주문 출고입니다. 출고하면 잔량이 있으면 부분출고, 전량이면 배송완료입니다.'
 export const LABEL_MODE = '출고방식'
 export const LABEL_MODE_STOCK = '배정재고 사용'
 export const LABEL_MODE_DIRECT = '일반재고 사용'
@@ -30,8 +36,7 @@ export const MSG_STOCK_MODE_PARTIAL_ALLOC = '선택한 상품 중 배정재고�
 export const MSG_STOCK_MODE_NEED_ORDER = '배정재고 출고는 주문이 필요합니다.'
 export const QTY_EPS = 1e-9
 
-export const ORDER_STATUS_PREP = 'ST010300'
-export const ORDER_STATUS_DELIVERED = 'ST010400'
+export { ORDER_STATUS_PREP, ORDER_STATUS_DELIVERED } from '@/views/orders/ordersConstants'
 
 export type ShipEntrySource = 'PRODUCTION' | 'ORDER' | 'STOCK'
 
@@ -43,6 +48,8 @@ export type ShipDeliveryDraft = {
   rcv_addr: string
   dlvry_msg: string
   ship_fee: number
+  /** 주문 배송지 원천. 화면에서 새로 만든 배송지는 null */
+  order_dlvry_id?: string | null
 }
 
 export type ShipDraftLine = {
@@ -64,6 +71,10 @@ export type ShipDraftLine = {
   grade_nm?: string
   size_nm?: string
   item_nm?: string
+  /** 주문 line 배송방식 — 주문 출고 UI 분기·혼합 차단용 */
+  dlvry_tp?: string
+  /** order_dlvry_id 없이 출고된 이력 수량 (>0이면 배송지 재확인 안내) */
+  untracked_delivery_shipped_qty?: number
   /** STOCK 택배 상품별 배송배분 (UI draft_id 포함). 수량 변경 시 자동 수정하지 않음. */
   delivery_allocations?: ShipDeliveryDraft[]
 }
@@ -130,6 +141,19 @@ export function shipModeLabel(mode: ShipMode): string {
   return mode === SHIP_MODE_STOCK ? LABEL_MODE_STOCK : LABEL_MODE_DIRECT
 }
 
+/** draft → API 배송배분 1건. order_dlvry_id는 신규 배송지면 null */
+export function toApiDeliveryAllocation(a: ShipDeliveryDraft): ShipDeliveryAllocation {
+  return {
+    qty: Number(a.qty),
+    rcv_name: String(a.rcv_name || '').trim(),
+    rcv_tel: String(a.rcv_tel || '').trim(),
+    rcv_addr: String(a.rcv_addr || '').trim(),
+    dlvry_msg: String(a.dlvry_msg || '').trim(),
+    ship_fee: Math.max(0, Math.round(Number(a.ship_fee) || 0)),
+    order_dlvry_id: a.order_dlvry_id || null,
+  }
+}
+
 export function buildShipConfirmRequest(input: {
   shipMode: ShipMode
   salesDt: string
@@ -164,14 +188,7 @@ export function buildShipConfirmRequest(input: {
       unit_price: ln.unit_price,
     }
     if (includeAlloc) {
-      base.delivery_allocations = (ln.delivery_allocations || []).map((a) => ({
-        qty: Number(a.qty),
-        rcv_name: String(a.rcv_name || '').trim(),
-        rcv_tel: String(a.rcv_tel || '').trim(),
-        rcv_addr: String(a.rcv_addr || '').trim(),
-        dlvry_msg: String(a.dlvry_msg || '').trim(),
-        ship_fee: Math.max(0, Math.round(Number(a.ship_fee) || 0)),
-      }))
+      base.delivery_allocations = (ln.delivery_allocations || []).map(toApiDeliveryAllocation)
     }
     return base
   })
@@ -227,7 +244,5 @@ export function mapShipApiError(err: unknown): string {
 }
 
 export function orderStatusLabel(statusCd: string | null | undefined): string {
-  if (statusCd === ORDER_STATUS_PREP) return '배송준비'
-  if (statusCd === ORDER_STATUS_DELIVERED) return '배송완료'
-  return statusCd || ''
+  return orderStatusLabelOf(statusCd)
 }

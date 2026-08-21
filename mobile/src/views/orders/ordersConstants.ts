@@ -115,13 +115,17 @@ export const MSG_PARCEL_DEST_INCOMPLETE =
 export const MSG_PARCEL_QTY_MISMATCH = '택배 배송수량 합계가 주문수량과 같아야 합니다.'
 export const MSG_PARCEL_QTY_OVER = '택배 배송수량이 주문수량을 초과할 수 없습니다.'
 export const MSG_PARCEL_DEST_NONE = '배송지 미등록'
+export const MSG_MIXED_DLVRY_TP = '배송방식이 다른 상품은 나누어 출고해 주세요.'
+export const MSG_UNTRACKED_DEST_RECHECK = '기존 출고이력이 있어 배송지를 다시 확인해 주세요.'
+export const MSG_NEED_SENDER = '보내는 사람 정보를 입력해 주세요.'
+export const MSG_NEED_SENDER_ADDR = '과수원 주소가 없어 직접 입력해 주세요.'
 export const LABEL_ASSIGNED = '배정'
 export const MSG_ORDER_LOCKED_DELIVERED = '배송완료된 주문은 수정할 수 없습니다.'
 export const MSG_ORDER_LOCKED_CANCEL = '취소된 주문은 수정할 수 없습니다.'
 export const MSG_ORDER_QTY_LOCKED = '주문확정 이후에는 상품/수량을 수정할 수 없습니다.'
 export const MSG_ORDER_CONFIRMED_LIMITED =
   '주문확정 상태에서는 고객·비고·배송정보만 수정할 수 있습니다.'
-export const MSG_ORDER_SHIP_ONLY = '배송준비 상태에서는 배송 정보만 수정할 수 있습니다.'
+export const MSG_ORDER_SHIP_ONLY = '부분출고 상태에서는 배송 정보만 수정할 수 있습니다.'
 export const MSG_ORDER_CANCEL_CONFIRM = '이 주문을 취소하시겠습니까?'
 export const MSG_ORDER_CANCEL_FORBIDDEN = '현재 상태에서는 주문을 취소할 수 없습니다.'
 export const MSG_ORDER_CANCEL_FAIL = '주문을 취소하지 못했습니다.'
@@ -131,6 +135,20 @@ export const ORDER_STATUS_CONFIRMED = 'ST010200'
 export const ORDER_STATUS_PREP = 'ST010300'
 export const ORDER_STATUS_DELIVERED = 'ST010400'
 export const ORDER_STATUS_CANCEL = 'ST010500'
+
+/** ST01 화면 명칭 SSOT — 목록 필터·출고 결과 등 모든 표시에 공용 */
+export const ORDER_STATUS_LABEL: Record<string, string> = {
+  [ORDER_STATUS_RESERVED]: '예약접수',
+  [ORDER_STATUS_CONFIRMED]: '주문확정',
+  [ORDER_STATUS_PREP]: '부분출고',
+  [ORDER_STATUS_DELIVERED]: '배송완료',
+  [ORDER_STATUS_CANCEL]: '취소',
+}
+
+export function orderStatusLabelOf(statusCd: string | null | undefined): string {
+  const cd = String(statusCd || '').trim()
+  return ORDER_STATUS_LABEL[cd] || cd
+}
 
 export const LABEL_FILTER = '필터'
 export const LABEL_LOOKUP_PERIOD = '조회기간'
@@ -162,12 +180,12 @@ export const ORDER_QUICK_RANGE_OPTIONS = [
 
 /** ST01 명칭 fallback — 화면에는 코드값 미노출 */
 export const ORDER_STATUS_FILTER_FALLBACK = [
-  { value: ORDER_STATUS_RESERVED, label: '예약접수' },
-  { value: ORDER_STATUS_CONFIRMED, label: '주문확정' },
-  { value: ORDER_STATUS_PREP, label: '배송준비' },
-  { value: ORDER_STATUS_DELIVERED, label: '배송완료' },
-  { value: ORDER_STATUS_CANCEL, label: '취소' },
-] as const
+  ORDER_STATUS_RESERVED,
+  ORDER_STATUS_CONFIRMED,
+  ORDER_STATUS_PREP,
+  ORDER_STATUS_DELIVERED,
+  ORDER_STATUS_CANCEL,
+].map((value) => ({ value, label: ORDER_STATUS_LABEL[value] }))
 
 export const CODE_PARENT_FRUIT = 'FR01'
 export const CODE_PARENT_GRADE = 'GR01'
@@ -182,6 +200,11 @@ export const WEIGHT_UNIT_KG = 'kg'
 export const WEIGHT_UNIT_PACK = '포'
 export const DEFAULT_WEIGHT_KG = 15
 export const ITEM_MID_SUFFIX = '00'
+
+/** 원물(통 단위) 품목 */
+export const ITEM_RAW_FRUIT = 'FR010300'
+export const LABEL_UNIT_BOX = '박스'
+export const LABEL_UNIT_WHOLE = '통'
 
 export const DELIVERY_TP_VISIT = 'LO010100'
 export const DELIVERY_TP_PARCEL = 'LO010200'
@@ -250,6 +273,17 @@ export function formatPhoneKr(raw: string): string {
 
 export function isParcelDelivery(codeCd: string): boolean {
   return String(codeCd || '').trim() === DELIVERY_TP_PARCEL
+}
+
+/** 판매 단위 — 원물(통)만 예외, 그 외 박스 */
+export function saleUnitLabel(itemCd: string | null | undefined): string {
+  return String(itemCd || '').trim() === ITEM_RAW_FRUIT ? LABEL_UNIT_WHOLE : LABEL_UNIT_BOX
+}
+
+/** 배송방식이 섞이면 한 판매(1 t_sales_delivery)로 출고할 수 없다 */
+export function hasMixedDeliveryTp(lines: { dlvry_tp?: string | null }[]): boolean {
+  const tps = new Set(lines.map((ln) => String(ln.dlvry_tp || '').trim()))
+  return tps.size > 1
 }
 
 export function joinDot(parts: Array<string | null | undefined>): string {

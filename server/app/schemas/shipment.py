@@ -17,6 +17,7 @@ class ShipDeliveryAllocRequest(BaseModel):
     rcv_addr: str
     dlvry_msg: str = ""
     ship_fee: float = Field(0.0, ge=0)
+    order_dlvry_id: str | None = None
 
 
 class ShipLineRequest(BaseModel):

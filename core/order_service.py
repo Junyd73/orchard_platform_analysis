@@ -13,7 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from core.ops_biz_date import now_ops_str, today_ops, today_ops_iso
-from core.order_ship_qty import confirmed_shipped_qty, order_line_ship_remainder
+from core.order_ship_qty import (
+    confirmed_shipped_by_order_dlvry,
+    confirmed_shipped_qty,
+    order_line_ship_remainder,
+)
 from core.order_constants import (
     DELIVERY_TP_ADDR_OPTIONAL,
     DELIVERY_TP_PARCEL_CD,
@@ -492,6 +496,7 @@ class OrderService:
             for row in detail_rows:
                 det_id = str(_row_val(row, "order_detail_id", 0) or "")
                 shipped_by_detail[det_id] = confirmed_shipped_qty(cur, farm, det_id)
+            shipped_by_order_dlvry = confirmed_shipped_by_order_dlvry(cur, farm, no)
             cur.execute(
                 """
                 SELECT
@@ -512,14 +517,20 @@ class OrderService:
             cur.close()
 
         deliveries_by_line: dict[str, list[dict[str, Any]]] = {}
+        linked_shipped_by_line: dict[str, float] = {}
         for row in delivery_rows:
             det_id = str(_row_val(row, "order_detail_id", 1) or "")
+            oid = str(_row_val(row, "order_dlvry_id", 0) or "")
+            planned = _as_float(_row_val(row, "dlvry_qty", 3))
+            dest_shipped = float(shipped_by_order_dlvry.get(oid, 0.0))
+            _, dest_remain = order_line_ship_remainder(planned, dest_shipped)
+            linked_shipped_by_line[det_id] = linked_shipped_by_line.get(det_id, 0.0) + dest_shipped
             deliveries_by_line.setdefault(det_id, []).append(
                 {
-                    "order_dlvry_id": str(_row_val(row, "order_dlvry_id", 0) or ""),
+                    "order_dlvry_id": oid,
                     "order_detail_id": det_id,
                     "delivery_tp_cd": str(_row_val(row, "delivery_tp_cd", 2) or ""),
-                    "qty": _as_float(_row_val(row, "dlvry_qty", 3)),
+                    "qty": planned,
                     "planned_dt": str(_row_val(row, "planned_dt", 4) or ""),
                     "snd_name": str(_row_val(row, "snd_name", 5) or ""),
                     "snd_tel": str(_row_val(row, "snd_tel", 6) or ""),
@@ -529,6 +540,8 @@ class OrderService:
                     "rcv_addr": str(_row_val(row, "rcv_addr", 10) or ""),
                     "dlvry_msg": str(_row_val(row, "dlvry_msg", 11) or ""),
                     "delivery_tp_nm": str(_row_val(row, "delivery_tp_nm", 12) or ""),
+                    "confirmed_shipped_qty": dest_shipped,
+                    "remaining_qty": dest_remain,
                 }
             )
 
@@ -539,6 +552,10 @@ class OrderService:
             qty = _as_float(_row_val(row, "qty", 6))
             allocated = _as_float(_row_val(row, "allocated_qty", 16))
             confirmed, remaining = order_line_ship_remainder(qty, shipped_by_detail.get(det_id, 0.0))
+            linked = float(linked_shipped_by_line.get(det_id, 0.0))
+            untracked = max(0.0, confirmed - linked)
+            if untracked <= _QTY_EPS:
+                untracked = 0.0
             total_qty += qty
             lines.append(
                 {
@@ -565,6 +582,7 @@ class OrderService:
                     "reserved_unshipped_qty": allocated,
                     "confirmed_shipped_qty": confirmed,
                     "remaining_order_qty": remaining,
+                    "untracked_delivery_shipped_qty": untracked,
                     "deliveries": deliveries_by_line.get(det_id, []),
                 }
             )

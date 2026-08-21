@@ -14,6 +14,8 @@ import {
   LABEL_ORDER_DETAIL,
   LABEL_SHIP,
   LABEL_SHIP_BATCH,
+  LABEL_SHIP_SELECTED,
+  MSG_MIXED_DLVRY_TP,
   MSG_ORDER_CANCEL_CONFIRM,
   MSG_ORDER_LOCKED_DELIVERED,
 } from '@/views/orders/ordersConstants'
@@ -243,6 +245,43 @@ describe('OrderDetailView', () => {
     two.lines = [base, { ...base, order_detail_id: 'ORD20260817-001-02' }]
     const { wrapper } = await mountDetail('ST010200', '주문확정', two)
     expect(wrapper.text()).toContain(LABEL_SHIP_BATCH)
+    wrapper.unmount()
+  })
+
+  it('배송방식이 다른 상품은 일괄/선택 출고를 막는다', async () => {
+    const body = detail('ST010200', '주문확정')
+    const base = body.lines[0]
+    body.lines = [
+      base,
+      { ...base, order_detail_id: 'ORD20260817-001-02', dlvry_tp: 'LO010100', dlvry_tp_nm: '방문수령' },
+    ]
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const { wrapper, router } = await mountDetail('ST010200', '주문확정', body)
+    await wrapper.findAll('button').find((b) => b.text().includes(LABEL_SHIP_BATCH))?.trigger('click')
+    await flushPromises()
+    expect(alert).toHaveBeenCalledWith(MSG_MIXED_DLVRY_TP)
+    expect(router.currentRoute.value.name).toBe('order-detail')
+    alert.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('배송방식이 같으면 선택 출고로 진행한다', async () => {
+    const body = detail('ST010200', '주문확정')
+    const base = body.lines[0]
+    body.lines = [base, { ...base, order_detail_id: 'ORD20260817-001-02' }]
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const { wrapper, router } = await mountDetail('ST010200', '주문확정', body)
+    for (const box of wrapper.findAll('input[type="checkbox"]')) {
+      await box.setValue(true)
+    }
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes(LABEL_SHIP_SELECTED))
+      ?.trigger('click')
+    await flushPromises()
+    expect(alert).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.name).toBe('ship-confirm')
+    alert.mockRestore()
     wrapper.unmount()
   })
 

@@ -5,6 +5,7 @@ import {
   MSG_PARCEL_DEST_REQUIRED,
   MSG_PARCEL_QTY_MISMATCH,
 } from '@/views/orders/ordersConstants'
+import { toApiDeliveryAllocation } from '@/views/sales/shipConfirmModel'
 import type { ShipDraftLine, ShipDeliveryDraft } from '@/views/sales/shipConfirmModel'
 
 export const MSG_SHIP_ALLOC_FEE_NEG = '배송비는 0 이상이어야 합니다.'
@@ -26,6 +27,7 @@ export function emptyDeliveryDraft(partial?: Partial<ShipDeliveryDraft>): ShipDe
     rcv_addr: '',
     dlvry_msg: '',
     ship_fee: 0,
+    order_dlvry_id: null,
     ...partial,
     draft_id: partial?.draft_id || newDeliveryDraftId(),
   }
@@ -105,12 +107,5 @@ export function findParcelDeliveryIssue(lines: ShipDraftLine[]): string {
 }
 
 export function toApiDeliveryAllocations(line: ShipDraftLine) {
-  return (line.delivery_allocations || []).map((a) => ({
-    qty: Number(a.qty),
-    rcv_name: String(a.rcv_name || '').trim(),
-    rcv_tel: String(a.rcv_tel || '').trim(),
-    rcv_addr: String(a.rcv_addr || '').trim(),
-    dlvry_msg: String(a.dlvry_msg || '').trim(),
-    ship_fee: Math.max(0, Math.round(Number(a.ship_fee) || 0)),
-  }))
+  return (line.delivery_allocations || []).map(toApiDeliveryAllocation)
 }

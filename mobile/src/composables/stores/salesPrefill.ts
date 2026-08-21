@@ -9,6 +9,7 @@ import {
   defaultShipMode,
   stockDraftKey,
   stockSaleSpecKey,
+  type ShipDeliveryDraft,
   type ShipDraftLine,
   type ShipEntrySource,
 } from '@/views/sales/shipConfirmModel'
@@ -17,7 +18,9 @@ import type { OrderDetail, OrderLine } from '@/types/order'
 import {
   DEFAULT_WAREHOUSE_CD,
   DELIVERY_TP_VISIT,
+  isParcelDelivery,
 } from '@/views/orders/ordersConstants'
+import { emptyDeliveryDraft, QTY_EPS } from '@/views/sales/shipDeliveryModel'
 import type { RemainingOrderLine, ShipConfirmResponse } from '@/types/shipment'
 
 export type ShipReturnTo = 'sales' | 'order-detail' | 'stock'
@@ -43,10 +46,39 @@ function draftFromProduction(ln: ProductionPrefillLine): ShipDraftLine {
   }
 }
 
+/**
+ * 주문 배송지 → 출고 배송배분 seed.
+ * 배송지별 remaining_qty만 사용하고, 합계는 상품 잔량(cap)을 넘지 않게 마지막 건을 잘라 담는다.
+ */
+function seedDeliveryAllocations(line: OrderLine, cap: number): ShipDeliveryDraft[] {
+  const seeded: ShipDeliveryDraft[] = []
+  let left = cap
+  for (const d of line.deliveries || []) {
+    if (left <= QTY_EPS) break
+    const rest = Number(d.remaining_qty ?? 0)
+    if (!(rest > QTY_EPS)) continue
+    const qty = Math.min(rest, left)
+    seeded.push(
+      emptyDeliveryDraft({
+        order_dlvry_id: d.order_dlvry_id,
+        qty,
+        rcv_name: d.rcv_name || '',
+        rcv_tel: d.rcv_tel || '',
+        rcv_addr: d.rcv_addr || '',
+        dlvry_msg: d.dlvry_msg || '',
+        ship_fee: 0,
+      }),
+    )
+    left -= qty
+  }
+  return seeded
+}
+
 function draftFromOrderLine(line: OrderLine): ShipDraftLine {
   const alloc = Number(line.reserved_unshipped_qty ?? 0)
   const remaining = Number(line.remaining_order_qty ?? line.qty)
-  return {
+  const untracked = Number(line.untracked_delivery_shipped_qty ?? 0)
+  const draft: ShipDraftLine = {
     order_detail_id: line.order_detail_id,
     item_cd: line.item_cd,
     variety_cd: line.variety_cd,
@@ -62,7 +94,14 @@ function draftFromOrderLine(line: OrderLine): ShipDraftLine {
     variety_nm: line.variety_nm,
     grade_nm: line.grade_nm,
     size_nm: line.size_nm,
+    dlvry_tp: line.dlvry_tp,
+    untracked_delivery_shipped_qty: untracked,
   }
+  // 추적 불가 출고이력이 있으면 배송지 매칭을 신뢰할 수 없어 사용자가 직접 지정한다.
+  if (isParcelDelivery(line.dlvry_tp) && untracked <= QTY_EPS) {
+    draft.delivery_allocations = seedDeliveryAllocations(line, remaining)
+  }
+  return draft
 }
 
 function draftFromStock(row: StockItem): ShipDraftLine {
@@ -159,6 +198,9 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange.value = true
     lastResult.value = null
     resetDelivery()
+    // 주문 line의 배송방식을 그대로 이어받는다(혼합 배송방식은 호출측에서 차단).
+    const lineDlvryTp = String(orderLines[0]?.dlvry_tp || '').trim()
+    if (lineDlvryTp) dlvryTp.value = lineDlvryTp
   }
 
   function setFromStock(row: StockItem) {

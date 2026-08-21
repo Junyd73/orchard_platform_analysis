@@ -448,6 +448,7 @@ class OrderShipService:
             raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
         has_group = _column_exists(cur, "t_sales_delivery", "dlvry_group_no")
         has_fee = _column_exists(cur, "t_sales_delivery", "ship_fee")
+        has_order_dlvry = _column_exists(cur, "t_sales_delivery", "order_dlvry_id")
         has_snd = (
             _column_exists(cur, "t_sales_delivery", "snd_name")
             and _column_exists(cur, "t_sales_delivery", "snd_tel")
@@ -456,6 +457,14 @@ class OrderShipService:
         if not (has_group and has_fee):
             raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
         if not has_snd:
+            raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
+
+        needs_order_link = any(
+            str(getattr(a, "order_dlvry_id", "") or "").strip()
+            for line in payload.lines
+            for a in (line.delivery_allocations or [])
+        )
+        if needs_order_link and not has_order_dlvry:
             raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
 
         snd_name = str(getattr(payload, "snd_name", "") or "").strip() or None
@@ -478,33 +487,64 @@ class OrderShipService:
                     MSG_PARCEL_QTY_MISMATCH, code="PARCEL_QTY_MISMATCH"
                 ) from exc
             for row in rows:
-                cur.execute(
-                    """
-                    INSERT INTO t_sales_delivery (
-                        dlvry_no, sale_detail_no, sales_no, farm_cd,
-                        snd_name, snd_tel, snd_addr,
-                        rcv_name, rcv_tel, rcv_addr, dlvry_qty, dlvry_msg,
-                        dlvry_group_no, ship_fee, reg_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        row["dlvry_no"],
-                        row["sale_detail_no"],
-                        sales_no,
-                        farm,
-                        snd_name,
-                        snd_tel,
-                        snd_addr,
-                        row["rcv_name"] or None,
-                        row["rcv_tel"] or None,
-                        row["rcv_addr"] or None,
-                        row["dlvry_qty"],
-                        row["dlvry_msg"] or None,
-                        row["dlvry_group_no"],
-                        float(row["ship_fee"] or 0),
-                        user_id,
-                    ),
-                )
+                order_dlvry = str(row.get("order_dlvry_id") or "").strip() or None
+                if has_order_dlvry:
+                    cur.execute(
+                        """
+                        INSERT INTO t_sales_delivery (
+                            dlvry_no, sale_detail_no, sales_no, farm_cd,
+                            snd_name, snd_tel, snd_addr,
+                            rcv_name, rcv_tel, rcv_addr, dlvry_qty, dlvry_msg,
+                            dlvry_group_no, ship_fee, order_dlvry_id, reg_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            row["dlvry_no"],
+                            row["sale_detail_no"],
+                            sales_no,
+                            farm,
+                            snd_name,
+                            snd_tel,
+                            snd_addr,
+                            row["rcv_name"] or None,
+                            row["rcv_tel"] or None,
+                            row["rcv_addr"] or None,
+                            row["dlvry_qty"],
+                            row["dlvry_msg"] or None,
+                            row["dlvry_group_no"],
+                            float(row["ship_fee"] or 0),
+                            order_dlvry,
+                            user_id,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO t_sales_delivery (
+                            dlvry_no, sale_detail_no, sales_no, farm_cd,
+                            snd_name, snd_tel, snd_addr,
+                            rcv_name, rcv_tel, rcv_addr, dlvry_qty, dlvry_msg,
+                            dlvry_group_no, ship_fee, reg_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            row["dlvry_no"],
+                            row["sale_detail_no"],
+                            sales_no,
+                            farm,
+                            snd_name,
+                            snd_tel,
+                            snd_addr,
+                            row["rcv_name"] or None,
+                            row["rcv_tel"] or None,
+                            row["rcv_addr"] or None,
+                            row["dlvry_qty"],
+                            row["dlvry_msg"] or None,
+                            row["dlvry_group_no"],
+                            float(row["ship_fee"] or 0),
+                            user_id,
+                        ),
+                    )
 
     def _require_trace_schema(self, cur: sqlite3.Cursor) -> None:
         need = (

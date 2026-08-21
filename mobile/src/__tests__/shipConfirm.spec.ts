@@ -294,7 +294,7 @@ describe('shipConfirmModel / ShipConfirmView', () => {
     await wrapper.findAll('button').find((b) => b.text().includes(LABEL_CONFIRM_SHIP))?.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('잔여 4')
-    expect(wrapper.text()).toContain('배송준비')
+    expect(wrapper.text()).toContain('부분출고')
     expect(wrapper.text()).not.toContain(LABEL_CONFIRM_SHIP)
     await wrapper.findAll('button').find((b) => b.text() === '확인')?.trigger('click')
     await flushPromises()

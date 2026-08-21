@@ -21,6 +21,7 @@ class ShipDeliveryAllocIn:
     rcv_addr: str = ""
     dlvry_msg: str = ""
     ship_fee: float = 0.0
+    order_dlvry_id: str = ""
 
 
 def alloc_qty_sum(allocs: list[ShipDeliveryAllocIn] | None) -> float:
@@ -86,6 +87,7 @@ def bridge_allocs_to_fifo_details(
                     "rcv_tel": str(alloc.rcv_tel or "").strip(),
                     "rcv_addr": str(alloc.rcv_addr or "").strip(),
                     "dlvry_msg": str(alloc.dlvry_msg or "").strip(),
+                    "order_dlvry_id": str(alloc.order_dlvry_id or "").strip(),
                 }
             )
             need -= take

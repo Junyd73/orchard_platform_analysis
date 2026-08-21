@@ -17,11 +17,12 @@ logger = logging.getLogger(__name__)
 SALES_DELIVERY_COLUMNS = (
     ("dlvry_group_no", "TEXT"),
     ("ship_fee", "REAL"),
+    ("order_dlvry_id", "TEXT"),
 )
 
 
 def ensure_sales_delivery_schema(db: Path | str | sqlite3.Connection | Any) -> dict[str, Any]:
-    """t_sales_delivery.dlvry_group_no · ship_fee 멱등 추가."""
+    """t_sales_delivery.dlvry_group_no · ship_fee · order_dlvry_id 멱등 추가."""
     stats: dict[str, Any] = {"ok": True, "columns": [], "reason": ""}
     conn, owns = _open_conn(db)
     if conn is None:

@@ -26,6 +26,7 @@ import {
   MSG_ORDER_CANCEL_FAIL,
   MSG_ORDER_CONFIRM_CONFIRM,
   MSG_ORDER_CONFIRM_FAIL,
+  MSG_MIXED_DLVRY_TP,
   ORDER_STATUS_CANCEL,
   ORDER_STATUS_DELIVERED,
   ORDER_STATUS_PREP,
@@ -43,6 +44,7 @@ import {
   formatOrderAmt,
   formatOrderLineShip,
   formatOrderLineSpec,
+  hasMixedDeliveryTp,
   isOrderEditLocked,
   orderEditLockMessage,
 } from '@/views/orders/ordersConstants'
@@ -143,10 +145,17 @@ function toggleSelect(id: string) {
   selectedIds.value = [...selectedIds.value, id]
 }
 
+/** 한 판매(1 t_sales_delivery)에 배송방식을 섞을 수 없어 여러 건 출고 시 차단한다. */
+function blockedByMixedDelivery(lines: OrderLine[]): boolean {
+  if (!hasMixedDeliveryTp(lines)) return false
+  window.alert(MSG_MIXED_DLVRY_TP)
+  return true
+}
+
 function goShipSelected() {
   if (!canShip.value || !detail.value) return
   const lines = shipableLines().filter((ln) => selectedIds.value.includes(ln.order_detail_id))
-  if (!lines.length) return
+  if (!lines.length || blockedByMixedDelivery(lines)) return
   applyRemaining(lines)
   void router.push({ name: 'ship-confirm' })
 }
@@ -154,7 +163,7 @@ function goShipSelected() {
 function goShipBatch() {
   if (!canShip.value || !detail.value) return
   const lines = shipableLines()
-  if (!lines.length) return
+  if (!lines.length || blockedByMixedDelivery(lines)) return
   applyRemaining(lines)
   void router.push({ name: 'ship-confirm' })
 }

@@ -42,6 +42,10 @@ export type OrderDelivery = {
   rcv_addr: string
   dlvry_msg?: string
   delivery_tp_nm?: string
+  /** 이 배송지로 이미 확정 출고된 수량 */
+  confirmed_shipped_qty?: number
+  /** 이 배송지의 남은 출고 대상 수량 */
+  remaining_qty?: number
 }
 
 export type OrderLine = {
@@ -66,6 +70,8 @@ export type OrderLine = {
   reserved_unshipped_qty?: number
   confirmed_shipped_qty?: number
   remaining_order_qty?: number
+  /** order_dlvry_id 없이 출고된 수량. >0이면 배송지 자동 seed 금지 */
+  untracked_delivery_shipped_qty?: number
   deliveries: OrderDelivery[]
 }
 

@@ -9,6 +9,8 @@ export type ShipDeliveryAllocation = {
   rcv_addr: string
   dlvry_msg?: string
   ship_fee: number
+  /** 주문 배송지(t_order_delivery) 원천. 신규 배송지는 null */
+  order_dlvry_id?: string | null
 }
 
 export type ShipConfirmLine = {

@@ -43,6 +43,7 @@ def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfir
                     rcv_addr=a.rcv_addr or "",
                     dlvry_msg=a.dlvry_msg or "",
                     ship_fee=float(a.ship_fee or 0),
+                    order_dlvry_id=str(getattr(a, "order_dlvry_id", None) or "").strip(),
                 )
                 for a in ln.delivery_allocations
             ]
