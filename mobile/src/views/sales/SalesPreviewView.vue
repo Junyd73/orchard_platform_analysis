@@ -112,7 +112,8 @@ const destDrafts = ref<ShipDeliveryDraft[]>([])
 const destSheetErr = ref('')
 /** 공통 배송메모 — 상품정보 | 주문자 | 직접입력 */
 const destCommonMemoMode = ref<string>(DEST_MEMO_MODE_PRODUCT)
-const destCommonMemoCustom = ref('')
+/** 선택값 채우기 + 직접 수정 공용 텍스트 */
+const destCommonMemoText = ref('')
 
 const lines = computed(() => prefill.shipLines)
 const isParcel = computed(() => isParcelDelivery(prefill.dlvryTp))
@@ -276,7 +277,7 @@ function openDestSheet(idx: number) {
   destFormIdx.value = null
   destSheetErr.value = ''
   destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
-  destCommonMemoCustom.value = ''
+  destCommonMemoText.value = formatPreviewLineSpec(ln)
   const existing = ln.delivery_allocations || []
   destDrafts.value = existing.length ? existing.map((a) => ({ ...a })) : []
 }
@@ -287,7 +288,7 @@ function closeDestSheet() {
   destDrafts.value = []
   destSheetErr.value = ''
   destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
-  destCommonMemoCustom.value = ''
+  destCommonMemoText.value = ''
 }
 
 function customerDefaults() {
@@ -298,14 +299,18 @@ function customerDefaults() {
   }
 }
 
-function resolveCommonMemo(): string {
-  if (destCommonMemoMode.value === DEST_MEMO_MODE_ORDERER) {
+function commonMemoTemplate(mode: string): string {
+  if (mode === DEST_MEMO_MODE_ORDERER) {
     return String(prefill.customerNm || customerDefaults().rcv_name || '').trim()
   }
-  if (destCommonMemoMode.value === DEST_MEMO_MODE_CUSTOM) {
-    return String(destCommonMemoCustom.value || '').trim()
+  if (mode === DEST_MEMO_MODE_CUSTOM) {
+    return String(destCommonMemoText.value || '').trim()
   }
   return destSheetProductSpec()
+}
+
+function resolveCommonMemo(): string {
+  return String(destCommonMemoText.value || '').trim()
 }
 
 function applyCommonMemoToAll() {
@@ -313,16 +318,19 @@ function applyCommonMemoToAll() {
   destDrafts.value = destDrafts.value.map((d) => ({ ...d, dlvry_msg: msg }))
 }
 
+/** 선택 → 템플릿 채움. 직접입력은 현재 텍스트 유지(이어서 수정) */
 function setCommonMemoMode(mode: string) {
   destCommonMemoMode.value = mode
   if (mode !== DEST_MEMO_MODE_CUSTOM) {
-    destCommonMemoCustom.value = ''
+    destCommonMemoText.value = commonMemoTemplate(mode)
   }
   applyCommonMemoToAll()
 }
 
-function setCommonMemoCustom(raw: string) {
-  destCommonMemoCustom.value = raw
+/** 직접 수정 시 모드를 직접입력으로 전환 */
+function setCommonMemoText(raw: string) {
+  destCommonMemoText.value = raw
+  destCommonMemoMode.value = DEST_MEMO_MODE_CUSTOM
   applyCommonMemoToAll()
 }
 
@@ -872,22 +880,14 @@ onMounted(async () => {
                     </option>
                   </OdsSelect>
                   <OdsInput
-                    v-if="destCommonMemoMode === DEST_MEMO_MODE_CUSTOM"
-                    :model-value="destCommonMemoCustom"
+                    :model-value="destCommonMemoText"
                     variant="form"
                     bare
                     class="dest-common-memo__input"
                     data-testid="sales-preview-dest-common-input"
                     :aria-label="LABEL_DEST_COMMON_MEMO"
-                    @update:model-value="setCommonMemoCustom"
+                    @update:model-value="setCommonMemoText"
                   />
-                  <p
-                    v-else
-                    class="dest-common-memo__preview"
-                    data-testid="sales-preview-dest-common-preview"
-                  >
-                    {{ resolveCommonMemo() || '—' }}
-                  </p>
                   <OdsButton
                     type="button"
                     variant="secondary"
@@ -1741,23 +1741,6 @@ onMounted(async () => {
   padding: 0 var(--ods-space-8);
   font: var(--ods-font-caption);
   font-weight: 600;
-  box-sizing: border-box;
-}
-.dest-common-memo__preview {
-  margin: 0;
-  min-width: 0;
-  padding: 0 var(--ods-space-8);
-  height: 28px;
-  display: flex;
-  align-items: center;
-  font: var(--ods-font-caption);
-  font-weight: 600;
-  color: var(--ods-color-text);
-  background: var(--ods-color-bg-muted, #f3f4f0);
-  border-radius: var(--ods-radius-button);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   box-sizing: border-box;
 }
 .dest-common-memo__apply {

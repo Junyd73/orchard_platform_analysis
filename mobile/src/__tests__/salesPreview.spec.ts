@@ -611,11 +611,18 @@ describe('SalesPreviewView 2B', () => {
     mode.value = 'orderer'
     mode.dispatchEvent(new Event('change'))
     await flushPromises()
+    const commonInput = sheet.querySelector(
+      '[data-testid="sales-preview-dest-common-input"]',
+    ) as HTMLInputElement
+    expect(commonInput.value).toBe('홍길동')
+    await new DOMWrapper(commonInput).setValue('문앞에 두세요')
+    await flushPromises()
+    expect(mode.value).toBe('custom')
     ;(sheet.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement).click()
     await flushPromises()
     const row = sheet.querySelector('[data-testid="sales-preview-dest-row"]')!
     const inputs = row.querySelectorAll('input')
-    expect((inputs[5] as HTMLInputElement).value).toBe('홍길동')
+    expect((inputs[5] as HTMLInputElement).value).toBe('문앞에 두세요')
     wrapper.unmount()
   })
 
