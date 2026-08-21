@@ -4,6 +4,7 @@
 > 배즙 완제품 2종(일반/도라지)은 Stage 6 운영 보완. PROCESS 유형은 1개 유지.  
 > 출고 UX: 재고 다건 판매 · 주문 일괄/부분 출고. 배즙 출고 표시는 제품명만. 재고 조정은 stock+log만(전표 없음).  
 > OPEN-PROD-01~03 **CLOSED**. DEC-026 harvest_year **APPROVED**.  
+> **2026-08-21:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**. 문서 정합성만 (코드·DB 변경 없음). 다음 순서: [2026-08-21 절](#2026-08-21--선입금수금-정책-확정).  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
 범례: `—` · `예정` · `진행` · `완료` · `차단` · `대기`
@@ -60,13 +61,15 @@
 - [x] 대표 5항 반영 (allocated_qty, 상태분리, 출고 TX, 선입금, 날짜)
 - [x] DEC-017 / DEC-018 설계 확정 (2026-08-17)
 - [x] **단계 0 설계 최종승인** (2026-08-17 대표). 다시 열지 않음
-- [x] DEC-019 OPEN 기록 (선입금 부분출고 배분 · 단계 4 전)
+- [x] DEC-019 최초 OPEN 기록 (2026-08-17 · 이후 **2026-08-21 APPROVED**)
 - [x] OPEN-PROD-01~03 **CLOSED** (2026-08-19 대표 최종승인. [09 §5·§9](./09_production_inventory_flow.md))
 - [x] DEC-026 harvest_year 원료 수확연도 승계 (2026-08-19)
 - [x] Stage 5B 재고조회/이력 (로컬 · main 미머지)
 - [x] ST01 운영 DB 확인 (DEC-011 **CLOSED** — 2026-08-17)
+- [x] **선입금 배분 확정 (DEC-019 APPROVED — 2026-08-21).** 순차 배분, 회차 적용액 = `min(선입금 잔액, 그 판매금액)`
+- [x] **주문 선입금 결제수단 (DEC-028 APPROVED — 2026-08-21).** `pre_pay_method_cd` 설계. DDL 미실행
+- [x] **판매상태 ≠ 수금상태 (DEC-029 APPROVED — 2026-08-21).** 수금상태는 금액 계산값
 - [ ] 기존 HOLD 백필 (DEC-015 OPEN — **CLOSED 후보**. 운영 테스트데이터 초기화로 대상 없음. 운영 DB 재확인 SQL: `scripts/ops/check_order_alloc_preflight.sql`. 재확인 전 CLOSED 금지)
-- [ ] 선입금 배분 확정 (DEC-019 OPEN — 출고 TX 단계 전)
 - [ ] 가락 확정 시 `t_sales_delivery` (DEC-016 OPEN — 단계 6 전)
 
 ## 단계 1 산출물
@@ -207,7 +210,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | Stage 3A/5A allocation | **구현 완료** · main 미머지 · 운영 DDL 미적용 |
 | Stage 5B 재고조회 | **구현 완료** · main 미머지 |
 | Stage 6 (구 3B 포함 판매 UX) | **로컬 완료** (`/orders/ship` DIRECT+STOCK). 배정 UI(3B)는 후순위. main 미머지 |
-| Stage 5C = S 판매/출고 OUT | Core+HTTP 완료. Mobile UI = Stage 6. DEC-019·020 저장 OPEN |
+| Stage 5C = S 판매/출고 OUT | Core+HTTP 완료. Mobile UI = Stage 6. **DEC-019 APPROVED**(선입금 배분은 단계 4 구현 대기) · DEC-020 저장 필드 OPEN |
 | 생산확정→바로판매 A안 | 설계 CLOSED. 코드 = P + 5C |
 
 ## 운영 테스트데이터 초기화 (2026-08-17 대표 완료)
@@ -240,7 +243,11 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | T-SHP-04 | 같은 주문 2회 출고 → 판매 2건. 기존 CONFIRMED 수량 불변 | 4 |
 | T-SHP-02 | STOCK: 미배정분만 재고출고 요청 시 409. DIRECT는 이 테스트 비대상 | 4 |
 | T-SHP-03 | 출고 중 실패 시 전체 rollback | 4 |
-| T-SHP-05 | 선입금 배분 (DEC-019 확정 후) | 4 |
+| T-SHP-05 | 선입금 순차 배분: 주문 30만·선입금 15만 → 판매1 10만 적용 10만 미수 0 / 판매2 20만 적용 5만 미수 15만 (DEC-019 **APPROVED**) | 4 |
+| T-PAY-02 | CONFIRMED 판매 추가수금 → paid/unpaid 갱신 · `sales_status` 불변 (DEC-029) | 6 |
+| T-PAY-03 | DRAFT 판매 수금 요청 409 (DEC-029) | 6 |
+| T-PAY-04 | 수금액 > 미수금 거부 | 6 |
+| T-ORD-06 | `pre_pay_amt=0` + 결제수단 값 전달 → 400 / `pre_pay_amt>0` + 결제수단 누락 → 400. 두 경우 모두 `t_cash_ledger`·`t_ledger` 0 (DEC-028) | 2 |
 | T-SHP-06 | DIRECT 즉시출고 (수량추적 OPEN 해소 후) | 4 |
 | T-SAL-01 | 판매 PUT 후 order_no 유지 | 5 |
 | T-AUC-01 | DRAFT 확정 시 출고+CONFIRMED, 실패 시 DRAFT 유지 | 6 |
@@ -324,6 +331,64 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 - **상태:** 로컬 완료. push는 feature branch만. **main merge / mirror / production 금지**
 - DIRECT E2E + STOCK E2E + allocation schema(로컬) + 레거시 reserved 103 정리
 - 경계 테스트: `test_stock_ship_e2e.py` (음수 로트 비후보 · 정상 로트 계속 · reserved>real 차단 · 음수+reserved 차단)
+
+## 2026-08-21 — 선입금·수금 정책 확정
+
+**문서 정합성 작업만.** 코드·DB·테스트 변경 없음.
+
+확정된 결정:
+
+| DEC | 내용 | 상태 |
+|-----|------|------|
+| DEC-019 | 부분출고 선입금 **순차 배분**. 회차 적용액 = `min(선입금 잔액, 그 판매금액)`. 초과 적용·기존 CONFIRMED 판매 재작성 금지 | **APPROVED** |
+| DEC-028 | 주문 **선입금 결제수단**. `pre_pay_amt=0` → NULL, `>0` → 필수. 제안 컬럼 `t_order_master.pre_pay_method_cd TEXT NULL`. **DDL 미실행** | **APPROVED** (설계) |
+| DEC-029 | **판매상태 ≠ 수금상태.** `sales_status`는 DRAFT/CONFIRMED만. 수금상태는 금액 계산값 | **APPROVED** |
+
+정리된 개념:
+
+- **주문 생성/확정 ≠ 판매.** 판매는 출고확정 시점에 생성 (새 `sales_no`, CONFIRMED, `sales_dt`=그 출고 업무일, 재고 OUT)
+- **판매확정** = 그 판매 CONFIRMED · **주문완료** = `ST010400` + `stock_status='Y'` · **수금완료** = 그 판매 미수 0. 세 개념을 섞지 않음
+- 수금상태: `tot_paid_amt==0` 미수 · `0 < tot_paid_amt < tot_sales_amt` 부분수금 · `tot_unpaid_amt==0` 수금완료
+- 회계는 기존 `t_cash_ledger` · `t_ledger` · `AccountManager.sync_ledger_by_basket('SALE',…)` 재사용. **모바일 전용 회계 엔진 금지**
+- UI 용어: **결제수단 · 수금액 · 미수금 · 수금상태** (「수금방법」 금지)
+
+반영 문서: [01](./01_overview.md) · [02 §8·§12](./02_domain_flow.md) · [03 §1.1·§4.1·§9](./03_data_contract.md) · [04 §4.1·§6.1·§6.2](./04_mobile_screen.md) · [05 §3.1·§6.C·§8](./05_api_contract.md) · [07](./07_decisions.md) · [08 A13](./08_pc_change_scope.md)
+
+### 다음 개발 순서 (2026-08-21 확정)
+
+```
+1  설계서 정합성 완료
+2  선입금 결제수단 기반
+3  판매 수금 Core
+4  출고 시 선입금 자동배분
+5  판매목록
+6  판매상세/수금등록
+7  PC 정합성
+8  가락 DRAFT→CONFIRMED
+```
+
+| # | 항목 | 내용 | 선행 확인 |
+|---|------|------|-----------|
+| 1 | **설계서 정합성 완료** | 본 문서 세트에 DEC-019/028/029 반영 | — |
+| 2 | **선입금 결제수단 기반** | `pre_pay_method_cd` 저장·검증(`0`→NULL, `>0`→필수)·결제수단 목록 조회. 주문 단계 전표 없음 | 운영 `PRAGMA table_info(t_order_master)` |
+| 3 | **판매 수금 Core** | CONFIRMED 판매 수금 저장 Core 1곳. `t_cash_ledger` → `AccountManager` → `t_ledger` → paid/unpaid. DRAFT 금지 | 운영 `PRAGMA table_info(t_cash_ledger)` · 기존 계정코드 사용 실태 |
+| 4 | **출고 시 선입금 자동배분** | `OrderShipService.confirm()`에 순차 배분 + 회계 연동 (DEC-019) | 3번 Core 완료 · 선입금/추가수금 구분키 확인 |
+| 5 | **판매목록** | 판매금액·수금액·미수금·수금상태 배지. 판매상태 배지와 분리 | 3·4 |
+| 6 | **판매상세/수금등록** | 수금 내역 + 수금등록(수금액 ≤ 미수금, 결제수단 필수) | 3 |
+| 7 | **PC 정합성** | PC `SalesPage` 회계 호출부를 공용 Core로 위임 ([08 A13](./08_pc_change_scope.md)). 전면 재작성 아님 | 3·4 |
+| 8 | **가락 DRAFT→CONFIRMED** | confirm TX + 선택 수금 (DEC-010). DEC-016 OPEN 선결 | 3·7 |
+
+**스키마 확인 대기 (DDL 미실행):**
+
+| 항목 | 확인 내용 | 단계 |
+|------|-----------|------|
+| `t_order_master.pre_pay_method_cd` | 동일 목적 컬럼 유무 → ALTER 여부 | 2 전 |
+| `t_cash_ledger` 실제 컬럼 | 선입금 적용분 vs 추가수금 **구분·연결 키** 존재 여부. 없으면 OPEN 유지, 임의 DDL 금지 | 3·4 전 |
+| 결제수단 계정코드 | 현금/예금 `AS0101` 하위 · 외상 `AS02…` 실사용 코드. 신규 코드 정의 금지 | 2·3 전 |
+
+DEC-016(가락 배송행)은 계속 **OPEN**이며 2026-08-21에 승인하지 않았다.
+
+---
 
 ## OPEN-DATA-NEG-STOCK (Stage 6 밖 · 운영 이관 전 메모)
 

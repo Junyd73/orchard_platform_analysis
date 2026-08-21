@@ -2,6 +2,7 @@
 
 > 상태: 단계 0 **최종승인** → 단계 1·2 **완료** → **3A/H/P/5B 구현 완료** (main 미머지)  
 > **2026-08-19:** Stage 5C 1차 DEC-027 · 추적 DDL. Core 출고 **없음**. 상세: [09](./09_production_inventory_flow.md) · [06](./06_development_progress.md)  
+> **2026-08-21:** 선입금·수금 정책 확정 — DEC-019 **APPROVED**, DEC-028 · DEC-029 **신규 APPROVED**. 문서 정합성만 (코드·DB·DDL 없음).  
 > Stage 5C Core · Stage 3B UI · 운영 migration **없음** (이번 작업).
 
 ## 0. UX 최우선 원칙 (DEC-021)
@@ -46,7 +47,10 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 공유 
 | 날짜 ISO | 012 | APPROVED |
 | Stage 3A DDL | 008, 018 | 로컬. 운영 별도 |
 | 주문상태 ≠ 이행상태 | 013 | APPROVED |
-| 선입금 금액만 | 009 | APPROVED |
+| 주문 단계 전표 없음 (금액+결제수단만) | 009, 028 | APPROVED |
+| 선입금 **순차 배분** (min(잔액, 판매금액)) | 019 | **APPROVED** (2026-08-21) |
+| 주문 선입금 **결제수단** (금액>0이면 필수) | 028 | **APPROVED** (2026-08-21). 컬럼 제안, DDL 미실행 |
+| **판매상태 ≠ 수금상태** (수금상태는 금액 계산값) | 029 | **APPROVED** (2026-08-21) |
 | 규격 4요소 | 004 | APPROVED |
 | harvest_year = 원료 수확연도 | 026 | APPROVED |
 
@@ -106,9 +110,12 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 공유 
 | ID | 내용 |
 |----|------|
 | DEC-015 | HOLD 백필 **금지**. active reserved만 DDL 차단. CLOSED 후보, 운영 재확인 전 CLOSED 금지 |
-| DEC-019 | 선입금 부분출고 배분 |
 | DEC-020 저장 | 출고방식 저장·DIRECT TX |
 | DEC-016 | 가락 `t_sales_delivery` |
+
+DEC-019는 **2026-08-21 APPROVED**로 OPEN 목록에서 제외.
+
+**스키마 확인 대기** (APPROVED 설계, DDL 미실행): `t_order_master.pre_pay_method_cd` (DEC-028) · `t_cash_ledger` 선입금/추가수금 구분키 (DEC-019) · 기존 결제수단 계정코드 실사용 확인. 상세: [03 §1.1·§9](./03_data_contract.md) · [06](./06_development_progress.md).
 
 ## 9. 코드 근거
 

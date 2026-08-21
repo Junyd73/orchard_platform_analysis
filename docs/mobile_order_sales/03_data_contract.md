@@ -38,11 +38,35 @@
 | status_cd | Stage 2 신규 `ST010100` | **주문상태만** (DEC-013). 운영 ST01 SSOT (DEC-011 CLOSED) | 표시 | PC `'10'`/`'20'` 폐기 |
 | stock_status | `'N'` | 출고완료 플래그. `'Y'` 전환 없음 | 이행 계산에 사용 | 출고 TX에서 Y |
 | tot_order_amt / tot_ship_fee / tot_pay_amt / pre_pay_amt | 금액 | 선입금은 전표 없음 (DEC-009) | 표시 | 유지 |
+| **pre_pay_method_cd** | **컬럼 없음 (제안)** | 선입금 결제수단. `pre_pay_amt=0`이면 NULL, `>0`이면 필수 (DEC-028) | 선입금>0일 때만 입력 | **제안: `TEXT NULL` ALTER. 이번 작업 미실행** |
 | season_type_cd | SS01 | 시즌 | 콤보 | 유지 |
 | sales_no | Stage 2 신규는 빈 값 | **legacy/reference.** 출고 전 비움. 이후 최초 출고 판매번호만. **주문 전체 판매 조회는 반드시 `t_sales_master.order_no` 기준.** | | DEC-005 · **017 APPROVED** |
 | rmk, reg_id, reg_dt, mod_* | 감사 | `now_ops_str` | 동일 | 유지 |
 
 출고예정일 마스터 컬럼 **추가하지 않음.** `MIN(t_order_delivery.planned_dt)`.
+
+### 1.1 선입금 결제수단 설계 (DEC-028 APPROVED · DDL 미실행)
+
+| 항목 | 내용 |
+|------|------|
+| 제안 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` |
+| 값 도메인 | `AccountManager` 기존 계정코드 재사용. 현금/예금 = `AS0101` 하위 4레벨(예 `AS010101`), 외상 계열 = `AS02…`. **모바일 전용 결제수단 코드 신설·하드코딩 금지** |
+| 목록 조회 | `AccountManager.get_account_codes` 계열. 화면에 코드 리터럴을 박지 않음 |
+| 규칙 | `pre_pay_amt = 0` → NULL · `pre_pay_amt > 0` → 필수 |
+| 회계 | 주문 저장 시 전표·수금줄 **없음** (DEC-009). 판매확정 시 이 결제수단으로 선입금 적용분을 회계 반영 |
+| 신규 테이블 | 없음 |
+
+**이번 작업에서 ALTER 하지 않는다.** 구현 착수 전 확인:
+
+```sql
+-- 동일 목적 컬럼이 이미 있는지
+PRAGMA table_info(t_order_master);
+
+-- 실제 사용 중인 결제수단 코드 분포
+SELECT pay_method_cd, COUNT(*) FROM t_cash_ledger GROUP BY 1 ORDER BY 2 DESC;
+```
+
+`prepay_balance` 같은 잔액 컬럼은 **만들지 않는다** (DEC-019, §9.1 계산식).
 
 ---
 
@@ -112,11 +136,33 @@ migration 직전 운영 점검 필수 → §15.
 |------|------|------|------|
 | sales_dt | YYYY-MM-DD | 판매화면 ISO / **주문경로 YYYYMMDD** | 신규 ISO (DEC-012). 과거 변환 없음 |
 | sales_tp | RETAIL/WHOLE | 주문 `'NORMAL'` | 정리 제안, 1차 비범위 가능 |
-| sales_status / sales_source | 문서 없음 | ALTER 후 사용 | DRAFT/CONFIRMED, ORDER/AUCTION_RT 유지 |
+| sales_status / sales_source | 문서 없음 | ALTER 후 사용 | **`DRAFT`/`CONFIRMED` 두 값만** (DEC-029). ORDER/AUCTION_RT 유지 |
+| tot_sales_amt / tot_paid_amt / tot_unpaid_amt | 있음 (`kpi_detail_page`·`sales_page`·`order_ship_service` 사용 확인) | 판매금액 / 수금액 / 미수금 | **수금상태 계산 근거** (§4.1) |
 | order_no | 문서 없음 | 주문 INSERT만. **재저장 시 누락**. UNIQUE 없음 | 출고마다 동일 `order_no` 가능 → **주문 1:N 판매 SSOT** (DEC-017). 재저장 보존 |
 | slip_no | 문서 있음 | 판매 INSERT 없음 | 전표는 `t_ledger` |
 
 채번: `generate_sales_no` vs 주문 `get_next_seq` 이중 → P0 공통화.
+
+### 4.1 수금상태는 계산값 (DEC-029 APPROVED)
+
+**수금상태 컬럼을 만들지 않는다.** `sales_status`에 수금 의미를 넣지 않는다.
+
+| 수금상태 | 조건 |
+|----------|------|
+| 미수 | `tot_paid_amt == 0` |
+| 부분수금 | `0 < tot_paid_amt < tot_sales_amt` |
+| 수금완료 | `tot_unpaid_amt == 0` |
+
+완료 개념 3종은 서로 다른 값에서 나온다.
+
+| 용어 | 근거 |
+|------|------|
+| 판매확정 | `t_sales_master.sales_status = 'CONFIRMED'` |
+| 주문완료 | `t_order_master.status_cd='ST010400'` AND `stock_status='Y'` |
+| 수금완료 | `t_sales_master.tot_unpaid_amt = 0` |
+
+**현재 구현:** `core/order_ship_service.py`는 판매 INSERT 시 `tot_paid_amt=0`, `tot_unpaid_amt=판매금액`으로 넣는다. 선입금 적용은 아직 없다.  
+**확정 설계:** 출고 TX에서 선입금 적용액을 `tot_paid_amt`에 반영하고 `tot_unpaid_amt = tot_sales_amt − tot_paid_amt`로 맞춘다 (DEC-019).
 
 ---
 
@@ -207,14 +253,48 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
 ---
 
-## 9. `t_cash_ledger` / `t_ledger`
+## 9. `t_cash_ledger` / `t_ledger` — 회계 SSOT
 
-판매 CONFIRMED 수금만. 문서명 `t_sales_pay_detail`과 다름. **코드 테이블명 우선.**
+판매 **CONFIRMED** 수금만. 문서명 `t_sales_pay_detail`과 다름. **코드 테이블명 우선.**
 
-주문 선입금은 **안 넣음** (DEC-009).  
+**주문 단계에는 아무 행도 넣지 않는다** (DEC-009). 주문에 선입금 금액·결제수단을 저장해도 전표는 생기지 않는다 (DEC-028).
+
+회계 엔진은 **기존 것을 그대로 재사용**한다. 모바일 전용 회계 엔진을 만들지 않는다.
+
+| 대상 | 사용 |
+|------|------|
+| 수금 상세 | `t_cash_ledger` |
+| 전표 | `t_ledger` (+ `t_ledger_history`) |
+| 전표 생성 | `AccountManager.sync_ledger_by_basket('SALE', sales_no, work_date, basket, user_id)` |
+| 계정코드 | 기존 자산 계정. 현금/예금 `AS0101` 하위, 외상 `AS02…` |
+
+**확인된 `t_cash_ledger` INSERT 컬럼** (`ui/pages/sales_page.py` 판매 저장 경로):
+
+```
+paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt, slip_no, rmk, reg_id
+```
+
+`AccountManager._get_db_fingerprints`의 `SALE` 조회도 `pay_method_cd` / `paid_detail_no` / `pay_amt` + `sales_no` 기준이다.
+
+**OPEN — 구현 전 재확인:** 위 컬럼만으로는 **선입금 적용분과 이후 추가수금을 구분하는 값이 없다.** `order_no`나 선입금 플래그 성격의 컬럼도 확인되지 않았다. 단계 4 착수 전 운영 `PRAGMA table_info(t_cash_ledger)`로 실제 컬럼을 확인한다. **없는 컬럼을 가정하지 않는다.** 구분·연결 키가 없으면 OPEN으로 남기고, `pre_pay_method_cd` 제안 외에 임의로 DDL을 확장하지 않는다.
+
+### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
+
+```
+남은 선입금 = t_order_master.pre_pay_amt
+            − 그 주문의 CONFIRMED 판매에 적용된 선입금 합
+```
+
+`prepay_balance` 컬럼은 **만들지 않는다.** 위 합계를 어떤 키로 집계할지는 §9 OPEN 확인 결과에 따른다.
+
+### 9.2 트랜잭션 순서 (확정 설계)
+
+출고확정: 판매 생성 → 선입금 적용액 계산 → `t_cash_ledger` → `AccountManager` → `t_ledger` → `tot_paid_amt`/`tot_unpaid_amt`. 전부 **한 TX**.  
+추가수금: **CONFIRMED 판매만** → 수금액+결제수단 → `t_cash_ledger` → `AccountManager` → `t_ledger` → paid/unpaid. **DRAFT 판매에는 수금 금지** (DEC-029).
+
 판매 삭제 시 `t_ledger` 미처리 — P1, 1차 DELETE 비활성.
 
-`ref_id` ≈ `SALE-{sales_no}-…`, `trans_type_cd='REVENUE'`. 회계 엔진 개편은 C.
+`ref_id` ≈ `SALE-{sales_no}-{acct_cd}_{method}`, `trans_type_cd='REVENUE'`. 회계 엔진 개편은 C.
 
 ---
 
@@ -264,6 +344,11 @@ t_order_master.stock_status  =  전량 출고 시만 Y
 
 | 제안 | 상태 |
 |------|------|
+| **`t_order_master.pre_pay_method_cd TEXT NULL`** | **설계 제안 (DEC-028 APPROVED).** DDL **미실행**. 운영 PRAGMA 확인 후 별도 승인 |
+| `t_order_master.prepay_balance` | **하지 않음** (계산. §9.1) |
+| 수금상태 컬럼 (`payment_status` 등) | **하지 않음** (금액 계산. DEC-029) |
+| `sales_status`에 PAID/UNPAID 추가 | **하지 않음** (DEC-029) |
+| `t_cash_ledger` 선입금 구분 컬럼 | **OPEN.** 실제 스키마 확인 전 제안하지 않음 (§9) |
 | `t_order_detail.allocated_qty` | **Stage 3A 로컬 DDL.** 운영 ALTER는 별도 승인 |
 | `unallocated_qty` / `shipped_qty` 컬럼 | **하지 않음** (계산) |
 | `t_sales_detail.stock_seq` | **Stage 5C 멱등 ALTER** (NULL). 운영 자동실행 금지 |
@@ -349,6 +434,23 @@ SELECT COUNT(*) FROM t_stock_log WHERE io_type = 'HOLD';
 
 -- DRAFT 판매
 SELECT COUNT(*) FROM t_sales_master WHERE sales_status = 'DRAFT';
+
+-- 선입금 결제수단 ALTER 전 (DEC-028)
+PRAGMA table_info(t_order_master);
+
+-- 선입금 적용분 vs 추가수금 구분키 확인 (§9 OPEN)
+PRAGMA table_info(t_cash_ledger);
+
+-- 실사용 결제수단 코드
+SELECT pay_method_cd, COUNT(*) FROM t_cash_ledger GROUP BY 1 ORDER BY 2 DESC;
+
+-- 수금상태 분포 (계산값 검증용)
+SELECT
+  SUM(CASE WHEN COALESCE(tot_paid_amt,0) = 0 THEN 1 ELSE 0 END) AS 미수,
+  SUM(CASE WHEN COALESCE(tot_paid_amt,0) > 0
+            AND COALESCE(tot_unpaid_amt,0) > 0 THEN 1 ELSE 0 END) AS 부분수금,
+  SUM(CASE WHEN COALESCE(tot_unpaid_amt,0) = 0 THEN 1 ELSE 0 END) AS 수금완료
+FROM t_sales_master;
 
 -- 날짜 형식
 SELECT
