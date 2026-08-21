@@ -17,7 +17,8 @@ from core.pc_sales_provenance import (
     PcPrepayImmutableError,
     cash_order_no_on_resave,
     fetch_master_order_no,
-    validate_pc_prepay_basket,
+    fetch_master_sales_dt,
+    validate_pc_prepay_save,
 )
 from ui.ops_qdate import qdate_today_ops
 
@@ -2705,8 +2706,15 @@ class SalesPage(QWidget):
                     'rmk': '' # 👈 적요 키를 명시적으로 추가
                 })
 
-            # Stage4-P2: 자동 선입금 cash 수정·삭제 방어 (AccountManager sync 이전)
-            validate_pc_prepay_basket(pay_basket)
+            # Stage4-P2/P2b: 선입금 행·판매일 불변성 (AccountManager sync 이전)
+            existing_sales_dt = fetch_master_sales_dt(
+                self.db.conn.cursor(), self.farm_cd, s_no
+            )
+            validate_pc_prepay_save(
+                pay_basket,
+                original_sales_dt=existing_sales_dt,
+                current_sales_dt=sales_date_str,
+            )
 
             if ledger_enabled:
                 ledger_queries, slip_map = self.acct_mgr.sync_ledger_by_basket('SALE', s_no, sales_date_str, pay_basket, self.user_id)
@@ -2819,8 +2827,9 @@ class SalesPage(QWidget):
                     status=str(item.get("status") or ""),
                     orig_data=item.get("orig_data"),
                 )
+                row_pay_dt = str(item.get("pay_dt") or "").strip()[:10] or sales_date_str
                 queries.append((sql_pay, (
-                    pd_no, s_no, self.farm_cd, sales_date_str, item['method'], 
+                    pd_no, s_no, self.farm_cd, row_pay_dt, item['method'], 
                     item['amt'], slip_no, 
                     item.get('rmk', ''), # 안전하게 get 사용
                     self.user_id,

@@ -286,6 +286,10 @@ PC `sales_page.py` INSERT·일반 추가수금 Core는 `order_no`를 **넣지 �
 판매관리에서 금액·결제수단·날짜 수정 및 삭제 **금지**. 일반수금(`order_no` NULL)은 기존 수정/삭제 유지.
 AccountManager sync·DB TX 이전에 검증한다.
 
+**PC 판매일 우회차단 (Stage4-P2b):** 자동 선입금 cash가 하나라도 있으면 기존 `sales_dt` 변경 **금지**
+(cash.pay_dt / ledger.trans_dt 불변). PC cash 재INSERT 시 `pay_dt`는 **각 수금행 `pay_dt`**를 사용한다
+(판매일로 일괄 덮어쓰기 금지).
+
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 
 ```

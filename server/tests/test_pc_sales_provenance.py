@@ -22,11 +22,15 @@ from core.order_ship_constants import SALES_STATUS_CONFIRMED  # noqa: E402
 from core.order_ship_service import OrderShipService  # noqa: E402
 from core.pc_sales_provenance import (  # noqa: E402
     MSG_PREPAY_CASH_IMMUTABLE,
+    MSG_PREPAY_SALES_DT_IMMUTABLE,
     PcPrepayImmutableError,
     cash_order_no_on_resave,
     fetch_master_order_no,
+    fetch_master_sales_dt,
     validate_pc_prepay_basket,
+    validate_pc_prepay_save,
     validate_protected_prepay_row,
+    validate_protected_prepay_sales_dt,
 )
 
 FARM = "OR001"
@@ -125,6 +129,7 @@ def _pc_style_resave(
             status=str(item.get("status") or ""),
             orig_data=item.get("orig_data"),
         )
+        row_pay_dt = str(item.get("pay_dt") or "").strip()[:10] or SALES_DT
         cur.execute(
             """
             INSERT INTO t_cash_ledger (
@@ -136,7 +141,7 @@ def _pc_style_resave(
                 pd_no,
                 sales_no,
                 farm_cd,
-                SALES_DT,
+                row_pay_dt,
                 item["method"],
                 item["amt"],
                 item.get("slip_no"),
@@ -613,6 +618,218 @@ class PcSalesProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(remaining, 50000.0)
         self.assertIn("자동 적용된 선입금", MSG_PREPAY_CASH_IMMUTABLE)
+
+    def test_p2b_01_same_sales_dt_ok(self) -> None:
+        orig = self._seed_protected_prepay()
+        validate_pc_prepay_save(
+            [
+                {
+                    "status": "ORG",
+                    "orig_data": orig,
+                    "pay_dt": SALES_DT,
+                    "method": METHOD,
+                    "amt": 100000,
+                }
+            ],
+            original_sales_dt=SALES_DT,
+            current_sales_dt=SALES_DT,
+        )
+        dt = fetch_master_sales_dt(self.conn.cursor(), FARM, SALES_NO)
+        self.assertEqual(dt, SALES_DT)
+
+    def test_p2b_02_03_sales_dt_change_blocked_no_db_change(self) -> None:
+        orig = self._seed_protected_prepay()
+        before = self._snapshot()
+        with self.assertRaises(PcPrepayImmutableError) as ctx:
+            validate_pc_prepay_save(
+                [
+                    {
+                        "status": "ORG",
+                        "orig_data": orig,
+                        "pay_dt": SALES_DT,
+                        "method": METHOD,
+                        "amt": 100000,
+                    }
+                ],
+                original_sales_dt=SALES_DT,
+                current_sales_dt="2026-08-22",
+            )
+        self.assertIn("판매일", str(ctx.exception))
+        self.assertIn("판매일", MSG_PREPAY_SALES_DT_IMMUTABLE)
+        self.assertEqual(self._snapshot(), before)
+
+    def test_p2b_04_validate_before_sync_contract(self) -> None:
+        """SalesPage는 validate_pc_prepay_save 후 sync — 차단 시 sync 미도달."""
+        sync_calls: list[object] = []
+
+        def fake_sync(*_a, **_k):
+            sync_calls.append(1)
+            return [], {}
+
+        orig = {
+            "order_no": ORDER_NO,
+            "pay_dt": SALES_DT,
+            "pay_method_cd": METHOD,
+            "pay_amt": 100000,
+        }
+        basket = [
+            {
+                "status": "ORG",
+                "orig_data": orig,
+                "pay_dt": SALES_DT,
+                "method": METHOD,
+                "amt": 100000,
+            }
+        ]
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_pc_prepay_save(
+                basket,
+                original_sales_dt=SALES_DT,
+                current_sales_dt="2026-08-22",
+            )
+            fake_sync()  # pragma: no cover — must not reach
+        self.assertEqual(sync_calls, [])
+
+    def test_p2b_05_protected_pay_dt_preserved_on_resave(self) -> None:
+        orig = self._seed_protected_prepay()
+        _pc_style_resave(
+            self.conn,
+            farm_cd=FARM,
+            sales_no=SALES_NO,
+            pay_basket=[
+                {
+                    "status": "ORG",
+                    "orig_data": orig,
+                    "method": METHOD,
+                    "amt": 100000,
+                    "pay_dt": SALES_DT,
+                }
+            ],
+        )
+        cash = self.conn.execute(
+            "SELECT pay_dt, order_no FROM t_cash_ledger WHERE sales_no=?",
+            (SALES_NO,),
+        ).fetchone()
+        self.assertEqual(cash["pay_dt"], SALES_DT)
+        self.assertEqual(cash["order_no"], ORDER_NO)
+
+    def test_p2b_06_ordinary_mod_pay_dt_applied(self) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO t_sales_master(
+                sales_no, farm_cd, sales_dt, tot_sales_amt, tot_paid_amt, tot_unpaid_amt,
+                order_no, sales_status, sales_source, reg_id
+            ) VALUES (?,?,?,50000,20000,30000,NULL,?,?,?)
+            """,
+            (SALES_NO, FARM, SALES_DT, SALES_STATUS_CONFIRMED, "ORDER", "T"),
+        )
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, order_no, reg_id
+            ) VALUES (?,?,?,?,?,?,NULL,?)
+            """,
+            (f"{SALES_NO}-P01", SALES_NO, FARM, SALES_DT, METHOD, 20000, "T"),
+        )
+        self.conn.commit()
+        loaded = dict(
+            self.conn.execute(
+                "SELECT * FROM t_cash_ledger WHERE paid_detail_no=?",
+                (f"{SALES_NO}-P01",),
+            ).fetchone()
+        )
+        validate_pc_prepay_save(
+            [
+                {
+                    "status": "MOD",
+                    "orig_data": loaded,
+                    "pay_dt": "2026-08-22",
+                    "method": METHOD,
+                    "amt": 20000,
+                }
+            ],
+            original_sales_dt=SALES_DT,
+            current_sales_dt=SALES_DT,
+        )
+        _pc_style_resave(
+            self.conn,
+            farm_cd=FARM,
+            sales_no=SALES_NO,
+            pay_basket=[
+                {
+                    "status": "MOD",
+                    "orig_data": loaded,
+                    "method": METHOD,
+                    "amt": 20000,
+                    "pay_dt": "2026-08-22",
+                }
+            ],
+        )
+        cash = self.conn.execute(
+            "SELECT pay_dt, order_no FROM t_cash_ledger WHERE sales_no=?",
+            (SALES_NO,),
+        ).fetchone()
+        self.assertEqual(cash["pay_dt"], "2026-08-22")
+        self.assertIsNone(cash["order_no"])
+
+    def test_p2b_07_08_ins_pay_dt_and_null_order(self) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO t_sales_master(
+                sales_no, farm_cd, sales_dt, tot_sales_amt, tot_paid_amt, tot_unpaid_amt,
+                order_no, sales_status, sales_source, reg_id
+            ) VALUES (?,?,?,50000,0,50000,NULL,?,?,?)
+            """,
+            (SALES_NO, FARM, SALES_DT, SALES_STATUS_CONFIRMED, "ORDER", "T"),
+        )
+        self.conn.commit()
+        basket = [
+            {
+                "status": "INS",
+                "orig_data": {},
+                "method": METHOD,
+                "amt": 10000,
+                "pay_dt": "2026-08-25",
+            }
+        ]
+        validate_pc_prepay_save(
+            basket,
+            original_sales_dt=SALES_DT,
+            current_sales_dt=SALES_DT,
+        )
+        _pc_style_resave(
+            self.conn, farm_cd=FARM, sales_no=SALES_NO, pay_basket=basket
+        )
+        cash = self.conn.execute(
+            "SELECT pay_dt, order_no FROM t_cash_ledger WHERE sales_no=?",
+            (SALES_NO,),
+        ).fetchone()
+        self.assertEqual(cash["pay_dt"], "2026-08-25")
+        self.assertIsNone(cash["order_no"])
+
+    def test_p2b_13_sales_dt_block_keeps_remaining_50k(self) -> None:
+        orig = self._seed_protected_prepay(pay_amt=100000)
+        with self.assertRaises(PcPrepayImmutableError):
+            validate_protected_prepay_sales_dt(
+                [
+                    {
+                        "status": "ORG",
+                        "orig_data": orig,
+                        "pay_dt": SALES_DT,
+                        "method": METHOD,
+                        "amt": 100000,
+                    }
+                ],
+                SALES_DT,
+                "2026-08-22",
+            )
+        remaining = OrderShipService(self.conn)._get_remaining_order_prepay(
+            self.conn.cursor(), FARM, ORDER_NO, 150000.0
+        )
+        self.assertEqual(remaining, 50000.0)
 
 
 if __name__ == "__main__":

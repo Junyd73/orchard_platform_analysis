@@ -1,7 +1,7 @@
 # 06. Development progress
 
 > **현재 기준 (2026-08-22):** private main **`6bc7b4f`**. 운영 backend **`f7d3187`**.  
-> **Stage4 (출고 선입금 자동배분):** Core + P1 provenance 보존 + P2 immutable guard · feature 완료 · **main/운영 미반영**.  
+> **Stage4 (출고 선입금 자동배분):** Core + P1 provenance + P2 immutable guard + P2b sales-date bypass guard · feature 완료 · **main/운영 미반영**.
 > **다음 개발 순서 SSOT:** [2026-08-21 절](#2026-08-21--선입금수금-정책-확정) 5~8.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED** (`t_cash_ledger.order_no`). DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
@@ -31,7 +31,7 @@
 1 설계서 정합성 완료
 2 선입금 결제수단 기반  ← 완료 · 운영
 3 판매 수금 Core        ← 완료 · 운영
-4 출고 시 선입금 자동배분  ← Core + P1 provenance + P2 immutable guard · feature 완료 · main/운영 미반영
+4 출고 시 선입금 자동배분  ← Core + P1 + P2 + P2b · feature 완료 · main/운영 미반영
 → 5 판매목록  →  6 판매상세/수금등록
 → 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
 ```
@@ -400,7 +400,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 1  설계서 정합성 완료
 2  선입금 결제수단 기반  ← 완료 · 운영
 3  판매 수금 Core        ← 완료 · 운영
-4  출고 시 선입금 자동배분  ← Core + P1 provenance + P2 immutable guard · feature 완료 · main/운영 미반영
+4  출고 시 선입금 자동배분  ← Core + P1 + P2 + P2b · feature 완료 · main/운영 미반영
 5  판매목록
 6  판매상세/수금등록
 7  PC 정합성
@@ -412,7 +412,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | 1 | **설계서 정합성 완료** | **완료** | 본 문서 세트에 DEC-019/028/029 반영 | — |
 | 2 | **선입금 결제수단 기반** | **완료 · 운영** | `pre_pay_method_cd` 저장·조회. `0`→NULL, `>0`→현금성 필수. parent `AS0101` / level4 / `use_yn=Y` 검증. legacy prepay>0·method NULL 조회 허용. ST010200/300 NULL→유효 method 최초 1회 보완 · 기존 method 변경 금지. 주문 단계 cash/ledger/sales **변화 없음**. 운영 ALTER `ADD COLUMN pre_pay_method_cd TEXT` + backend/frontend `a41b40e` | — |
 | 3 | **판매 수금 Core** | **완료 · 운영** | `SalesPaymentService` append 추가수금. cash SSOT · AccountManager SALE farm scope · DRAFT 금지 · `AS0101` 검증 · `add_payment_in_tx` caller-owned TX. HTTP/UI 없음. 운영 backend `f7d3187` (DDL 없음) | — |
-| 4 | **출고 시 선입금 자동배분** | **feature 구현 완료 · main/운영 미반영** | Core(DEC-019) + P1 PC `order_no` 보존 + P2 자동 선입금 cash 수정·삭제 가드. DDL/HTTP/Mobile 0. Stage7 전체 PC 정합 아님 | — |
+| 4 | **출고 시 선입금 자동배분** | **feature 구현 완료 · main/운영 미반영** | Core(DEC-019) + P1 PC `order_no` 보존 + P2 자동 선입금 cash 수정·삭제 가드 + P2b 판매일 우회변경 차단·행별 `pay_dt` INSERT. DDL/HTTP/Mobile 0 | — |
 | 5 | **판매목록** | **예정** | 판매금액·수금액·미수금·수금상태 배지. 판매상태 배지와 분리 | 3·4 |
 | 6 | **판매상세/수금등록** | **예정** | 수금 내역 + 수금등록(수금액 ≤ 미수금, 결제수단 필수) | 3 |
 | 7 | **PC 정합성** | **예정** | PC `SalesPage` 회계 호출부를 공용 Core로 위임 ([08 A13](./08_pc_change_scope.md)). 전면 재작성 아님. **OPEN P1:** `t_sales_detail.order_detail_id` 재저장 유실 | 3·4 |
