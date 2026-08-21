@@ -23,7 +23,6 @@ import {
   LABEL_RCV_NAME,
   LABEL_RCV_TEL,
   formatOrderAmt,
-  formatOrderLineSpec,
   formatWeightLabel,
   isJuiceItemCd,
   isParcelDelivery,
@@ -69,7 +68,6 @@ const LABEL_DEST_SHEET = '배송지 등록'
 const LABEL_ADD_DEST = '+ 배송지 추가'
 const LABEL_DEST_SAVE = '배송지추가'
 const LABEL_DEST_DONE = '완료'
-const LABEL_SALE_QTY = '판매수량'
 const LABEL_DEST_QTY = '수량'
 const LABEL_DEST_FEE = '배송비'
 const LABEL_DEST_MEMO = '배송메모'
@@ -359,15 +357,6 @@ function destAssignedSum() {
   return destDrafts.value.reduce((s, d) => s + Number(d.qty || 0), 0)
 }
 
-function destSheetAssignedLabel(): string {
-  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
-  if (!ln) return ''
-  const sale = Number(ln.qty)
-  const got = destAssignedSum()
-  const unit = lineUnit(ln)
-  return `지정 ${got} / ${sale}${unit}`
-}
-
 function destSheetRemainLabel(): string {
   const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
   if (!ln) return ''
@@ -378,6 +367,22 @@ function destSheetRemainLabel(): string {
   if (remain > 0) return `미지정 ${remain}${unit}`
   if (remain < 0) return `${-remain}${unit} 초과`
   return '지정 완료'
+}
+
+/** Sheet 상품 카드 1행 — 품종축약 / 판매수량 / 미지정 */
+function formatDestProductShort(ln: (typeof lines.value)[number]): string {
+  if (isJuiceItemCd(ln.item_cd)) {
+    return juiceItemLabel(ln.item_cd, ln.item_nm)
+  }
+  return String(ln.variety_nm || ln.variety_cd || ln.item_nm || '').trim() || '상품'
+}
+
+function destSheetProductSummary(): string {
+  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
+  if (!ln) return ''
+  const short = formatDestProductShort(ln)
+  const qty = `${Number(ln.qty)}${lineUnit(ln)}`
+  return `${short} / ${qty} / ${destSheetRemainLabel()}`
 }
 
 function commitDestSheet() {
@@ -472,18 +477,6 @@ function goStock() {
   void router.replace({ name: 'orders', query: { tab: 'stock' } })
 }
 
-const destLineSpec = computed(() => {
-  if (destEditIdx.value == null) return ''
-  const ln = lines.value[destEditIdx.value]
-  return ln ? formatOrderLineSpec(ln) : ''
-})
-
-const destSaleQty = computed(() => {
-  if (destEditIdx.value == null) return 0
-  return Number(lines.value[destEditIdx.value]?.qty || 0)
-})
-
-/** Sheet 상단 단위 — 현재 편집 품목 기준 (footer unitHint와 분리) */
 const destSaleUnit = computed(() => {
   if (destEditIdx.value == null) return '박스'
   const ln = lines.value[destEditIdx.value]
@@ -798,15 +791,9 @@ onMounted(async () => {
                 </button>
               </div>
               <div class="dest-sheet__product" data-testid="sales-preview-dest-product">
-                <p class="dest-sheet__spec">{{ destLineSpec }}</p>
-                <p class="dest-sheet__qty">
-                  <span class="dest-sheet__qty-lbl">{{ LABEL_SALE_QTY }}</span>
-                  <strong class="dest-sheet__qty-val">{{ destSaleQty }}{{ destSaleUnit }}</strong>
+                <p class="dest-sheet__product-line" data-testid="sales-preview-dest-summary">
+                  {{ destSheetProductSummary() }}
                 </p>
-                <div class="dest-sheet__sum" data-testid="sales-preview-dest-summary">
-                  <p class="dest-sheet__sum-line">{{ destSheetAssignedLabel() }}</p>
-                  <p class="dest-sheet__sum-line">{{ destSheetRemainLabel() }}</p>
-                </div>
               </div>
             </div>
           </header>
@@ -1554,57 +1541,22 @@ onMounted(async () => {
   font: var(--ods-font-title-3);
 }
 .dest-sheet__product {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
   min-width: 0;
   padding: var(--ods-space-8) var(--ods-space-12);
   border-radius: var(--ods-radius-button);
   background: var(--ods-color-bg-muted, #f3f4f0);
   box-sizing: border-box;
 }
-.dest-sheet__spec {
+.dest-sheet__product-line {
   margin: 0;
   font: var(--ods-font-body-2);
   font-weight: 700;
   color: var(--ods-color-text);
+  font-variant-numeric: tabular-nums;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.dest-sheet__qty {
-  margin: 0;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--ods-space-8);
-  font: var(--ods-font-caption);
-  color: var(--ods-color-text-secondary);
-}
-.dest-sheet__qty-lbl {
-  flex-shrink: 0;
-}
-.dest-sheet__qty-val {
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-primary);
-  font-variant-numeric: tabular-nums;
-}
-.dest-sheet__sum {
-  margin: 0;
-  padding-top: var(--ods-space-4);
-  border-top: 1px solid color-mix(in srgb, var(--ods-color-border) 70%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.dest-sheet__sum-line {
-  margin: 0;
-  font: var(--ods-font-caption);
-  font-weight: 600;
-  color: var(--ods-color-text-secondary);
-  font-variant-numeric: tabular-nums;
 }
 .dest-sheet__x {
   border: none;
