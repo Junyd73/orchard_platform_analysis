@@ -5,6 +5,8 @@ import { storeToRefs } from 'pinia'
 
 import { confirmShipment } from '@/api/shipments'
 import { fetchCustomers } from '@/api/orders'
+import ParcelDestinationSheet from '@/components/sales/ParcelDestinationSheet.vue'
+import ParcelSenderSheet from '@/components/sales/ParcelSenderSheet.vue'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
@@ -16,8 +18,13 @@ import {
   LABEL_CUSTOMER,
   LABEL_QTY,
   LABEL_UNIT_PRICE,
+  MSG_NEED_SENDER,
+  MSG_UNTRACKED_DEST_RECHECK,
   formatOrderAmt,
   formatOrderLineSpec,
+  isParcelDelivery,
+  joinDot,
+  saleUnitLabel,
 } from '@/views/orders/ordersConstants'
 import {
   LABEL_CONFIRM_SHIP,
@@ -43,16 +50,33 @@ import {
   findStockModeIssue,
   mapShipApiError,
   orderStatusLabel,
+  type ShipDeliveryDraft,
   type ShipDraftLine,
 } from '@/views/sales/shipConfirmModel'
+import {
+  QTY_EPS,
+  allocQtySum,
+  deliveryQtyTone,
+  findParcelDeliveryIssue,
+  orderParcelStatusText,
+  totalAllocShipFee,
+} from '@/views/sales/shipDeliveryModel'
 import { todayBizIso } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import type { CustomerListItem } from '@/types/order'
 import type { ShipConfirmResponse, ShipMode } from '@/types/shipment'
 
+const LABEL_SENDER = '보내는 사람'
+const LABEL_SENDER_UNSET = '미설정'
+const LABEL_SENDER_SETUP = '설정 ›'
+const LABEL_SENDER_EDIT = '편집 ›'
+const LABEL_VIEW_DEST = '배송지 편집 ›'
+const LABEL_SHIP_FEE = '배송비'
+const TEST_PREFIX = 'ship-confirm'
+
 const router = useRouter()
-const { farmCd } = storeToRefs(useAppStore())
+const { farmCd, farm } = storeToRefs(useAppStore())
 const prefill = useSalesPrefillStore()
 
 const busy = ref(false)
@@ -92,8 +116,105 @@ const showModeToggle = computed(
   () => prefill.allowModeChange && hasOrder.value,
 )
 
+/** 주문 택배 출고 — 상품별 배송지 지정 + 판매 공통 보내는 사람 */
+const isOrderParcel = computed(
+  () => source.value === 'ORDER' && isParcelDelivery(prefill.dlvryTp),
+)
+const senderConfigured = computed(() =>
+  Boolean(
+    String(prefill.senderName || '').trim()
+    && String(prefill.senderTel || '').trim()
+    && String(prefill.senderAddr || '').trim(),
+  ),
+)
+const senderSummary = computed(() =>
+  senderConfigured.value ? joinDot([prefill.senderName, prefill.senderTel]) : '',
+)
+const senderIssue = computed(() => {
+  if (!isOrderParcel.value) return ''
+  return senderConfigured.value ? '' : MSG_NEED_SENDER
+})
+const parcelIssue = computed(() =>
+  isOrderParcel.value ? findParcelDeliveryIssue(lines.value) : '',
+)
+const parcelShipFee = computed(() => totalAllocShipFee(lines.value))
+/** order_dlvry_id 없는 과거 출고분이 있으면 seed를 신뢰할 수 없어 재확인을 안내 */
+const untrackedHint = computed(() => {
+  if (!isOrderParcel.value) return ''
+  const hasUntracked = lines.value.some(
+    (ln) => Number(ln.untracked_delivery_shipped_qty || 0) > QTY_EPS,
+  )
+  return hasUntracked ? MSG_UNTRACKED_DEST_RECHECK : ''
+})
+
 function specText(ln: ShipDraftLine): string {
   return formatOrderLineSpec(ln)
+}
+
+function lineUnit(ln: ShipDraftLine): string {
+  return saleUnitLabel(ln.item_cd)
+}
+
+function lineDestStatus(ln: ShipDraftLine): string {
+  return orderParcelStatusText(Number(ln.qty), allocQtySum(ln), lineUnit(ln))
+}
+
+function lineDestTone(ln: ShipDraftLine): 'ok' | 'warn' | 'danger' {
+  return deliveryQtyTone(Number(ln.qty), allocQtySum(ln))
+}
+
+const destEditIdx = ref<number | null>(null)
+const destSheetLine = computed(() =>
+  destEditIdx.value != null ? lines.value[destEditIdx.value] ?? null : null,
+)
+const destProductSummary = computed(() =>
+  destSheetLine.value ? formatOrderLineSpec(destSheetLine.value) : '',
+)
+const destOrderQty = computed(() =>
+  Math.max(0, Math.floor(Number(destSheetLine.value?.qty || 0))),
+)
+const destUnitLabel = computed(() =>
+  destSheetLine.value ? lineUnit(destSheetLine.value) : saleUnitLabel(''),
+)
+const destInitialDests = computed((): ShipDeliveryDraft[] =>
+  (destSheetLine.value?.delivery_allocations || []).map((a) => ({ ...a })),
+)
+const destCustomerDefaults = computed(() => ({
+  rcv_name: String(prefill.customerNm || '').trim(),
+  rcv_tel: '',
+}))
+
+function openDestSheet(idx: number) {
+  if (!lines.value[idx]) return
+  destEditIdx.value = idx
+}
+
+function closeDestSheet() {
+  destEditIdx.value = null
+}
+
+/** 수량 변경과 무관하게 사용자가 확정한 배송지만 반영한다(자동 축소·삭제 없음). */
+function onDestComplete(cleaned: ShipDeliveryDraft[]) {
+  const idx = destEditIdx.value
+  if (idx == null || !lines.value[idx]) return
+  lines.value[idx].delivery_allocations = cleaned
+  closeDestSheet()
+}
+
+const senderSheetOpen = ref(false)
+const farmAddress = computed(() => String(farm.value?.address || '').trim())
+
+function openSenderSheet() {
+  senderSheetOpen.value = true
+}
+
+function closeSenderSheet() {
+  senderSheetOpen.value = false
+}
+
+function onSenderSave(input: { name: string; tel: string; addr: string }) {
+  prefill.setSender(input)
+  senderSheetOpen.value = false
 }
 
 function goBackAfterSuccess() {
@@ -127,15 +248,31 @@ async function onConfirm() {
     errorMsg.value = findStockModeIssue(lines.value)
     if (errorMsg.value) return
   }
+  if (isOrderParcel.value) {
+    errorMsg.value = senderIssue.value || parcelIssue.value
+    if (errorMsg.value) return
+  }
   busy.value = true
   errorMsg.value = ''
   try {
+    const parcel = isOrderParcel.value
+    const firstAlloc = lines.value[0]?.delivery_allocations?.[0]
     const payload = buildShipConfirmRequest({
       shipMode: shipMode.value,
       salesDt: todayBizIso(),
       orderNo: prefill.orderNo,
       custmId: custmId.value.trim() || prefill.custmId,
       lines: lines.value,
+      dlvryTp: parcel ? prefill.dlvryTp : '',
+      shipFee: parcel ? parcelShipFee.value : 0,
+      rcvName: parcel ? firstAlloc?.rcv_name : '',
+      rcvTel: parcel ? firstAlloc?.rcv_tel : '',
+      rcvAddr: parcel ? firstAlloc?.rcv_addr : '',
+      dlvryMsg: parcel ? firstAlloc?.dlvry_msg : '',
+      sndName: parcel ? prefill.senderName : '',
+      sndTel: parcel ? prefill.senderTel : '',
+      sndAddr: parcel ? prefill.senderAddr : '',
+      includeDeliveryAllocations: parcel,
     })
     const res = await confirmShipment(farmCd.value, payload)
     prefill.rememberResult(res)
@@ -179,6 +316,31 @@ onMounted(() => {
 
       <p v-if="!lines.length && !done" class="err" role="alert">{{ MSG_NO_PREFILL }}</p>
 
+      <OdsCard v-if="isOrderParcel && !done" :title="LABEL_SENDER">
+        <div
+          class="sender-bar"
+          :class="senderConfigured ? 'sender-bar--ok' : 'sender-bar--warn'"
+          data-testid="ship-confirm-sender-bar"
+        >
+          <span class="sender-bar__txt" data-testid="ship-confirm-sender-summary">
+            {{ senderSummary || LABEL_SENDER_UNSET }}
+          </span>
+          <button
+            type="button"
+            class="sender-bar__act"
+            data-testid="ship-confirm-sender-setup"
+            :aria-label="LABEL_SENDER"
+            @click="openSenderSheet"
+          >
+            {{ senderConfigured ? LABEL_SENDER_EDIT : LABEL_SENDER_SETUP }}
+          </button>
+        </div>
+        <p v-if="untrackedHint" class="hint" role="status" data-testid="ship-confirm-untracked-hint">
+          {{ untrackedHint }}
+        </p>
+        <p class="meta">{{ LABEL_SHIP_FEE }} {{ formatOrderAmt(parcelShipFee) }}원</p>
+      </OdsCard>
+
       <OdsCard v-if="!hasOrder && !done" :title="LABEL_CUSTOMER">
         <OdsFormField :label="LABEL_CUSTOMER" optional>
           <OdsSelect v-model="custmId" variant="form">
@@ -219,6 +381,22 @@ onMounted(() => {
             @update:model-value="ln.unit_price = Number($event)"
           />
         </OdsFormField>
+        <div
+          v-if="isOrderParcel && !done"
+          class="line__dest"
+          :class="`line__dest--${lineDestTone(ln)}`"
+          data-testid="ship-confirm-delivery-status"
+        >
+          <span class="line__dest-status">{{ lineDestStatus(ln) }}</span>
+          <button
+            type="button"
+            class="line__dest-btn"
+            data-testid="ship-confirm-dest-open"
+            @click="openDestSheet(idx)"
+          >
+            {{ LABEL_VIEW_DEST }}
+          </button>
+        </div>
       </OdsCard>
 
       <OdsCard v-if="showModeToggle && !done" :title="LABEL_MODE">
@@ -271,6 +449,31 @@ onMounted(() => {
       </OdsButton>
     </div>
     <OdsBottomNav />
+
+    <ParcelDestinationSheet
+      :open="destEditIdx != null"
+      :product-summary="destProductSummary"
+      :order-qty="destOrderQty"
+      :unit-label="destUnitLabel"
+      :initial-dests="destInitialDests"
+      :customer-defaults="destCustomerDefaults"
+      :orderer-name="prefill.customerNm"
+      :show-ship-fee="true"
+      :test-id-prefix="TEST_PREFIX"
+      @close="closeDestSheet"
+      @complete="onDestComplete"
+    />
+
+    <ParcelSenderSheet
+      :open="senderSheetOpen"
+      :sender-name="prefill.senderName"
+      :sender-tel="prefill.senderTel"
+      :sender-addr="prefill.senderAddr"
+      :farm-address="farmAddress"
+      :test-id-prefix="TEST_PREFIX"
+      @close="closeSenderSheet"
+      @save="onSenderSave"
+    />
   </div>
 </template>
 
@@ -320,5 +523,75 @@ onMounted(() => {
   bottom: calc(56px + env(safe-area-inset-bottom));
   padding: var(--ods-space-12) var(--ods-space-16);
   background: var(--ods-color-bg-muted);
+}
+.sender-bar,
+.line__dest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  box-sizing: border-box;
+  min-height: 28px;
+  margin: var(--ods-space-8) 0 0;
+  padding: 0 var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  min-width: 0;
+  font: var(--ods-font-caption);
+  font-weight: 600;
+}
+.sender-bar {
+  background: var(--ods-color-bg-muted);
+  color: var(--ods-color-text-secondary);
+}
+.sender-bar--ok {
+  background: var(--ods-color-primary-subtle, #f0f7f4);
+  color: var(--ods-color-primary);
+}
+.sender-bar--warn {
+  background: var(--ods-color-caution-soft);
+  color: var(--ods-color-gray-900);
+}
+.sender-bar__txt,
+.line__dest-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sender-bar__act,
+.line__dest-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-primary);
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  min-height: 28px;
+  white-space: nowrap;
+}
+.sender-bar__act:focus-visible,
+.line__dest-btn:focus-visible {
+  outline: 2px solid var(--ods-color-primary);
+  outline-offset: 2px;
+}
+.line__dest--ok {
+  background: var(--ods-color-primary-subtle, #f0f7f4);
+}
+.line__dest--ok .line__dest-status {
+  color: var(--ods-color-primary);
+}
+.line__dest--warn {
+  background: var(--ods-color-caution-soft);
+}
+.line__dest--warn .line__dest-status {
+  color: var(--ods-color-caution);
+}
+.line__dest--danger {
+  background: var(--ods-color-danger-soft);
+}
+.line__dest--danger .line__dest-status {
+  color: var(--ods-color-danger);
 }
 </style>

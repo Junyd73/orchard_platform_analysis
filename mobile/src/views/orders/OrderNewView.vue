@@ -8,6 +8,7 @@ import { createCustomer, createOrder, fetchCustomers, fetchOrder, updateOrder } 
 import { ApiClientError } from '@/api/client'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import iconChevronRight from '@/assets/ods/scr004/icon-chevron-right.svg'
+import ParcelDestinationSheet from '@/components/sales/ParcelDestinationSheet.vue'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
@@ -21,13 +22,10 @@ import {
   CODE_PARENT_SIZE,
   CODE_PARENT_SPEC,
   DELIVERY_TP_VISIT,
-  LABEL_ADD_DEST,
   LABEL_ADD_LINE,
-  LABEL_ALLOC,
   LABEL_AMT,
   LABEL_BASIC_INFO,
   LABEL_CANCEL_EDIT,
-  LABEL_COLLAPSE_DEST,
   LABEL_COLLAPSE_LINE,
   LABEL_COLLAPSE_SHIP,
   LABEL_CUSTOMER,
@@ -41,10 +39,7 @@ import {
   LABEL_DELIVERY_TP,
   LABEL_DEST,
   LABEL_DEST_COUNT_SUFFIX,
-  LABEL_DEST_QTY,
-  LABEL_DLVRY_MSG,
   LABEL_EDIT_ORDER,
-  LABEL_EXPAND_DEST,
   LABEL_EXPAND_LINE,
   LABEL_EXPAND_SHIP,
   LABEL_GRADE,
@@ -54,7 +49,6 @@ import {
   LABEL_NEW_CUSTOMER_PLUS,
   LABEL_NEW_ORDER,
   LABEL_ORDER_DT,
-  LABEL_OVER,
   LABEL_PREPAY,
   LABEL_QTY,
   LABEL_REMOVE_LINE,
@@ -66,12 +60,12 @@ import {
   LABEL_SIZE,
   LABEL_TOTAL_LINES,
   LABEL_TOTAL_QTY,
-  LABEL_UNASSIGNED,
   LABEL_UNIT_PRICE,
   LABEL_VARIETY,
   LABEL_WEIGHT,
   MSG_CUSTOMER_REQUIRED,
   MSG_CUSTOMER_SAVE_FAIL,
+  MSG_PARCEL_DEST_NONE,
   MSG_SAVE_FAIL,
   formatOrderAmt,
   isOrderEditLocked,
@@ -93,16 +87,28 @@ import {
   destQtySum,
   emptyDest,
   emptyLine,
+  effectiveDests,
   findSaveIssue as findFormSaveIssue,
+  isBlankDestDraft,
   linesFromDetail,
   num,
   type EditDest,
   type EditLine,
 } from '@/views/orders/orderFormModel'
+import {
+  deliveryQtyTone,
+  emptyDeliveryDraft,
+  orderParcelStatusText,
+  type ShipDeliveryDraft,
+} from '@/views/sales/shipDeliveryModel'
 import { todayBizIso } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import type { CommonCodeItem } from '@/types/commonCode'
 import type { CustomerListItem, OrderCreatePayload } from '@/types/order'
+
+const LABEL_DEST_SETUP = '설정 ›'
+const LABEL_DEST_EDIT = '편집 ›'
+const LABEL_UNIT_BOX = '박스'
 
 const router = useRouter()
 const route = useRoute()
@@ -137,7 +143,8 @@ const rmk = ref('')
 const lines = ref<EditLine[]>([emptyLine()])
 const expandedProductIndex = ref<number | null>(0)
 const expandedShipIndex = ref<number | null>(null)
-const expandedDest = ref<{ line: number; dest: number } | null>(null)
+const destSheetLineIdx = ref<number | null>(null)
+const destSheetOpenFormIndex = ref<number | null>(null)
 const customers = ref<CustomerListItem[]>([])
 const varieties = ref<CommonCodeItem[]>([])
 const grades = ref<CommonCodeItem[]>([])
@@ -191,49 +198,99 @@ function shipSummaryText(line: EditLine): string {
     const d = line.dests[0]
     return joinDot([tpNm, d?.rcv_name || '', d?.rcv_addr || ''])
   }
+  const assigned = destQtySum(line)
+  if (assigned <= 1e-9) {
+    return joinDot([tpNm, MSG_PARCEL_DEST_NONE])
+  }
   return joinDot([
     tpNm,
-    `${LABEL_DEST} ${line.dests.length}${LABEL_DEST_COUNT_SUFFIX}`,
-    `${formatOrderAmt(destQtySum(line))}/${formatOrderAmt(num(line.qty))}`,
+    `${LABEL_DEST} ${effectiveDests(line).length}${LABEL_DEST_COUNT_SUFFIX}`,
+    `${formatOrderAmt(assigned)}/${formatOrderAmt(num(line.qty))}`,
   ])
 }
 
-function destSummarySub(dest: EditDest): string {
-  return joinDot([dest.rcv_tel, dest.rcv_addr])
+function parcelStatusText(line: EditLine): string {
+  return orderParcelStatusText(num(line.qty), destQtySum(line), LABEL_UNIT_BOX)
 }
 
-function destSummaryMain(dest: EditDest): string {
-  return joinDot([dest.rcv_name || LABEL_DEST, formatOrderAmt(num(dest.qty))])
+function parcelStatusTone(line: EditLine): 'ok' | 'warn' | 'danger' {
+  return deliveryQtyTone(num(line.qty), destQtySum(line))
 }
 
-function allocStatusText(line: EditLine): string {
-  const sum = destQtySum(line)
-  const qty = num(line.qty)
-  const remain = qty - sum
-  const head = `${LABEL_ALLOC} ${formatOrderAmt(sum)} / ${formatOrderAmt(qty)}`
-  if (remain > 0) return `${head} · ${LABEL_UNASSIGNED} ${formatOrderAmt(remain)}`
-  if (remain < 0) return `${head} · ${formatOrderAmt(-remain)} ${LABEL_OVER}`
-  return head
+function parcelDestBtnLabel(line: EditLine): string {
+  return destQtySum(line) <= 1e-9 ? LABEL_DEST_SETUP : LABEL_DEST_EDIT
 }
 
-function canAddDest(line: EditLine): boolean {
-  return (
-    !lockDestStructure.value &&
-    isParcelDelivery(line.delivery_tp_cd) &&
-    destQtySum(line) < num(line.qty)
-  )
+function editDestToDraft(dest: EditDest): ShipDeliveryDraft {
+  return emptyDeliveryDraft({
+    qty: Math.max(1, Math.floor(num(dest.qty))),
+    rcv_name: dest.rcv_name,
+    rcv_tel: dest.rcv_tel,
+    rcv_addr: dest.rcv_addr,
+    dlvry_msg: dest.dlvry_msg,
+    ship_fee: 0,
+  })
 }
 
-function isDestOpen(lineIdx: number, destIdx: number): boolean {
-  return expandedDest.value?.line === lineIdx && expandedDest.value.dest === destIdx
-}
-
-function toggleDest(lineIdx: number, destIdx: number) {
-  if (isDestOpen(lineIdx, destIdx)) {
-    expandedDest.value = null
-    return
+function draftToEditDest(d: ShipDeliveryDraft): EditDest {
+  return {
+    qty: String(Math.max(1, Math.floor(Number(d.qty) || 0))),
+    rcv_name: String(d.rcv_name || '').trim(),
+    rcv_tel: String(d.rcv_tel || '').trim(),
+    rcv_addr: String(d.rcv_addr || '').trim(),
+    dlvry_msg: String(d.dlvry_msg || '').trim(),
   }
-  expandedDest.value = { line: lineIdx, dest: destIdx }
+}
+
+function parcelInitialDests(line: EditLine): ShipDeliveryDraft[] {
+  return effectiveDests(line).map(editDestToDraft)
+}
+
+const destSheetLine = computed(() =>
+  destSheetLineIdx.value != null ? lines.value[destSheetLineIdx.value] ?? null : null,
+)
+
+const destSheetProductSummary = computed(() =>
+  destSheetLine.value ? lineSpecText(destSheetLine.value) : '',
+)
+
+const destSheetOrderQty = computed(() =>
+  destSheetLine.value ? Math.max(0, Math.floor(num(destSheetLine.value.qty))) : 0,
+)
+
+const destSheetInitialDests = computed(() =>
+  destSheetLine.value ? parcelInitialDests(destSheetLine.value) : [],
+)
+
+const destSheetCustomerDefaults = computed(() => {
+  const c = customers.value.find((x) => x.custm_id === custmId.value)
+  return {
+    rcv_name: c?.custm_nm || '',
+    rcv_tel: c?.mobile || '',
+  }
+})
+
+const destSheetOrdererName = computed(
+  () => String(destSheetCustomerDefaults.value.rcv_name || '').trim(),
+)
+
+function openParcelDestSheet(lineIdx: number, formIndex: number | null = null) {
+  destSheetOpenFormIndex.value = formIndex
+  destSheetLineIdx.value = lineIdx
+}
+
+function closeParcelDestSheet() {
+  destSheetLineIdx.value = null
+  destSheetOpenFormIndex.value = null
+}
+
+function onParcelDestComplete(drafts: ShipDeliveryDraft[]) {
+  const idx = destSheetLineIdx.value
+  if (idx == null) return
+  const line = lines.value[idx]
+  if (!line) return
+  line.dests = drafts.map(draftToEditDest)
+  closeParcelDestSheet()
 }
 
 function setLineQty(line: EditLine, raw: string) {
@@ -249,37 +306,14 @@ function setDeliveryTp(line: EditLine, tp: string) {
   const nowParcel = isParcelDelivery(tp)
   line.delivery_tp_cd = tp
   if (nowParcel && !wasParcel) {
-    const first = line.dests[0] || emptyDest()
-    first.qty = '1'
-    line.dests = [first]
+    line.dests = []
     return
   }
   if (!nowParcel) {
-    const first = line.dests[0] || emptyDest()
+    const first = line.dests.find((d) => !isBlankDestDraft(d)) || line.dests[0] || emptyDest()
     first.qty = line.qty
     line.dests = [first]
-    expandedDest.value = null
   }
-}
-
-function addDest(lineIdx: number) {
-  if (lockDestStructure.value) return
-  const line = lines.value[lineIdx]
-  if (!canAddDest(line)) return
-  line.dests.push(emptyDest())
-  expandedProductIndex.value = lineIdx
-  expandedShipIndex.value = lineIdx
-  expandedDest.value = { line: lineIdx, dest: line.dests.length - 1 }
-}
-
-function removeDest(lineIdx: number, destIdx: number) {
-  if (lockDestStructure.value) return
-  const line = lines.value[lineIdx]
-  line.dests.splice(destIdx, 1)
-  const cur = expandedDest.value
-  if (!cur || cur.line !== lineIdx) return
-  if (cur.dest === destIdx) expandedDest.value = null
-  else if (cur.dest > destIdx) expandedDest.value = { line: lineIdx, dest: cur.dest - 1 }
 }
 
 function visitDest(line: EditLine): EditDest {
@@ -290,7 +324,7 @@ function visitDest(line: EditLine): EditDest {
 function lineDeliveries(line: EditLine): OrderCreatePayload['lines'][number]['deliveries'] {
   const tp = line.delivery_tp_cd || DELIVERY_TP_VISIT
   if (isParcelDelivery(tp)) {
-    return line.dests.map((d) => ({
+    return effectiveDests(line).map((d) => ({
       delivery_tp_cd: tp,
       qty: num(d.qty),
       planned_dt: orderDt.value,
@@ -326,12 +360,10 @@ function toggleProduct(idx: number) {
   if (expandedProductIndex.value === idx) {
     expandedProductIndex.value = null
     if (expandedShipIndex.value === idx) expandedShipIndex.value = null
-    if (expandedDest.value?.line === idx) expandedDest.value = null
     return
   }
   expandedProductIndex.value = idx
   expandedShipIndex.value = null
-  expandedDest.value = null
 }
 
 function toggleShip(idx: number) {
@@ -373,10 +405,14 @@ function applyLineDefaults(line: EditLine) {
   if (!line.delivery_tp_cd && deliveries.value[0]) {
     line.delivery_tp_cd = deliveries.value[0].code_cd
   }
+  if (isParcelDelivery(line.delivery_tp_cd)) {
+    line.dests = line.dests.filter((d) => !isBlankDestDraft(d))
+    return
+  }
   if (!line.dests.length) {
     line.dests.push(emptyDest())
   }
-  if (!isParcelDelivery(line.delivery_tp_cd) && line.dests[0]) {
+  if (line.dests[0]) {
     line.dests[0].qty = line.qty
   }
 }
@@ -430,7 +466,6 @@ async function hydrateOrder() {
   lines.value.forEach(applyLineDefaults)
   expandedProductIndex.value = 0
   expandedShipIndex.value = null
-  expandedDest.value = null
 }
 
 function addLine() {
@@ -440,7 +475,6 @@ function addLine() {
   lines.value.push(next)
   expandedProductIndex.value = lines.value.length - 1
   expandedShipIndex.value = null
-  expandedDest.value = null
 }
 
 function removeLine(idx: number) {
@@ -449,7 +483,6 @@ function removeLine(idx: number) {
   lines.value.splice(idx, 1)
   expandedProductIndex.value = Math.min(idx, lines.value.length - 1)
   expandedShipIndex.value = null
-  expandedDest.value = null
 }
 
 function openCustomerModal() {
@@ -508,8 +541,9 @@ async function onSave() {
     errorMsg.value = issue.message
     expandedProductIndex.value = issue.lineIdx
     expandedShipIndex.value = issue.ship ? issue.lineIdx : expandedShipIndex.value
-    expandedDest.value =
-      issue.destIdx === null ? null : { line: issue.lineIdx, dest: issue.destIdx }
+    if (issue.destIdx !== null) {
+      openParcelDestSheet(issue.lineIdx, issue.destIdx)
+    }
     return
   }
   const payload = buildOrderPayload({
@@ -763,88 +797,21 @@ watch(
                   </OdsFormField>
                 </div>
                 <template v-if="isParcelDelivery(line.delivery_tp_cd)">
-                  <p class="alloc">{{ allocStatusText(line) }}</p>
                   <div
-                    v-for="(dest, dIdx) in line.dests"
-                    :key="dIdx"
-                    class="dest-card"
-                    :class="{ 'dest-card--open': isDestOpen(idx, dIdx) }"
+                    class="line__dest"
+                    :class="`line__dest--${parcelStatusTone(line)}`"
+                    data-testid="order-new-delivery-status"
                   >
+                    <span class="line__dest-status">{{ parcelStatusText(line) }}</span>
                     <button
-                      v-if="!isDestOpen(idx, dIdx)"
                       type="button"
-                      class="dest-summary"
-                      :aria-expanded="false"
-                      :aria-label="LABEL_EXPAND_DEST"
-                      @click="toggleDest(idx, dIdx)"
+                      class="line__dest-btn"
+                      data-testid="order-new-dest-open"
+                      @click="openParcelDestSheet(idx)"
                     >
-                      <span class="dest-summary__top">
-                        <span class="dest-summary__title">
-                          {{ LABEL_DEST }} {{ dIdx + 1 }}
-                        </span>
-                        <img :src="iconChevronRight" alt="" class="chev" />
-                      </span>
-                      <span class="dest-summary__main">{{ destSummaryMain(dest) }}</span>
-                      <span class="dest-summary__sub">{{ destSummarySub(dest) }}</span>
+                      {{ parcelDestBtnLabel(line) }}
                     </button>
-                    <template v-else>
-                      <div class="dest-head">
-                        <h4 class="dest-head__title">{{ LABEL_DEST }} {{ dIdx + 1 }}</h4>
-                        <div class="dest-head__actions">
-                          <button
-                            v-if="!lockDestStructure"
-                            type="button"
-                            class="line-head__del"
-                            @click="removeDest(idx, dIdx)"
-                          >
-                            {{ LABEL_REMOVE_LINE }}
-                          </button>
-                          <button
-                            type="button"
-                            class="line-head__chev"
-                            :aria-expanded="true"
-                            :aria-label="LABEL_COLLAPSE_DEST"
-                            @click="toggleDest(idx, dIdx)"
-                          >
-                            <img :src="iconChevronDown" alt="" class="chev" />
-                          </button>
-                        </div>
-                      </div>
-                      <div class="form-grid">
-                        <OdsFormField :label="LABEL_DEST_QTY" required>
-                          <OdsInput
-                            v-model="dest.qty"
-                            type="number"
-                            variant="form"
-                            bare
-                            :disabled="lockDestStructure"
-                          />
-                        </OdsFormField>
-                        <OdsFormField :label="LABEL_RCV_NAME" required>
-                          <OdsInput v-model="dest.rcv_name" variant="form" bare />
-                        </OdsFormField>
-                        <OdsFormField class="form-span-2" :label="LABEL_RCV_TEL" required>
-                          <OdsInput v-model="dest.rcv_tel" variant="form" bare />
-                        </OdsFormField>
-                        <OdsFormField class="form-span-2" :label="LABEL_RCV_ADDR" required>
-                          <OdsInput v-model="dest.rcv_addr" variant="form" bare />
-                        </OdsFormField>
-                        <OdsFormField class="form-span-2" :label="LABEL_DLVRY_MSG" optional>
-                          <OdsInput v-model="dest.dlvry_msg" variant="form" bare />
-                        </OdsFormField>
-                      </div>
-                    </template>
                   </div>
-                  <OdsButton
-                    v-if="!lockDestStructure"
-                    class="add-dest-btn"
-                    variant="secondary"
-                    type="button"
-                    :disabled="!canAddDest(line)"
-                    @click="addDest(idx)"
-                  >
-                    {{ LABEL_ADD_DEST }}
-                  </OdsButton>
                 </template>
                 <div v-else class="form-grid">
                   <OdsFormField :label="LABEL_RCV_NAME" optional>
@@ -899,6 +866,21 @@ watch(
       </div>
     </main>
     <OdsBottomNav />
+    <ParcelDestinationSheet
+      :open="destSheetLineIdx != null"
+      :product-summary="destSheetProductSummary"
+      :order-qty="destSheetOrderQty"
+      :unit-label="LABEL_UNIT_BOX"
+      :initial-dests="destSheetInitialDests"
+      :customer-defaults="destSheetCustomerDefaults"
+      :orderer-name="destSheetOrdererName"
+      :show-ship-fee="false"
+      :lock-structure="lockDestStructure"
+      :open-form-index="destSheetOpenFormIndex"
+      test-id-prefix="order-new"
+      @close="closeParcelDestSheet"
+      @complete="onParcelDestComplete"
+    />
     <div
       v-if="customerModalOpen"
       class="modal"
@@ -1161,75 +1143,60 @@ watch(
 .ship-body > .form-grid {
   margin-top: 0;
 }
-.alloc {
-  margin: 0;
-  font: var(--ods-font-card-section);
-  color: var(--ods-color-text);
-}
-.dest-card {
-  border: 1px solid var(--ods-color-border);
-  border-radius: var(--ods-radius-button);
-  padding: var(--ods-space-8);
-  background: var(--ods-color-white);
-}
-.dest-card--open {
-  background: var(--ods-color-gray-100);
-}
-.dest-summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-}
-.dest-summary__top {
+.line__dest {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-}
-.dest-summary__title,
-.dest-head__title {
+  box-sizing: border-box;
+  min-height: 28px;
   margin: 0;
-  font: var(--ods-font-card-section);
-  color: var(--ods-color-text);
+  padding: 0 var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  min-width: 0;
 }
-.dest-summary__main,
-.dest-summary__sub {
-  display: block;
+.line__dest--ok {
+  background: var(--ods-color-primary-subtle, #f0f7f4);
+}
+.line__dest--warn {
+  background: var(--ods-color-caution-soft);
+}
+.line__dest--danger {
+  background: var(--ods-color-danger-soft);
+}
+.line__dest-status {
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: var(--ods-font-card-meta);
-  color: var(--ods-color-text-secondary);
 }
-.dest-summary__main {
-  font: var(--ods-font-card-body);
-  color: var(--ods-color-text);
+.line__dest--ok .line__dest-status {
+  color: var(--ods-color-primary);
 }
-.dest-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ods-space-8);
-  margin: 0 0 var(--ods-space-8);
+.line__dest--warn .line__dest-status {
+  color: var(--ods-color-caution);
 }
-.dest-head__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--ods-space-4);
+.line__dest--danger .line__dest-status {
+  color: var(--ods-color-danger);
 }
-.content :deep(.add-dest-btn.ods-btn) {
-  min-height: var(--ods-button-height-in-card);
-  height: var(--ods-button-height-in-card);
-  font: var(--ods-font-body-2);
-  font-weight: 600;
+.line__dest-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ods-color-primary);
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  min-height: 26px;
+  white-space: nowrap;
+}
+.line__dest-btn:focus-visible {
+  outline: 2px solid var(--ods-color-primary);
+  outline-offset: 2px;
 }
 .content :deep(.add-line-btn.ods-btn) {
   min-height: var(--ods-button-height-in-card);

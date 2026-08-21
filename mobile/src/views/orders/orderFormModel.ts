@@ -6,8 +6,7 @@ import {
   MSG_LINE_REQUIRED,
   MSG_PARCEL_DEST_INCOMPLETE,
   MSG_PARCEL_DEST_QTY,
-  MSG_PARCEL_DEST_REQUIRED,
-  MSG_PARCEL_QTY_MISMATCH,
+  MSG_PARCEL_QTY_OVER,
   isParcelDelivery,
   parseWeightFromCodeNm,
 } from '@/views/orders/ordersConstants'
@@ -69,8 +68,22 @@ export function emptyLine(): EditLine {
   }
 }
 
+/** 완전 공백 draft — 배송지 없음으로 취급 (기본 qty 무시). */
+export function isBlankDestDraft(dest: EditDest): boolean {
+  return !(
+    dest.rcv_name.trim() ||
+    dest.rcv_tel.trim() ||
+    dest.rcv_addr.trim() ||
+    dest.dlvry_msg.trim()
+  )
+}
+
+export function effectiveDests(line: EditLine): EditDest[] {
+  return line.dests.filter((d) => !isBlankDestDraft(d))
+}
+
 export function destQtySum(line: EditLine): number {
-  return line.dests.reduce((sum, d) => sum + num(d.qty), 0)
+  return effectiveDests(line).reduce((sum, d) => sum + num(d.qty), 0)
 }
 
 export function findSaveIssue(
@@ -91,20 +104,24 @@ export function findSaveIssue(
       return { lineIdx: i, destIdx: null, ship: false, message: MSG_LINE_REQUIRED }
     }
     if (!isParcelDelivery(line.delivery_tp_cd)) continue
-    if (!line.dests.length) {
-      return { lineIdx: i, destIdx: null, ship: true, message: MSG_PARCEL_DEST_REQUIRED }
-    }
-    for (let j = 0; j < line.dests.length; j += 1) {
-      const dest = line.dests[j]
+    const dests = effectiveDests(line)
+    for (let j = 0; j < dests.length; j += 1) {
+      const dest = dests[j]
+      const origIdx = line.dests.indexOf(dest)
       if (num(dest.qty) <= 0) {
-        return { lineIdx: i, destIdx: j, ship: true, message: MSG_PARCEL_DEST_QTY }
+        return { lineIdx: i, destIdx: origIdx, ship: true, message: MSG_PARCEL_DEST_QTY }
       }
       if (!dest.rcv_name.trim() || !dest.rcv_tel.trim() || !dest.rcv_addr.trim()) {
-        return { lineIdx: i, destIdx: j, ship: true, message: MSG_PARCEL_DEST_INCOMPLETE }
+        return {
+          lineIdx: i,
+          destIdx: origIdx,
+          ship: true,
+          message: MSG_PARCEL_DEST_INCOMPLETE,
+        }
       }
     }
-    if (Math.abs(destQtySum(line) - num(line.qty)) > QTY_EPS) {
-      return { lineIdx: i, destIdx: null, ship: true, message: MSG_PARCEL_QTY_MISMATCH }
+    if (destQtySum(line) - num(line.qty) > QTY_EPS) {
+      return { lineIdx: i, destIdx: null, ship: true, message: MSG_PARCEL_QTY_OVER }
     }
   }
   return null

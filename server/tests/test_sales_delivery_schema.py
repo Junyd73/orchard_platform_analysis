@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Stage 6 보완 2C — t_sales_delivery.dlvry_group_no / ship_fee 멱등 ALTER."""
+"""t_sales_delivery.dlvry_group_no / ship_fee / order_dlvry_id 멱등 ALTER.
+
+Stage 6 보완 2C + Step3 §22(주문 배송지 연결).
+"""
 
 from __future__ import annotations
 
@@ -50,14 +53,23 @@ class SalesDeliverySchemaTest(unittest.TestCase):
         self.assertEqual(stats["reason"], "table_missing")
         self.assertEqual(stats["columns"], [])
 
-    def test_s2_add_both_columns(self) -> None:
+    def _columns(self) -> set[str]:
+        return {
+            str(r[1]).strip().lower()
+            for r in self.conn.execute("PRAGMA table_info(t_sales_delivery)")
+        }
+
+    def test_s2_add_all_columns(self) -> None:
         self._create_base_delivery()
         first = ensure_sales_delivery_schema(self.conn)
         self.assertTrue(first["ok"])
         self.assertIn("t_sales_delivery.dlvry_group_no", first["columns"])
         self.assertIn("t_sales_delivery.ship_fee", first["columns"])
+        self.assertIn("t_sales_delivery.order_dlvry_id", first["columns"])
+        self.assertIn("order_dlvry_id", self._columns())
 
-    def test_s3_add_one_missing_column(self) -> None:
+    def test_s3_add_missing_columns_only(self) -> None:
+        """이미 있는 dlvry_group_no는 건너뛰고 ship_fee·order_dlvry_id만 추가."""
         self.conn.executescript(
             """
             CREATE TABLE t_sales_delivery (
@@ -70,7 +82,27 @@ class SalesDeliverySchemaTest(unittest.TestCase):
         self.conn.commit()
         stats = ensure_sales_delivery_schema(self.conn)
         self.assertTrue(stats["ok"])
-        self.assertEqual(stats["columns"], ["t_sales_delivery.ship_fee"])
+        self.assertEqual(
+            stats["columns"],
+            ["t_sales_delivery.ship_fee", "t_sales_delivery.order_dlvry_id"],
+        )
+
+    def test_s3b_add_order_dlvry_id_only(self) -> None:
+        """2C까지 적용된 스키마 → Step3 컬럼 1개만 추가."""
+        self.conn.executescript(
+            """
+            CREATE TABLE t_sales_delivery (
+                dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                rcv_name TEXT, dlvry_qty REAL, reg_id TEXT,
+                dlvry_group_no TEXT, ship_fee REAL,
+                PRIMARY KEY (dlvry_no, farm_cd)
+            );
+            """
+        )
+        self.conn.commit()
+        stats = ensure_sales_delivery_schema(self.conn)
+        self.assertTrue(stats["ok"])
+        self.assertEqual(stats["columns"], ["t_sales_delivery.order_dlvry_id"])
 
     def test_s4_s5_idempotent_when_present(self) -> None:
         self._create_base_delivery()
@@ -82,11 +114,16 @@ class SalesDeliverySchemaTest(unittest.TestCase):
         self.assertTrue(third["ok"])
         self.assertEqual(third["columns"], [])
         row = self.conn.execute(
-            "SELECT rcv_name, dlvry_group_no, ship_fee FROM t_sales_delivery WHERE dlvry_no='X-D001'"
+            """
+            SELECT rcv_name, dlvry_group_no, ship_fee, order_dlvry_id
+            FROM t_sales_delivery WHERE dlvry_no='X-D001'
+            """
         ).fetchone()
+        # backfill 없음: 기존 행은 신규 컬럼 전부 NULL 유지
         self.assertEqual(row[0], "기존")
         self.assertIsNone(row[1])
         self.assertIsNone(row[2])
+        self.assertIsNone(row[3])
 
 
 if __name__ == "__main__":

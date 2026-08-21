@@ -231,6 +231,26 @@ class OrderApiService:
             raise BusinessRuleError(exc.message, error_code=exc.code) from exc
         return self.get_order(farm_cd, order_no)
 
+    def confirm_order(
+        self,
+        farm_cd: str,
+        order_no: str,
+        *,
+        user_id: str | None,
+    ) -> OrderDetail:
+        try:
+            with get_sqlite_write_connection(self._db_path) as conn:
+                OrderService(conn).confirm_order(
+                    farm_cd, order_no, user_id=user_id or "MOBILE"
+                )
+        except OrderNotFoundError as exc:
+            raise EntityNotFoundError(exc.message) from exc
+        except OrderValidationError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        except OrderSaveError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        return self.get_order(farm_cd, order_no)
+
     def list_allocations(self, farm_cd: str, order_no: str) -> AllocationSummaryOut:
         try:
             with get_sqlite_connection(self._db_path) as conn:

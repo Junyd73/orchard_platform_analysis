@@ -65,6 +65,8 @@ class OrderDeliveryOut(BaseModel):
     rcv_addr: str = ""
     dlvry_msg: str = ""
     delivery_tp_nm: str = ""
+    confirmed_shipped_qty: float = 0
+    remaining_qty: float = 0
 
 
 class OrderLineOut(BaseModel):
@@ -91,6 +93,7 @@ class OrderLineOut(BaseModel):
     reserved_unshipped_qty: float = 0
     confirmed_shipped_qty: float = 0
     remaining_order_qty: float = 0
+    untracked_delivery_shipped_qty: float = 0
     deliveries: list[OrderDeliveryOut]
 
 

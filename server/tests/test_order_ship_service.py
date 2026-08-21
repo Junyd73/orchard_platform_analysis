@@ -186,6 +186,42 @@ def _insert_stock(
 
 def _order(conn: sqlite3.Connection, qty: float = 10) -> str:
     svc = OrderService(conn)
+    order_no = svc.create_order(
+        FARM,
+        OrderSaveInput(
+            custm_id=CUST,
+            order_dt=None,
+            season_type_cd="SS010100",
+            pre_pay_amt=0,
+            lines=[
+                OrderLineInput(
+                    variety_cd=VARIETY,
+                    weight=WEIGHT,
+                    grade_cd=GRADE,
+                    size_cd=SIZE,
+                    qty=qty,
+                    unit_price=1000,
+                    harvest_year=YEAR,
+                    warehouse_cd=WH,
+                    item_cd=ITEM,
+                    deliveries=[
+                        OrderDeliveryInput(
+                            delivery_tp_cd="LO010100",
+                            qty=qty,
+                            planned_dt=today_ops_iso(),
+                        )
+                    ],
+                )
+            ],
+        ),
+        user_id="T",
+    )
+    svc.confirm_order(FARM, order_no, user_id="T")
+    return order_no
+
+
+def _order_reserved(conn: sqlite3.Connection, qty: float = 10) -> str:
+    svc = OrderService(conn)
     return svc.create_order(
         FARM,
         OrderSaveInput(
@@ -676,18 +712,42 @@ class OrderShipServiceTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.code, "SCHEMA_PRECONDITION")
 
-    def test_skip_st010200(self) -> None:
+    def test_reserved_ship_blocked(self) -> None:
+        from core.order_ship_constants import CODE_SHIP_ORDER_NOT_CONFIRMED
+
         _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)
-        order_no = _order(self.conn, 10)
+        order_no = _order_reserved(self.conn, 10)
         st = self.conn.execute(
             "SELECT status_cd FROM t_order_master WHERE order_no=?", (order_no,)
         ).fetchone()["status_cd"]
         self.assertEqual(st, ORDER_STATUS_RESERVED_CD)
-        out = _ship(
-            self.conn, mode=SHIP_MODE_DIRECT, qty=1,
-            order_no=order_no, det=f"{order_no}-01",
-        )
-        self.assertEqual(out["order_status_cd"], ORDER_STATUS_PREP_CD)
+        before = {
+            "sales": self.conn.execute("SELECT COUNT(*) FROM t_sales_master").fetchone()[0],
+            "detail": self.conn.execute("SELECT COUNT(*) FROM t_sales_detail").fetchone()[0],
+            "delivery": self.conn.execute("SELECT COUNT(*) FROM t_sales_delivery").fetchone()[0],
+            "log": self.conn.execute("SELECT COUNT(*) FROM t_stock_log").fetchone()[0],
+            "out": self.conn.execute("SELECT COALESCE(SUM(out_qty),0) FROM t_stock_master").fetchone()[0],
+            "rsv": self.conn.execute(
+                "SELECT COALESCE(SUM(reserved_qty),0) FROM t_stock_master"
+            ).fetchone()[0],
+        }
+        with self.assertRaises(ShipValidationError) as ctx:
+            _ship(
+                self.conn, mode=SHIP_MODE_DIRECT, qty=1,
+                order_no=order_no, det=f"{order_no}-01",
+            )
+        self.assertEqual(ctx.exception.code, CODE_SHIP_ORDER_NOT_CONFIRMED)
+        after = {
+            "sales": self.conn.execute("SELECT COUNT(*) FROM t_sales_master").fetchone()[0],
+            "detail": self.conn.execute("SELECT COUNT(*) FROM t_sales_detail").fetchone()[0],
+            "delivery": self.conn.execute("SELECT COUNT(*) FROM t_sales_delivery").fetchone()[0],
+            "log": self.conn.execute("SELECT COUNT(*) FROM t_stock_log").fetchone()[0],
+            "out": self.conn.execute("SELECT COALESCE(SUM(out_qty),0) FROM t_stock_master").fetchone()[0],
+            "rsv": self.conn.execute(
+                "SELECT COALESCE(SUM(reserved_qty),0) FROM t_stock_master"
+            ).fetchone()[0],
+        }
+        self.assertEqual(before, after)
 
     def test_direct_doraji_does_not_consume_plain_juice(self) -> None:
         from core.stock_constants import ITEM_JUICE_DORAJI, ITEM_JUICE_PLAIN

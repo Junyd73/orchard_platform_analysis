@@ -1,9 +1,11 @@
 import {
   MSG_PARCEL_DEST_INCOMPLETE,
+  MSG_PARCEL_DEST_NONE,
   MSG_PARCEL_DEST_QTY,
   MSG_PARCEL_DEST_REQUIRED,
   MSG_PARCEL_QTY_MISMATCH,
 } from '@/views/orders/ordersConstants'
+import { toApiDeliveryAllocation } from '@/views/sales/shipConfirmModel'
 import type { ShipDraftLine, ShipDeliveryDraft } from '@/views/sales/shipConfirmModel'
 
 export const MSG_SHIP_ALLOC_FEE_NEG = '배송비는 0 이상이어야 합니다.'
@@ -25,6 +27,7 @@ export function emptyDeliveryDraft(partial?: Partial<ShipDeliveryDraft>): ShipDe
     rcv_addr: '',
     dlvry_msg: '',
     ship_fee: 0,
+    order_dlvry_id: null,
     ...partial,
     draft_id: partial?.draft_id || newDeliveryDraftId(),
   }
@@ -58,6 +61,28 @@ export function deliveryStatusText(saleQty: number, assigned: number, unit = '�
   return '배송지 등록 완료'
 }
 
+/** 주문 택배 — 미배정(0)은 미등록, 그 외는 sales 동일 문구 */
+export function orderParcelStatusText(
+  orderQty: number,
+  assigned: number,
+  unit = '박스',
+): string {
+  if (Number(assigned) <= QTY_EPS) return MSG_PARCEL_DEST_NONE
+  return deliveryStatusText(orderQty, assigned, unit)
+}
+
+/** ok | warn | danger — 배송상태 시각 구분 */
+export function deliveryQtyTone(
+  orderQty: number,
+  assigned: number,
+): 'ok' | 'warn' | 'danger' {
+  const sale = Number(orderQty) || 0
+  const got = Number(assigned) || 0
+  if (Math.abs(got - sale) <= QTY_EPS) return 'ok'
+  if (got > sale) return 'danger'
+  return 'warn'
+}
+
 export function isDeliveryQtyMatched(line: ShipDraftLine): boolean {
   return Math.abs(allocQtySum(line) - Number(line.qty)) <= QTY_EPS
 }
@@ -82,12 +107,5 @@ export function findParcelDeliveryIssue(lines: ShipDraftLine[]): string {
 }
 
 export function toApiDeliveryAllocations(line: ShipDraftLine) {
-  return (line.delivery_allocations || []).map((a) => ({
-    qty: Number(a.qty),
-    rcv_name: String(a.rcv_name || '').trim(),
-    rcv_tel: String(a.rcv_tel || '').trim(),
-    rcv_addr: String(a.rcv_addr || '').trim(),
-    dlvry_msg: String(a.dlvry_msg || '').trim(),
-    ship_fee: Math.max(0, Math.round(Number(a.ship_fee) || 0)),
-  }))
+  return (line.delivery_allocations || []).map(toApiDeliveryAllocation)
 }

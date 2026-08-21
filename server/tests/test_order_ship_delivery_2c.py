@@ -174,7 +174,9 @@ def _alloc(
     addr: str = "서울시 테스트",
     fee: float = 0,
     msg: str = "",
+    order_dlvry_id: str = "",
 ) -> ShipDeliveryAllocIn:
+    """배송배분 1건. order_dlvry_id는 주문 배송지 연결(Step3)에서만 채운다."""
     return ShipDeliveryAllocIn(
         qty=qty,
         rcv_name=name,
@@ -182,6 +184,7 @@ def _alloc(
         rcv_addr=addr,
         dlvry_msg=msg,
         ship_fee=fee,
+        order_dlvry_id=order_dlvry_id,
     )
 
 
@@ -591,6 +594,7 @@ class ShipDelivery2CTest(unittest.TestCase):
             ),
             user_id="T",
         )
+        OrderService(self.conn).confirm_order(FARM, order_no, user_id="T")
         OrderAllocationService(self.conn).allocate(
             FARM,
             order_no,

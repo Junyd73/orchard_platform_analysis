@@ -100,6 +100,16 @@ def cancel_order(
     return service.cancel_order(farm_cd, order_no, user_id=user_id)
 
 
+@router.post("/{order_no}/confirm", response_model=OrderDetail)
+def confirm_order(
+    farm_cd: str,
+    order_no: str,
+    user_id: str | None = Depends(_user_header),
+    service: OrderApiService = Depends(get_order_api_service),
+) -> OrderDetail:
+    return service.confirm_order(farm_cd, order_no, user_id=user_id)
+
+
 @router.get("/{order_no}/allocations", response_model=AllocationSummaryOut)
 def list_allocations(
     farm_cd: str,
