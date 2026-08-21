@@ -794,6 +794,9 @@ onMounted(async () => {
                   <span class="dest-sheet__qty-lbl">{{ LABEL_SALE_QTY }}</span>
                   <strong class="dest-sheet__qty-val">{{ destSaleQty }}{{ destSaleUnit }}</strong>
                 </p>
+                <p class="dest-sheet__sum" data-testid="sales-preview-dest-summary">
+                  {{ destSheetSummary() }}
+                </p>
               </div>
             </div>
           </header>
@@ -973,9 +976,6 @@ onMounted(async () => {
               {{ LABEL_ADD_DEST }}
             </OdsButton>
 
-            <p class="dest-sheet__sum" data-testid="sales-preview-dest-summary">
-              {{ destSheetSummary() }}
-            </p>
             <p v-if="destSheetErr" class="dest-sheet__err" role="alert">{{ destSheetErr }}</p>
           </div>
 
@@ -1581,6 +1581,15 @@ onMounted(async () => {
   color: var(--ods-color-primary);
   font-variant-numeric: tabular-nums;
 }
+.dest-sheet__sum {
+  margin: 0;
+  padding-top: var(--ods-space-4);
+  border-top: 1px solid color-mix(in srgb, var(--ods-color-border) 70%, transparent);
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  color: var(--ods-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 .dest-sheet__x {
   border: none;
   background: transparent;
@@ -1692,11 +1701,6 @@ onMounted(async () => {
   text-align: right;
   font-variant-numeric: tabular-nums;
   padding-inline: var(--ods-space-4);
-}
-.dest-sheet__sum {
-  margin: 0;
-  font: var(--ods-font-footnote, 12px);
-  color: var(--ods-color-text-secondary);
 }
 .dest-sheet__err {
   margin: 0;
