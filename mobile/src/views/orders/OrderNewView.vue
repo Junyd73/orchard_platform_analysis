@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { createCustomer, createOrder, fetchCustomers, fetchOrder, updateOrder } from '@/api/orders'
+import { fetchWorkLogAccountCodes, type WorkLogAccountCodeOption } from '@/api/workLogs'
 import { ApiClientError } from '@/api/client'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import iconChevronRight from '@/assets/ods/scr004/icon-chevron-right.svg'
@@ -50,6 +51,7 @@ import {
   LABEL_NEW_ORDER,
   LABEL_ORDER_DT,
   LABEL_PREPAY,
+  LABEL_PREPAY_METHOD,
   LABEL_QTY,
   LABEL_REMOVE_LINE,
   LABEL_RCV_ADDR,
@@ -66,6 +68,7 @@ import {
   MSG_CUSTOMER_REQUIRED,
   MSG_CUSTOMER_SAVE_FAIL,
   MSG_PARCEL_DEST_NONE,
+  MSG_PREPAY_METHOD_REQUIRED,
   MSG_SAVE_FAIL,
   formatOrderAmt,
   isOrderEditLocked,
@@ -73,6 +76,8 @@ import {
   isPearVariety,
   isVarietyCode,
   PEAR_ITEM_CD,
+  PREPAY_METHOD_ACCT_LEVEL,
+  PREPAY_METHOD_ACCT_PREFIX,
   isWeightKgName,
   isWeightPackName,
   joinDot,
@@ -139,6 +144,10 @@ const errorMsg = ref('')
 const orderDt = ref(todayBizIso())
 const custmId = ref('')
 const prePay = ref('0')
+const prePayMethodCd = ref('')
+/** hydrate 시점의 저장된 결제수단. 레거시 NULL 보완 판정용. */
+const originalPrePayMethodCd = ref('')
+const payMethodOptions = ref<WorkLogAccountCodeOption[]>([])
 const rmk = ref('')
 const lines = ref<EditLine[]>([emptyLine()])
 const expandedProductIndex = ref<number | null>(0)
@@ -158,6 +167,25 @@ const weightPackCodes = computed(() => specs.value.filter((c) => isWeightPackNam
 const harvestYear = computed(() => Number(todayBizIso().slice(0, 4)))
 const totalQty = computed(() => lines.value.reduce((sum, line) => sum + num(line.qty), 0))
 const totalAmt = computed(() => lines.value.reduce((sum, line) => sum + lineAmt(line), 0))
+const showPrePayMethod = computed(() => num(prePay.value) > 0)
+/** 확정/부분출고 + 선입금>0 + 저장 method 없음 → 결제수단만 1회 보완 가능 */
+const legacyMissingPrePayMethod = computed(
+  () =>
+    isEdit.value &&
+    num(prePay.value) > 0 &&
+    !originalPrePayMethodCd.value &&
+    (statusCd.value === ORDER_STATUS_CONFIRMED || statusCd.value === ORDER_STATUS_PREP),
+)
+/** 결제수단 잠금: 헤더 잠금이어도 레거시 보완이면 예외로 열림 */
+const lockPrePayMethod = computed(
+  () => editLocked.value || (lockHeaderCore.value && !legacyMissingPrePayMethod.value),
+)
+
+watch(prePay, (raw) => {
+  if (num(raw) <= 0) {
+    prePayMethodCd.value = ''
+  }
+})
 
 const customerModalOpen = ref(false)
 const customerSaving = ref(false)
@@ -425,13 +453,18 @@ function setVariety(line: EditLine, varietyCd: string) {
 async function loadMasters() {
   errorMsg.value = ''
   try {
-    const [cust, pearKids, grade, spec, size, dlv] = await Promise.all([
+    const [cust, pearKids, grade, spec, size, dlv, payMethods] = await Promise.all([
       fetchCustomers(farmCd.value),
       fetchCommonCodes(farmCd.value, PEAR_ITEM_CD),
       fetchCommonCodes(farmCd.value, CODE_PARENT_GRADE),
       fetchCommonCodes(farmCd.value, CODE_PARENT_SPEC),
       fetchCommonCodes(farmCd.value, CODE_PARENT_SIZE),
       fetchCommonCodes(farmCd.value, CODE_PARENT_DELIVERY),
+      fetchWorkLogAccountCodes(
+        farmCd.value,
+        PREPAY_METHOD_ACCT_PREFIX,
+        PREPAY_METHOD_ACCT_LEVEL,
+      ),
     ])
     customers.value = cust
     // FR01 직계는 중분류(배/배즙/원물). 품종은 FR010100 하위 소분류만.
@@ -440,6 +473,7 @@ async function loadMasters() {
     specs.value = spec
     pearSizes.value = size
     deliveries.value = dlv
+    payMethodOptions.value = payMethods
     if (!isEdit.value) {
       lines.value.forEach(applyLineDefaults)
     }
@@ -459,6 +493,8 @@ async function hydrateOrder() {
   orderDt.value = detail.order_dt
   custmId.value = detail.custm_id
   prePay.value = String(detail.pre_pay_amt ?? 0)
+  originalPrePayMethodCd.value = String(detail.pre_pay_method_cd || '')
+  prePayMethodCd.value = originalPrePayMethodCd.value
   rmk.value = detail.rmk || ''
   lines.value = linesFromDetail(detail, (line) =>
     isPearVariety(line.variety_cd) ? weightKgCodes.value : weightPackCodes.value,
@@ -536,6 +572,10 @@ async function onSave() {
     errorMsg.value = MSG_CUSTOMER_REQUIRED
     return
   }
+  if (num(prePay.value) > 0 && !prePayMethodCd.value) {
+    errorMsg.value = MSG_PREPAY_METHOD_REQUIRED
+    return
+  }
   const issue = findSaveIssue()
   if (issue) {
     errorMsg.value = issue.message
@@ -550,6 +590,7 @@ async function onSave() {
     custmId: custmId.value,
     orderDt: orderDt.value,
     prePay: num(prePay.value),
+    prePayMethodCd: prePayMethodCd.value || null,
     rmk: rmk.value,
     harvestYear: harvestYear.value,
     lines: lines.value,
@@ -647,6 +688,24 @@ watch(
           </OdsFormField>
           <OdsFormField :label="LABEL_PREPAY" optional>
             <OdsInput v-model="prePay" type="number" variant="form" bare :disabled="lockHeaderCore" />
+          </OdsFormField>
+          <OdsFormField v-if="showPrePayMethod" :label="LABEL_PREPAY_METHOD" required>
+            <OdsSelect
+              v-model="prePayMethodCd"
+              variant="form"
+              required
+              data-testid="order-prepay-method"
+              :disabled="lockPrePayMethod"
+            >
+              <option value="">선택</option>
+              <option
+                v-for="opt in payMethodOptions"
+                :key="opt.acct_cd"
+                :value="opt.acct_cd"
+              >
+                {{ opt.acct_nm }}
+              </option>
+            </OdsSelect>
           </OdsFormField>
           <OdsFormField :label="LABEL_RMK" optional>
             <OdsInput v-model="rmk" variant="form" bare :disabled="lockRmk" />

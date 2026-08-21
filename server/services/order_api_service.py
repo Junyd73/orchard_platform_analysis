@@ -86,6 +86,7 @@ def _to_save_input(body: OrderCreateRequest) -> OrderSaveInput:
         order_dt=body.order_dt,
         season_type_cd=body.season_type_cd or "",
         pre_pay_amt=body.pre_pay_amt,
+        pre_pay_method_cd=body.pre_pay_method_cd,
         tot_ship_fee=body.tot_ship_fee,
         rmk=body.rmk or "",
         lines=[_to_line_input(line) for line in body.lines],

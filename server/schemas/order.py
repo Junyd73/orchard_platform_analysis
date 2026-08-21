@@ -44,6 +44,7 @@ class OrderCreateRequest(BaseModel):
     order_dt: str | None = None
     season_type_cd: str = ""
     pre_pay_amt: float = 0
+    pre_pay_method_cd: str | None = None
     tot_ship_fee: float = 0
     rmk: str = ""
     lines: list[OrderLineIn]
@@ -142,6 +143,7 @@ class OrderDetail(OrderListItem):
     tot_order_amt: float = 0
     tot_ship_fee: float = 0
     tot_pay_amt: float = 0
+    pre_pay_method_cd: str | None = None
     rmk: str = ""
     sales_no: str = ""
     lines: list[OrderLineOut]

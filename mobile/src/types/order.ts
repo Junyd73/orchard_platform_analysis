@@ -96,6 +96,7 @@ export type OrderDetail = OrderListItem & {
   tot_order_amt: number
   tot_ship_fee: number
   tot_pay_amt: number
+  pre_pay_method_cd?: string | null
   rmk: string
   sales_no: string
   lines: OrderLine[]
@@ -133,6 +134,7 @@ export type OrderCreatePayload = {
   order_dt?: string | null
   season_type_cd?: string
   pre_pay_amt?: number
+  pre_pay_method_cd?: string | null
   tot_ship_fee?: number
   rmk?: string
   lines: OrderLinePayload[]

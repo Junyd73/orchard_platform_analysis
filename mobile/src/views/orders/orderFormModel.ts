@@ -175,6 +175,7 @@ export function buildOrderPayload(
     custmId: string
     orderDt: string
     prePay: number
+    prePayMethodCd: string | null
     rmk: string
     harvestYear: number
     lines: EditLine[]
@@ -182,10 +183,12 @@ export function buildOrderPayload(
     lineDeliveries: (line: EditLine) => OrderCreatePayload['lines'][number]['deliveries']
   },
 ): OrderCreatePayload {
+  const prePay = input.prePay > 0 ? input.prePay : 0
   return {
     custm_id: input.custmId,
     order_dt: input.orderDt,
-    pre_pay_amt: input.prePay,
+    pre_pay_amt: prePay,
+    pre_pay_method_cd: prePay > 0 ? input.prePayMethodCd || null : null,
     rmk: input.rmk,
     lines: input.lines.map((l) => ({
       variety_cd: l.variety_cd,
