@@ -8,9 +8,9 @@ import { fetchOrders } from '@/api/orders'
 import { ApiClientError } from '@/api/client'
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
+import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
-import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsEmptyState from '@/components/ods/OdsEmptyState.vue'
 import OdsFab from '@/components/ods/OdsFab.vue'
 import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
@@ -23,6 +23,10 @@ import {
   CODE_PARENT_STATUS,
   LABEL_FAB_ORDER,
   LABEL_FAB_SALES,
+  LABEL_ORDER_LIST_COL_CUSTOMER,
+  LABEL_ORDER_LIST_COL_QTY,
+  LABEL_ORDER_LIST_COL_SHIP,
+  LABEL_ORDER_LIST_COL_STATUS,
   LABEL_PAGE_NEXT,
   LABEL_PAGE_PREV,
   LABEL_SEGMENT_ARIA,
@@ -47,6 +51,10 @@ import {
   TAB_SALES,
   TAB_STOCK,
   formatOrderAmt,
+  orderListSecondaryText,
+  orderListShipRemainText,
+  orderStatusLabelOf,
+  orderStatusToneOf,
 } from '@/views/orders/ordersConstants'
 import {
   defaultOrderLookupRange,
@@ -335,23 +343,32 @@ onMounted(() => {
       </template>
       <p v-else-if="isOrderTab && loadError" class="err" role="alert">{{ loadError }}</p>
       <OdsEmptyState v-else-if="showOrderEmpty" :title="emptyTitle" :description="emptyDesc" />
-      <ul v-else-if="showOrderList" class="list">
-        <li v-for="row in orders" :key="row.order_no">
-          <button type="button" class="card-btn" @click="openOrder(row.order_no)">
-            <OdsCard>
-              <div class="row-top">
-                <strong>{{ row.customer || row.custm_id }}</strong>
-                <span class="status">{{ row.status_nm || row.status_cd }}</span>
-              </div>
-              <p class="meta">{{ row.order_no }} · {{ row.order_dt }}</p>
-              <p class="meta">
-                수량 {{ formatOrderAmt(row.total_qty) }} ·
-                {{ formatOrderAmt(row.total_amt) }}원
-                <template v-if="row.pre_pay_amt">
-                  · 선입 {{ formatOrderAmt(row.pre_pay_amt) }}원
-                </template>
-              </p>
-            </OdsCard>
+      <ul v-else-if="showOrderList" class="order-list">
+        <li class="order-list__head" aria-hidden="true">
+          <span class="order-list__head-cust">{{ LABEL_ORDER_LIST_COL_CUSTOMER }}</span>
+          <span class="order-list__head-qty">{{ LABEL_ORDER_LIST_COL_QTY }}</span>
+          <span class="order-list__head-ship">{{ LABEL_ORDER_LIST_COL_SHIP }}</span>
+          <span class="order-list__head-status">{{ LABEL_ORDER_LIST_COL_STATUS }}</span>
+        </li>
+        <li v-for="row in orders" :key="row.order_no" class="order-list__item">
+          <button
+            type="button"
+            class="order-list__row"
+            :aria-label="`${row.customer || row.custm_id} ${row.order_no}`"
+            @click="openOrder(row.order_no)"
+          >
+            <div class="order-list__line1">
+              <span class="order-list__cust">{{ row.customer || row.custm_id }}</span>
+              <span class="order-list__qty">{{ formatOrderAmt(row.total_qty) }}</span>
+              <span class="order-list__ship">{{ orderListShipRemainText(row) }}</span>
+              <OdsBadge class="order-list__status" :tone="orderStatusToneOf(row.status_cd)">
+                {{ orderStatusLabelOf(row.status_cd) }}
+              </OdsBadge>
+            </div>
+            <div class="order-list__line2">
+              <span class="order-list__meta">{{ orderListSecondaryText(row) }}</span>
+              <span class="order-list__amt">{{ formatOrderAmt(row.total_amt) }}원</span>
+            </div>
           </button>
         </li>
       </ul>
@@ -432,37 +449,118 @@ onMounted(() => {
   border-bottom-color: var(--ods-color-primary);
   font-weight: 700;
 }
-.list {
+.order-list {
+  --order-col-qty: 2.75rem;
+  --order-col-ship: 3.5rem;
+  --order-col-status: 4.25rem;
   list-style: none;
-  margin: 0;
+  margin: 0 calc(var(--ods-space-16) * -1);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-12);
+  gap: 0;
+  background: var(--ods-color-white, #fff);
 }
-.card-btn {
-  display: block;
+.order-list__head,
+.order-list__line1 {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    var(--order-col-qty)
+    var(--order-col-ship)
+    var(--order-col-status);
+  align-items: center;
+  column-gap: var(--ods-space-6);
+  padding: 0 var(--ods-space-16);
+}
+.order-list__head {
+  min-height: 32px;
+  border-bottom: 1px solid var(--ods-color-border);
+  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  user-select: none;
+}
+.order-list__head-cust {
+  min-width: 0;
+  white-space: nowrap;
+}
+.order-list__head-qty,
+.order-list__head-ship {
+  text-align: right;
+  white-space: nowrap;
+}
+.order-list__head-status {
+  text-align: right;
+  white-space: nowrap;
+}
+.order-list__item {
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.order-list__item:last-child {
+  border-bottom: none;
+}
+.order-list__row {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
   width: 100%;
-  padding: 0;
+  min-height: 60px;
+  padding: var(--ods-space-8) 0;
   border: 0;
   background: transparent;
   text-align: left;
   color: inherit;
+  cursor: pointer;
 }
-.row-top {
+.order-list__row:active {
+  background: var(--ods-color-primary-subtle, #f0f7f4);
+}
+.order-list__line1 {
+  font: var(--ods-font-body-2);
+}
+.order-list__cust {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ods-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.order-list__qty,
+.order-list__ship {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-color-text);
+}
+.order-list__status {
+  justify-self: end;
+  white-space: nowrap;
+}
+.order-list__line2 {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  align-items: baseline;
-}
-.status {
-  font: var(--ods-font-form-help);
+  padding: 0 var(--ods-space-16);
+  font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
-.meta {
-  margin: var(--ods-space-8) 0 0;
-  font: var(--ods-font-form-help);
-  color: var(--ods-color-text-secondary);
+.order-list__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.order-list__amt {
+  flex-shrink: 0;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-color-text);
+  font-weight: 600;
 }
 .pager {
   display: flex;

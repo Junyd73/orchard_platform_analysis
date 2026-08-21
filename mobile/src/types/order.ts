@@ -10,6 +10,20 @@ export type OrderListItem = {
   total_qty: number
   total_amt: number
   pre_pay_amt: number
+  line_count?: number
+  rep_item_cd?: string
+  rep_variety_cd?: string
+  rep_variety_nm?: string
+  rep_grade_cd?: string
+  rep_grade_nm?: string
+  rep_size_cd?: string
+  rep_size_nm?: string
+  rep_weight?: number
+  delivery_tp_cd?: string
+  delivery_tp_nm?: string
+  delivery_tp_count?: number
+  confirmed_shipped_qty?: number
+  remaining_order_qty?: number
 }
 
 export type OrderListQuery = {
