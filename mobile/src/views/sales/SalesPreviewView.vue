@@ -89,6 +89,8 @@ const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
 const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요.'
+const MSG_DEST_QTY_OVER = '주문량을 초과할 수 없습니다.'
+const MSG_DEST_ADD_OVER = '주문량이 모두 지정되어 배송지를 추가할 수 없습니다.'
 const HINT_PARCEL_DONE = '배송지 지정 완료'
 
 const router = useRouter()
@@ -359,6 +361,49 @@ function destDraftFieldError(d: ShipDeliveryDraft): string {
   return ''
 }
 
+function destSaleQtyNum(): number {
+  if (destEditIdx.value == null) return 0
+  return Math.max(0, Math.floor(Number(lines.value[destEditIdx.value]?.qty || 0)))
+}
+
+function destAssignedSumExcept(di: number): number {
+  return destDrafts.value.reduce(
+    (s, d, i) => (i === di ? s : s + Math.max(0, Math.floor(Number(d.qty) || 0))),
+    0,
+  )
+}
+
+/** 현재 편집 행 기준 할당 가능 최대 수량 */
+function destMaxQtyForRow(di: number): number {
+  return Math.max(0, destSaleQtyNum() - destAssignedSumExcept(di))
+}
+
+function clearDestOverErr() {
+  if (
+    destSheetErr.value === MSG_DEST_QTY_OVER ||
+    destSheetErr.value === MSG_DEST_ADD_OVER
+  ) {
+    destSheetErr.value = ''
+  }
+}
+
+/** 수량 입력 — 주문량 초과분 강제 clamp + 안내 */
+function setDestQty(di: number, raw: string) {
+  const maxForRow = destMaxQtyForRow(di)
+  const wanted = Math.max(1, Math.floor(Number(String(raw).replace(/,/g, '')) || 1))
+  if (maxForRow < 1) {
+    destSheetErr.value = MSG_DEST_QTY_OVER
+    return
+  }
+  if (wanted > maxForRow) {
+    patchDestDraft(di, { qty: maxForRow })
+    destSheetErr.value = MSG_DEST_QTY_OVER
+    return
+  }
+  patchDestDraft(di, { qty: wanted })
+  clearDestOverErr()
+}
+
 /** 편집 폼 → 상단 요약. 유효하지 않으면 false */
 function collapseDestForm(): boolean {
   if (destFormIdx.value == null) return true
@@ -372,6 +417,10 @@ function collapseDestForm(): boolean {
     destSheetErr.value = err
     return false
   }
+  if (destAssignedSum() > destSaleQtyNum()) {
+    destSheetErr.value = MSG_DEST_QTY_OVER
+    return false
+  }
   destFormIdx.value = null
   destSheetErr.value = ''
   return true
@@ -379,18 +428,25 @@ function collapseDestForm(): boolean {
 
 function addDestDraft() {
   if (destFormIdx.value != null && !collapseDestForm()) return
+  const sale = destSaleQtyNum()
+  const got = destAssignedSum()
+  if (got >= sale) {
+    destSheetErr.value = MSG_DEST_ADD_OVER
+    return
+  }
   const defs = customerDefaults()
+  const remain = Math.max(1, sale - got)
   destDrafts.value = [
     ...destDrafts.value,
     emptyDeliveryDraft({
-      qty: 1,
+      qty: Math.min(1, remain),
       rcv_name: defs.rcv_name,
       rcv_tel: defs.rcv_tel,
       dlvry_msg: resolveCommonMemo(),
     }),
   ]
   destFormIdx.value = destDrafts.value.length - 1
-  destSheetErr.value = ''
+  clearDestOverErr()
 }
 
 function editDestDraft(di: number) {
@@ -1018,11 +1074,8 @@ onMounted(async () => {
                     variant="form"
                     bare
                     class="dest-form__qty"
-                    @update:model-value="
-                      patchDestDraft(destFormIdx, {
-                        qty: Math.max(1, Math.floor(Number($event) || 1)),
-                      })
-                    "
+                    data-testid="sales-preview-dest-qty"
+                    @update:model-value="setDestQty(destFormIdx, $event)"
                   />
                 </OdsFormField>
                 <OdsFormField :label="LABEL_DEST_FEE" required>
@@ -1076,7 +1129,14 @@ onMounted(async () => {
               {{ LABEL_ADD_DEST }}
             </OdsButton>
 
-            <p v-if="destSheetErr" class="dest-sheet__err" role="alert">{{ destSheetErr }}</p>
+            <p
+              v-if="destSheetErr"
+              class="dest-sheet__err"
+              role="alert"
+              data-testid="sales-preview-dest-err"
+            >
+              {{ destSheetErr }}
+            </p>
           </div>
 
           <footer class="dest-sheet__foot">

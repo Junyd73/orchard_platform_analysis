@@ -626,6 +626,53 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
+  it('주문량 초과 — 수량 clamp · 배송지 추가 차단', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ available_qty: 10 }), 5)
+    store.updateShipLine(0, { unit_price: 1000 })
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    const r = router()
+    await r.push('/orders/sales-preview')
+    await r.isReady()
+    const wrapper = mount(SalesPreviewView, {
+      attachTo: document.body,
+      ...mountOpts(r),
+    })
+    await flushPromises()
+    await wrapper.find('[data-testid="sales-preview-dest-open"]').trigger('click')
+    await flushPromises()
+    const sheet = document.querySelector('[data-testid="sales-preview-dest-sheet"]')!
+
+    ;(sheet.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement).click()
+    await flushPromises()
+    let row = sheet.querySelector('[data-testid="sales-preview-dest-row"]')!
+    let inputs = row.querySelectorAll('input')
+    await new DOMWrapper(inputs[0]).setValue('A')
+    await new DOMWrapper(inputs[1]).setValue('010')
+    await new DOMWrapper(sheet.querySelector('[data-testid="sales-preview-dest-qty"]')!).setValue(
+      '9',
+    )
+    await flushPromises()
+    expect(
+      (sheet.querySelector('[data-testid="sales-preview-dest-qty"]') as HTMLInputElement).value,
+    ).toBe('5')
+    expect(sheet.querySelector('[data-testid="sales-preview-dest-err"]')?.textContent || '').toContain(
+      '주문량을 초과',
+    )
+    await new DOMWrapper(inputs[4]).setValue('서울')
+    ;(sheet.querySelector('[data-testid="sales-preview-dest-save"]') as HTMLButtonElement).click()
+    await flushPromises()
+
+    ;(sheet.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(sheet.querySelector('[data-testid="sales-preview-dest-row"]')).toBeFalsy()
+    expect(sheet.querySelector('[data-testid="sales-preview-dest-err"]')?.textContent || '').toContain(
+      '모두 지정',
+    )
+    wrapper.unmount()
+  })
+
   it('P7 동일 판매규격 storage_dt 달라도 1 line(회귀)', () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock({ storage_dt: '2026-08-01', available_qty: 10 }), 4)
