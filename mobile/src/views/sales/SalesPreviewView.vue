@@ -67,8 +67,12 @@ const LABEL_COL_QTY = '수량'
 const LABEL_COL_PRICE = '단가'
 const LABEL_DEST_SHEET = '배송지 배분'
 const LABEL_ADD_DEST = '+ 배송지 추가'
+const LABEL_DEST_SAVE = '담기'
 const LABEL_DEST_DONE = '완료'
 const LABEL_SALE_QTY = '판매수량'
+const LABEL_DEST_QTY = '수량'
+const LABEL_DEST_FEE = '배송비'
+const LABEL_DEST_MEMO = '배송메모'
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
 const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
@@ -91,6 +95,8 @@ const deliveryOptions = ref<{ value: string; label: string }[]>([
 ])
 
 const destEditIdx = ref<number | null>(null)
+/** sheet 내 편집 중인 배송지 index — null이면 전부 요약 1줄 */
+const destFormIdx = ref<number | null>(null)
 const destDrafts = ref<ShipDeliveryDraft[]>([])
 const destSheetErr = ref('')
 
@@ -253,6 +259,7 @@ function openDestSheet(idx: number) {
   const ln = lines.value[idx]
   if (!ln) return
   destEditIdx.value = idx
+  destFormIdx.value = null
   destSheetErr.value = ''
   const existing = ln.delivery_allocations || []
   destDrafts.value = existing.length ? existing.map((a) => ({ ...a })) : []
@@ -260,6 +267,7 @@ function openDestSheet(idx: number) {
 
 function closeDestSheet() {
   destEditIdx.value = null
+  destFormIdx.value = null
   destDrafts.value = []
   destSheetErr.value = ''
 }
@@ -272,7 +280,44 @@ function customerDefaults() {
   }
 }
 
+function formatDestSummaryLine(d: ShipDeliveryDraft): string {
+  const unit = destSaleUnit.value
+  const name = String(d.rcv_name || '').trim() || '수령인 미입력'
+  const tel = String(d.rcv_tel || '').trim()
+  const qty = `${Math.max(0, Math.floor(Number(d.qty) || 0))}${unit}`
+  const fee = `${formatAmt(Number(d.ship_fee))}원`
+  return [name, tel, qty, fee].filter(Boolean).join(' · ')
+}
+
+function destDraftFieldError(d: ShipDeliveryDraft): string {
+  if (!(Number(d.qty) >= 1)) return '배송수량은 1 이상이어야 합니다.'
+  if (Number(d.ship_fee) < 0) return MSG_SHIP_FEE_NEG
+  if (!String(d.rcv_name).trim() || !String(d.rcv_tel).trim() || !String(d.rcv_addr).trim()) {
+    return MSG_DEST_INCOMPLETE
+  }
+  return ''
+}
+
+/** 편집 폼 → 상단 요약 1줄. 유효하지 않으면 false */
+function collapseDestForm(): boolean {
+  if (destFormIdx.value == null) return true
+  const d = destDrafts.value[destFormIdx.value]
+  if (!d) {
+    destFormIdx.value = null
+    return true
+  }
+  const err = destDraftFieldError(d)
+  if (err) {
+    destSheetErr.value = err
+    return false
+  }
+  destFormIdx.value = null
+  destSheetErr.value = ''
+  return true
+}
+
 function addDestDraft() {
+  if (destFormIdx.value != null && !collapseDestForm()) return
   const defs = customerDefaults()
   destDrafts.value = [
     ...destDrafts.value,
@@ -282,10 +327,21 @@ function addDestDraft() {
       rcv_tel: defs.rcv_tel,
     }),
   ]
+  destFormIdx.value = destDrafts.value.length - 1
+  destSheetErr.value = ''
+}
+
+function editDestDraft(di: number) {
+  if (destFormIdx.value != null && destFormIdx.value !== di && !collapseDestForm()) return
+  destFormIdx.value = di
+  destSheetErr.value = ''
 }
 
 function removeDestDraft(di: number) {
   destDrafts.value = destDrafts.value.filter((_, i) => i !== di)
+  if (destFormIdx.value == null) return
+  if (destFormIdx.value === di) destFormIdx.value = null
+  else if (destFormIdx.value > di) destFormIdx.value -= 1
 }
 
 function patchDestDraft(di: number, patch: Partial<ShipDeliveryDraft>) {
@@ -310,17 +366,11 @@ function destSheetSummary() {
 
 function commitDestSheet() {
   if (destEditIdx.value == null) return
+  if (destFormIdx.value != null && !collapseDestForm()) return
   for (const d of destDrafts.value) {
-    if (!(Number(d.qty) >= 1)) {
-      destSheetErr.value = '배송수량은 1 이상이어야 합니다.'
-      return
-    }
-    if (Number(d.ship_fee) < 0) {
-      destSheetErr.value = MSG_SHIP_FEE_NEG
-      return
-    }
-    if (!String(d.rcv_name).trim() || !String(d.rcv_tel).trim() || !String(d.rcv_addr).trim()) {
-      destSheetErr.value = MSG_DEST_INCOMPLETE
+    const err = destDraftFieldError(d)
+    if (err) {
+      destSheetErr.value = err
       return
     }
   }
@@ -733,80 +783,160 @@ onMounted(async () => {
           </header>
 
           <div class="dest-sheet__body">
+            <ul v-if="destDrafts.length" class="dest-summary-list" aria-label="배송지 목록">
+              <li
+                v-for="(d, di) in destDrafts"
+                v-show="di !== destFormIdx"
+                :key="d.draft_id"
+                class="dest-summary"
+                data-testid="sales-preview-dest-summary-row"
+              >
+                <span class="dest-summary__text">{{ formatDestSummaryLine(d) }}</span>
+                <div class="dest-summary__actions">
+                  <button
+                    type="button"
+                    class="line__icon-btn"
+                    data-testid="sales-preview-dest-edit"
+                    :aria-label="`배송지 ${di + 1} 수정`"
+                    title="수정"
+                    @click="editDestDraft(di)"
+                  >
+                    <svg class="line__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path
+                        d="M12.2 3.6l4.2 4.2"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                      />
+                      <path
+                        d="M4 16l.7-3.6L13.2 4l2.8 2.8L7.6 15.3 4 16z"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="line__icon-btn line__icon-btn--danger"
+                    data-testid="sales-preview-dest-remove"
+                    :aria-label="`배송지 ${di + 1} 삭제`"
+                    title="삭제"
+                    @click="removeDestDraft(di)"
+                  >
+                    <svg class="line__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path
+                        d="M5.2 6.2h9.6"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                      />
+                      <path
+                        d="M8 4.2h4l.8 2H7.2L8 4.2z"
+                        stroke="currentColor"
+                        stroke-width="1.4"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M7.5 8.2v6M10 8.2v6M12.5 8.2v6"
+                        stroke="currentColor"
+                        stroke-width="1.4"
+                        stroke-linecap="round"
+                      />
+                      <path
+                        d="M6.2 6.2l.6 10.2a1 1 0 001 .8h4.4a1 1 0 001-.8l.6-10.2"
+                        stroke="currentColor"
+                        stroke-width="1.4"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </li>
+            </ul>
+
             <div
-              v-for="(d, di) in destDrafts"
-              :key="d.draft_id"
-              class="dest-card"
+              v-if="destFormIdx != null && destDrafts[destFormIdx]"
+              class="dest-form"
               data-testid="sales-preview-dest-row"
             >
-              <p class="dest-card__lbl">배송지 {{ di + 1 }}</p>
-              <OdsFormField label="수량" required>
-                <OdsInput
-                  :model-value="String(d.qty)"
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputmode="numeric"
-                  variant="form"
-                  bare
-                  @update:model-value="patchDestDraft(di, { qty: Math.max(1, Math.floor(Number($event) || 1)) })"
-                />
-              </OdsFormField>
-              <OdsFormField :label="LABEL_RCV_NAME" required>
-                <OdsInput
-                  :model-value="d.rcv_name"
-                  variant="form"
-                  bare
-                  @update:model-value="patchDestDraft(di, { rcv_name: $event })"
-                />
-              </OdsFormField>
-              <OdsFormField :label="LABEL_RCV_TEL" required>
-                <OdsInput
-                  :model-value="d.rcv_tel"
-                  variant="form"
-                  bare
-                  @update:model-value="patchDestDraft(di, { rcv_tel: $event })"
-                />
-              </OdsFormField>
+              <div class="dest-form__row dest-form__row--top">
+                <OdsFormField :label="LABEL_RCV_NAME" required>
+                  <OdsInput
+                    :model-value="destDrafts[destFormIdx].rcv_name"
+                    variant="form"
+                    bare
+                    @update:model-value="patchDestDraft(destFormIdx, { rcv_name: $event })"
+                  />
+                </OdsFormField>
+                <OdsFormField :label="LABEL_RCV_TEL" required>
+                  <OdsInput
+                    :model-value="destDrafts[destFormIdx].rcv_tel"
+                    variant="form"
+                    bare
+                    @update:model-value="patchDestDraft(destFormIdx, { rcv_tel: $event })"
+                  />
+                </OdsFormField>
+                <OdsFormField :label="LABEL_DEST_QTY" required>
+                  <OdsInput
+                    :model-value="String(destDrafts[destFormIdx].qty)"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    variant="form"
+                    bare
+                    class="dest-form__qty"
+                    @update:model-value="
+                      patchDestDraft(destFormIdx, {
+                        qty: Math.max(1, Math.floor(Number($event) || 1)),
+                      })
+                    "
+                  />
+                </OdsFormField>
+                <OdsFormField :label="LABEL_DEST_FEE" required>
+                  <OdsInput
+                    :model-value="formatAmt(Number(destDrafts[destFormIdx].ship_fee))"
+                    type="text"
+                    inputmode="numeric"
+                    variant="form"
+                    bare
+                    class="amt-input dest-form__fee"
+                    data-testid="sales-preview-dest-fee"
+                    @update:model-value="
+                      patchDestDraft(destFormIdx, { ship_fee: normalizeShipFee($event) })
+                    "
+                  />
+                </OdsFormField>
+              </div>
               <OdsFormField :label="LABEL_RCV_ADDR" required>
                 <OdsInput
-                  :model-value="d.rcv_addr"
+                  :model-value="destDrafts[destFormIdx].rcv_addr"
                   variant="form"
                   bare
-                  @update:model-value="patchDestDraft(di, { rcv_addr: $event })"
+                  @update:model-value="patchDestDraft(destFormIdx, { rcv_addr: $event })"
                 />
               </OdsFormField>
-              <OdsFormField label="배송메모" optional>
+              <OdsFormField :label="LABEL_DEST_MEMO" optional>
                 <OdsInput
-                  :model-value="d.dlvry_msg"
+                  :model-value="destDrafts[destFormIdx].dlvry_msg"
                   variant="form"
                   bare
-                  @update:model-value="patchDestDraft(di, { dlvry_msg: $event })"
+                  @update:model-value="patchDestDraft(destFormIdx, { dlvry_msg: $event })"
                 />
               </OdsFormField>
-              <OdsFormField label="배송비" required>
-                <OdsInput
-                  :model-value="formatAmt(Number(d.ship_fee))"
-                  type="text"
-                  inputmode="numeric"
-                  variant="form"
-                  bare
-                  class="amt-input"
-                  data-testid="sales-preview-dest-fee"
-                  @update:model-value="patchDestDraft(di, { ship_fee: normalizeShipFee($event) })"
-                />
-              </OdsFormField>
-              <button
+              <OdsButton
                 type="button"
-                class="dest-card__del"
-                data-testid="sales-preview-dest-remove"
-                @click="removeDestDraft(di)"
+                variant="secondary"
+                data-testid="sales-preview-dest-save"
+                @click="collapseDestForm"
               >
-                삭제
-              </button>
+                {{ LABEL_DEST_SAVE }}
+              </OdsButton>
             </div>
 
             <OdsButton
+              v-if="destFormIdx == null"
               type="button"
               variant="secondary"
               data-testid="sales-preview-dest-add"
@@ -1395,26 +1525,78 @@ onMounted(async () => {
   gap: var(--ods-space-12);
   min-width: 0;
 }
-.dest-card {
+.dest-summary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.dest-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ods-space-8);
+  min-height: var(--preview-icon-touch, 40px);
+  padding: var(--ods-space-4) 0;
   border-bottom: 1px solid var(--ods-color-border);
-  padding-bottom: var(--ods-space-12);
+  min-width: 0;
+}
+.dest-summary__text {
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dest-summary__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+  flex-shrink: 0;
+}
+.dest-form {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-8);
   min-width: 0;
+  padding-bottom: var(--ods-space-4);
+  border-bottom: 1px solid var(--ods-color-border);
 }
-.dest-card__lbl {
-  margin: 0;
-  font: var(--ods-font-body-2);
+.dest-form__row--top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) 52px 72px;
+  gap: var(--ods-space-8);
+  align-items: start;
+  min-width: 0;
+}
+.dest-form :deep(.ods-form-field__label) {
+  font: var(--ods-font-caption);
   font-weight: 700;
 }
-.dest-card__del {
-  align-self: flex-end;
-  border: none;
-  background: transparent;
-  color: var(--ods-color-text-secondary);
-  cursor: pointer;
-  font: var(--ods-font-footnote, 12px);
+.dest-form :deep(input.ods-input) {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 var(--ods-space-8);
+  box-sizing: border-box;
+}
+.dest-form__qty :deep(input.ods-input),
+.dest-form :deep(input.dest-form__qty.ods-input),
+.dest-form :deep(.dest-form__qty.ods-input) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-inline: var(--ods-space-4);
+}
+.dest-form__fee :deep(input.ods-input),
+.dest-form :deep(input.dest-form__fee.ods-input),
+.dest-form :deep(.dest-form__fee.ods-input) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-inline: var(--ods-space-4);
 }
 .dest-sheet__sum {
   margin: 0;
@@ -1429,6 +1611,12 @@ onMounted(async () => {
 .dest-sheet__foot {
   padding: var(--ods-space-12) var(--ods-space-16) calc(var(--ods-space-12) + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--ods-color-border);
+}
+
+@media (max-width: 360px) {
+  .dest-form__row--top {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 </style>
