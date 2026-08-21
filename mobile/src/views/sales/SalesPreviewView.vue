@@ -359,16 +359,25 @@ function destAssignedSum() {
   return destDrafts.value.reduce((s, d) => s + Number(d.qty || 0), 0)
 }
 
-function destSheetSummary() {
+function destSheetAssignedLabel(): string {
+  const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
+  if (!ln) return ''
+  const sale = Number(ln.qty)
+  const got = destAssignedSum()
+  const unit = lineUnit(ln)
+  return `지정 ${got} / ${sale}${unit}`
+}
+
+function destSheetRemainLabel(): string {
   const ln = destEditIdx.value != null ? lines.value[destEditIdx.value] : null
   if (!ln) return ''
   const sale = Number(ln.qty)
   const got = destAssignedSum()
   const remain = sale - got
   const unit = lineUnit(ln)
-  if (remain > 0) return `지정 ${got} / ${sale}${unit} · 미지정 ${remain}${unit}`
-  if (remain < 0) return `지정 ${got} / ${sale}${unit} · ${-remain}초과`
-  return `지정 ${got} / ${sale}${unit}`
+  if (remain > 0) return `미지정 ${remain}${unit}`
+  if (remain < 0) return `${-remain}${unit} 초과`
+  return '지정 완료'
 }
 
 function commitDestSheet() {
@@ -794,9 +803,10 @@ onMounted(async () => {
                   <span class="dest-sheet__qty-lbl">{{ LABEL_SALE_QTY }}</span>
                   <strong class="dest-sheet__qty-val">{{ destSaleQty }}{{ destSaleUnit }}</strong>
                 </p>
-                <p class="dest-sheet__sum" data-testid="sales-preview-dest-summary">
-                  {{ destSheetSummary() }}
-                </p>
+                <div class="dest-sheet__sum" data-testid="sales-preview-dest-summary">
+                  <p class="dest-sheet__sum-line">{{ destSheetAssignedLabel() }}</p>
+                  <p class="dest-sheet__sum-line">{{ destSheetRemainLabel() }}</p>
+                </div>
               </div>
             </div>
           </header>
@@ -1585,6 +1595,12 @@ onMounted(async () => {
   margin: 0;
   padding-top: var(--ods-space-4);
   border-top: 1px solid color-mix(in srgb, var(--ods-color-border) 70%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dest-sheet__sum-line {
+  margin: 0;
   font: var(--ods-font-caption);
   font-weight: 600;
   color: var(--ods-color-text-secondary);
