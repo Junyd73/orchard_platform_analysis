@@ -587,6 +587,38 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
+  it('공통 배송메모 — 주문자 선택 시 신규 배송지에 반영', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ available_qty: 10 }), 2)
+    store.updateShipLine(0, { unit_price: 1000 })
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    const r = router()
+    await r.push('/orders/sales-preview')
+    await r.isReady()
+    const wrapper = mount(SalesPreviewView, {
+      attachTo: document.body,
+      ...mountOpts(r),
+    })
+    await flushPromises()
+    await wrapper.find('[data-testid="sales-preview-dest-open"]').trigger('click')
+    await flushPromises()
+    const sheet = document.querySelector('[data-testid="sales-preview-dest-sheet"]')!
+    expect(sheet.querySelector('[data-testid="sales-preview-dest-common-memo"]')).toBeTruthy()
+    const mode = sheet.querySelector(
+      '[data-testid="sales-preview-dest-common-mode"]',
+    ) as HTMLSelectElement
+    mode.value = 'orderer'
+    mode.dispatchEvent(new Event('change'))
+    await flushPromises()
+    ;(sheet.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement).click()
+    await flushPromises()
+    const row = sheet.querySelector('[data-testid="sales-preview-dest-row"]')!
+    const inputs = row.querySelectorAll('input')
+    expect((inputs[5] as HTMLInputElement).value).toBe('홍길동')
+    wrapper.unmount()
+  })
+
   it('P7 동일 판매규격 storage_dt 달라도 1 line(회귀)', () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock({ storage_dt: '2026-08-01', available_qty: 10 }), 4)

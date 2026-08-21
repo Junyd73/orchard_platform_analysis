@@ -74,6 +74,16 @@ const LABEL_DEST_MEMO = '배송메모'
 const LABEL_DEST_PRODUCT = '상품'
 const LABEL_DEST_ORDER_QTY = '주문량'
 const LABEL_DEST_UNASSIGNED = '미지정'
+const LABEL_DEST_COMMON_MEMO = '공통 배송메모'
+const LABEL_DEST_MEMO_APPLY = '전체 적용'
+const DEST_MEMO_MODE_PRODUCT = 'product'
+const DEST_MEMO_MODE_ORDERER = 'orderer'
+const DEST_MEMO_MODE_CUSTOM = 'custom'
+const DEST_COMMON_MEMO_OPTIONS = [
+  { value: DEST_MEMO_MODE_PRODUCT, label: '상품정보' },
+  { value: DEST_MEMO_MODE_ORDERER, label: '주문자' },
+  { value: DEST_MEMO_MODE_CUSTOM, label: '직접입력' },
+] as const
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
 const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
@@ -100,6 +110,9 @@ const destEditIdx = ref<number | null>(null)
 const destFormIdx = ref<number | null>(null)
 const destDrafts = ref<ShipDeliveryDraft[]>([])
 const destSheetErr = ref('')
+/** 공통 배송메모 — 상품정보 | 주문자 | 직접입력 */
+const destCommonMemoMode = ref<string>(DEST_MEMO_MODE_PRODUCT)
+const destCommonMemoCustom = ref('')
 
 const lines = computed(() => prefill.shipLines)
 const isParcel = computed(() => isParcelDelivery(prefill.dlvryTp))
@@ -262,6 +275,8 @@ function openDestSheet(idx: number) {
   destEditIdx.value = idx
   destFormIdx.value = null
   destSheetErr.value = ''
+  destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
+  destCommonMemoCustom.value = ''
   const existing = ln.delivery_allocations || []
   destDrafts.value = existing.length ? existing.map((a) => ({ ...a })) : []
 }
@@ -271,6 +286,8 @@ function closeDestSheet() {
   destFormIdx.value = null
   destDrafts.value = []
   destSheetErr.value = ''
+  destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
+  destCommonMemoCustom.value = ''
 }
 
 function customerDefaults() {
@@ -279,6 +296,34 @@ function customerDefaults() {
     rcv_name: c?.custm_nm || '',
     rcv_tel: c?.mobile || '',
   }
+}
+
+function resolveCommonMemo(): string {
+  if (destCommonMemoMode.value === DEST_MEMO_MODE_ORDERER) {
+    return String(prefill.customerNm || customerDefaults().rcv_name || '').trim()
+  }
+  if (destCommonMemoMode.value === DEST_MEMO_MODE_CUSTOM) {
+    return String(destCommonMemoCustom.value || '').trim()
+  }
+  return destSheetProductSpec()
+}
+
+function applyCommonMemoToAll() {
+  const msg = resolveCommonMemo()
+  destDrafts.value = destDrafts.value.map((d) => ({ ...d, dlvry_msg: msg }))
+}
+
+function setCommonMemoMode(mode: string) {
+  destCommonMemoMode.value = mode
+  if (mode !== DEST_MEMO_MODE_CUSTOM) {
+    destCommonMemoCustom.value = ''
+  }
+  applyCommonMemoToAll()
+}
+
+function setCommonMemoCustom(raw: string) {
+  destCommonMemoCustom.value = raw
+  applyCommonMemoToAll()
 }
 
 function formatDestSummaryPrimary(d: ShipDeliveryDraft): string {
@@ -333,6 +378,7 @@ function addDestDraft() {
       qty: 1,
       rcv_name: defs.rcv_name,
       rcv_tel: defs.rcv_tel,
+      dlvry_msg: resolveCommonMemo(),
     }),
   ]
   destFormIdx.value = destDrafts.value.length - 1
@@ -807,6 +853,55 @@ onMounted(async () => {
           </header>
 
           <div class="dest-sheet__body">
+            <div class="dest-common-memo" data-testid="sales-preview-dest-common-memo">
+              <OdsFormField :label="LABEL_DEST_COMMON_MEMO">
+                <div class="dest-common-memo__row">
+                  <OdsSelect
+                    :model-value="destCommonMemoMode"
+                    variant="form"
+                    class="dest-common-memo__mode"
+                    data-testid="sales-preview-dest-common-mode"
+                    @update:model-value="setCommonMemoMode"
+                  >
+                    <option
+                      v-for="opt in DEST_COMMON_MEMO_OPTIONS"
+                      :key="opt.value"
+                      :value="opt.value"
+                    >
+                      {{ opt.label }}
+                    </option>
+                  </OdsSelect>
+                  <OdsInput
+                    v-if="destCommonMemoMode === DEST_MEMO_MODE_CUSTOM"
+                    :model-value="destCommonMemoCustom"
+                    variant="form"
+                    bare
+                    class="dest-common-memo__input"
+                    data-testid="sales-preview-dest-common-input"
+                    :aria-label="LABEL_DEST_COMMON_MEMO"
+                    @update:model-value="setCommonMemoCustom"
+                  />
+                  <p
+                    v-else
+                    class="dest-common-memo__preview"
+                    data-testid="sales-preview-dest-common-preview"
+                  >
+                    {{ resolveCommonMemo() || '—' }}
+                  </p>
+                  <OdsButton
+                    type="button"
+                    variant="secondary"
+                    class="dest-common-memo__apply"
+                    data-testid="sales-preview-dest-common-apply"
+                    :disabled="!destDrafts.length"
+                    @click="applyCommonMemoToAll"
+                  >
+                    {{ LABEL_DEST_MEMO_APPLY }}
+                  </OdsButton>
+                </div>
+              </OdsFormField>
+            </div>
+
             <ul v-if="destDrafts.length" class="dest-summary-list" aria-label="배송지 목록">
               <li
                 v-for="(d, di) in destDrafts"
@@ -1605,6 +1700,46 @@ onMounted(async () => {
   flex-direction: column;
   gap: var(--ods-space-12);
   min-width: 0;
+}
+.dest-common-memo {
+  min-width: 0;
+}
+.dest-common-memo__row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 7.5rem) minmax(0, 1fr) auto;
+  gap: var(--ods-space-8);
+  align-items: center;
+  min-width: 0;
+}
+.dest-common-memo__mode {
+  width: 100%;
+  min-width: 0;
+}
+.dest-common-memo__input {
+  min-width: 0;
+  width: 100%;
+}
+.dest-common-memo__preview {
+  margin: 0;
+  min-width: 0;
+  padding: 0 var(--ods-space-8);
+  height: 36px;
+  display: flex;
+  align-items: center;
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  background: var(--ods-color-bg-muted, #f3f4f0);
+  border-radius: var(--ods-radius-button);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.dest-common-memo__apply {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding-inline: var(--ods-space-12);
 }
 .dest-summary-list {
   list-style: none;
