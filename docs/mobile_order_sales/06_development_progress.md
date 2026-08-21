@@ -1,58 +1,92 @@
 # 06. Development progress
 
-> **Stage 6 로컬 완료** (DIRECT+STOCK+allocation). main 반영 · 운영 이관 별도.  
-> 배즙 완제품 2종(일반/도라지)은 Stage 6 운영 보완. PROCESS 유형은 1개 유지.  
-> 출고 UX: 재고 다건 판매 · 주문 일괄/부분 출고. 배즙 출고 표시는 제품명만. 재고 조정은 stock+log만(전표 없음).  
-> OPEN-PROD-01~03 **CLOSED**. DEC-026 harvest_year **APPROVED**.  
-> **2026-08-21:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**. 문서 정합성만 (코드·DB 변경 없음). 다음 순서: [2026-08-21 절](#2026-08-21--선입금수금-정책-확정).  
+> **현재 운영 기준 (2026-08-21):** private/운영 backend **`fd963e0`**. analysis main **`2e7b3fc`**.  
+> Stage 6 출고/판매 · Order→Shipment Step1~3 · 주문목록 compact 2줄 UI **운영 반영 완료**.  
+> 본 feature(`cursor/docs-sales-prepay-payment-align`)는 **설계 문서만** — **main 미반영**.  
+> **다음 개발 순서 SSOT:** [2026-08-21 절](#2026-08-21--선입금수금-정책-확정) 1~8.  
+> OPEN-PROD-01~03 **CLOSED**. DEC-019/028/029 **APPROVED** (문서).  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
 범례: `—` · `예정` · `진행` · `완료` · `차단` · `대기`
 
-## 현재 Stage 표 (2026-08-19)
+## 현재 운영 기준 — Stage 표 (2026-08-21)
 
 | 단계 | 목표 | 상태 |
 |------|------|------|
 | 0 | 주문·판매·재고 전체 설계 / PC 기준 분석 / 업무규칙 확정 | **완료** |
+| 1 | 모바일 주문/판매 진입구조·메뉴·라우팅 | **완료 · 운영** |
+| 2 | 주문관리 — 조회·등록·수정·취소·고객·배송지 | **완료 · 운영** (compact 2줄 목록 포함) |
+| 3 (=H) | 수확기록 확장 — 영농일지 품종·콘테이너 수량 | **완료 · 운영** |
+| 4 (=P) | 생산/변환 — PACK·PROCESS·원물 OUT·생산품 IN | **완료 · 운영** |
+| 5A (=3A) | 재고배정 Core — HOLD / RELEASE / allocation | **완료 · 운영** |
+| 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료 · 운영** |
+| 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **완료 · 운영** |
+| 6 | 모바일 출고·배정·판매 UX + Order→Ship Step1~3 | **완료 · 운영** (`fd963e0`) |
+| — | **다음:** 선입금 결제수단 → 수금 Core → 출고 선입금 배분 → 판매목록/상세 → PC 정합 → 가락 | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
+| 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
+| 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
+
+\*표의 7·8은 과거 게이트 번호. **앞으로의 구현 순서는 아래 1~8이 SSOT**이며, 이미 끝난 Stage 6을 그 안에 다시 넣지 않는다.
+
+```
+1 설계서 정합성 완료  →  2 선입금 결제수단 기반  →  3 판매 수금 Core
+→ 4 출고 시 선입금 자동배분  →  5 판매목록  →  6 판매상세/수금등록
+→ 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
+```
+
+SHA 스냅샷: private main = `fd963e0` · 운영 backend = `fd963e0` · analysis main = `2e7b3fc` · 본 문서 feature = main **미반영**.
+
+---
+
+## 역사적 개발 기록 (2026-08-19 이전 게이트 표)
+
+아래는 **당시 로컬 진행 스냅샷**이다. **현재 운영 상태로 읽지 말 것.**  
+「main 미머지」「운영 미적용」「Mobile UI 후속」은 **당시 표현**이며, Stage 6·출고 Core는 이후 운영 반영됨 ([위 현재 운영 기준](#현재-운영-기준--stage-표-2026-08-21)).
+
+### (역사) Stage 표 스냅샷 — 2026-08-19
+
+| 단계 | 목표 | 상태 (당시) |
+|------|------|------|
+| 0 | 주문·판매·재고 전체 설계 / PC 기준 분석 / 업무규칙 확정 | **완료** |
 | 1 | 모바일 주문/판매 진입구조·메뉴·라우팅 | **완료** |
 | 2 | 주문관리 — 조회·등록·수정·취소·고객·배송지 | **완료** |
-| 3 (=H) | 수확기록 확장 — 영농일지 품종·콘테이너 수량 | **완료** (main 미머지) |
-| 4 (=P) | 생산/변환 — PACK·PROCESS·원물 OUT·생산품 IN | **완료** (main 미머지) |
-| 5A (=3A) | 재고배정 Core — HOLD / RELEASE / allocation | **완료** (main 미머지) |
-| 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료** (main 미머지) |
-| 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **Core+HTTP 완료** (Mobile UI 후속 · main 미머지) |
-| 6 | 모바일 출고·배정·판매 UX | **로컬 완료** (main 미머지 · 운영 미적용) |
+| 3 (=H) | 수확기록 확장 — 영농일지 품종·콘테이너 수량 | **완료** (당시: main 미머지) |
+| 4 (=P) | 생산/변환 — PACK·PROCESS·원물 OUT·생산품 IN | **완료** (당시: main 미머지) |
+| 5A (=3A) | 재고배정 Core — HOLD / RELEASE / allocation | **완료** (당시: main 미머지) |
+| 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료** (당시: main 미머지) |
+| 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **Core+HTTP 완료** (당시: Mobile UI 후속 · main 미머지) |
+| 6 | 모바일 출고·배정·판매 UX | **로컬 완료** (당시: main 미머지 · 운영 미적용) |
 | 7 | 가락시장 경매→판매확정·정산 | **예정** |
 | 8 | 통합 회귀·PC/PWA 정합·운영 Migration·배포 | **예정** |
 
-역사적 게이트 번호(3A/H/P/S)는 코드·커밋 메시지에 남아 있다. 위 표가 현재 SSOT.
+역사적 게이트 번호(3A/H/P/S)는 코드·커밋 메시지에 남아 있다.
 
-## 게이트 (기존 번호 유지)
+## 게이트 (기존 번호 유지 · 역사+현황 혼용 주의)
 
 ```
 0 설계 최종승인 (완료)
  → 1 메뉴/라우트
  → 2 주문 조회/등록
- → 3A 저장재고형 선택적 재고배정  (구현 완료 · main 미머지)
+ → 3A 저장재고형 선택적 재고배정  (이후 운영 반영)
  → [권장] 수확기록 → 생산확장 → 판매/출고 OUT TX
- → 3B 모바일 배정 UI  (3A 직후 아님)
- → 5 판매관리
- → 6 경매/수금/회계
+ → 3B 모바일 배정 UI  (3A 직후 아님 · 후순위)
+ → 5 판매관리 (목록·상세·수금 — 다음 개발순서 5·6)
+ → 6 경매/수금/회계 (수금 Core·선입금 배분 — 다음 개발순서 2~4 · 가락은 8)
  → 7 회귀/운영검증
 ```
 
-기존 단계 4(출고→판매)는 **권장 후속의 판매/출고 공통 TX**와 같음. 번호만 유지.
+기존 단계 4(출고→판매)는 **권장 후속의 판매/출고 공통 TX**와 같음. 번호만 유지. **이미 운영 반영된 Stage 6 출고 UX를 이 순서에 다시 끼워 넣지 않는다.**
 
 | 단계 | 목표 | 상태 | PC | Core | API | Mobile | Test | 대표 승인 |
 |------|------|------|----|------|-----|--------|------|-----------|
 | 0. 설계 | 본 폴더 문서 · 규칙 합의 | **완료** | — | — | — | — | 문서 리뷰 | **최종승인 완료** (2026-08-17) |
-| 1. 메뉴/라우트 | 하단 주문/판매 · 내정보 이동 | **완료 / 대표 승인** | 없음 | 없음 | 없음 | 셸 | T-NAV-* | **승인** (2026-08-17) |
-| 2. 주문 조회/등록 | 선주문 저장 (판매·전표 없음) | **완료 / 대표 승인** | 주문만 저장 | OrderService | GET/POST orders | 목록·등록·수정 | T-ORD-01 | **승인** (2026-08-19) |
-| 3A. 재고배정 | 저장재고형 **선택** 배정 · Hold · `t_order_alloc` | **구현 완료** | Hold 키 | Allocation | allocations | 조회만 | 42 passed | **구현 승인 대기 · main 미머지** |
+| 1. 메뉴/라우트 | 하단 주문/판매 · 내정보 이동 | **완료 / 운영** | 없음 | 없음 | 없음 | 셸 | T-NAV-* | **승인** (2026-08-17) |
+| 2. 주문 조회/등록 | 선주문 저장 (판매·전표 없음) | **완료 / 운영** | 주문만 저장 | OrderService | GET/POST orders | 목록·등록·수정 | T-ORD-01 | **승인** (2026-08-19) |
+| 3A. 재고배정 | 저장재고형 **선택** 배정 · Hold · `t_order_alloc` | **완료 / 운영** | Hold 키 | Allocation | allocations | 조회만 | 42 passed | 운영 반영 (`fd963e0` 계열) |
 | 3B. 배정 UI | 모바일 배정 UX (필수단계처럼 보이지 않게) | **후순위** | — | 3A 재사용 | 3A 재사용 | 미착수 | — | 수확·생산·OUT TX 이후 |
-| 4. 출고→판매 | 상품 OUT + 판매 · STOCK/DIRECT | Core+HTTP 완료 / UI 후속 | 미위임 | OrderShip | POST shipments/confirm | 출고 CTA | T-SHIP-* / T-SHIP-API-* | Mobile UX 후속 |
-| 5. 판매관리 | 목록·직접판매·order_no | 예정 | 재저장 보존 | SalesService | GET/PUT sales | 판매 탭 | T-SAL-01 | 단계4 승인 후 |
-| 6. 경매/수금/회계 | confirm TX · payments | 예정 | 확정 버튼 | Confirm+Account | confirm/payments | DRAFT CTA | T-AUC/PAY | 단계5 승인 후 |
+| 4. 출고→판매 | 상품 OUT + 판매 · STOCK/DIRECT | **완료 / 운영** | 미위임(PC) | OrderShip | POST shipments/confirm | `/orders/ship` + Step1~3 | T-SHIP-* | Stage 6 운영 |
+| 5. 판매관리 | 목록·상세·수금 표시 | **예정** (개발순서 5·6) | 재저장 보존 | SalesService | GET/PUT sales | 판매 탭 | T-SAL-01 | 수금 Core 후 |
+| 6. 경매/수금/회계 | 선입금·수금 Core · payments · 가락 | **예정** (개발순서 2~4·8) | 확정 버튼 | Confirm+Account | confirm/payments | 수금 UI | T-AUC/PAY | DEC-016 등 |
 | 7. 회귀/운영 | PC+모바일+관찰/일지/농약 | 예정 | 회귀 | — | health | 스모크 | T-REG-01 | 배포 승인 |
 
 ## 단계 0 산출물
@@ -64,7 +98,7 @@
 - [x] DEC-019 최초 OPEN 기록 (2026-08-17 · 이후 **2026-08-21 APPROVED**)
 - [x] OPEN-PROD-01~03 **CLOSED** (2026-08-19 대표 최종승인. [09 §5·§9](./09_production_inventory_flow.md))
 - [x] DEC-026 harvest_year 원료 수확연도 승계 (2026-08-19)
-- [x] Stage 5B 재고조회/이력 (로컬 · main 미머지)
+- [x] Stage 5B 재고조회/이력 (**운영 반영됨**. 당시 기록: 로컬 · main 미머지)
 - [x] ST01 운영 DB 확인 (DEC-011 **CLOSED** — 2026-08-17)
 - [x] **선입금 배분 확정 (DEC-019 APPROVED — 2026-08-21).** 순차 배분, 회차 적용액 = `min(선입금 잔액, 그 판매금액)`
 - [x] **주문 선입금 결제수단 (DEC-028 APPROVED — 2026-08-21).** `pre_pay_method_cd` 설계. DDL 미실행
@@ -206,12 +240,13 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 
 | 항목 | 상태 |
 |------|------|
-| OPEN-PROD-01~03 | **CLOSED** (설계). **Stage P·5B·5C Core** 로컬 · API/UI 후속 |
-| Stage 3A/5A allocation | **구현 완료** · main 미머지 · 운영 DDL 미적용 |
-| Stage 5B 재고조회 | **구현 완료** · main 미머지 |
-| Stage 6 (구 3B 포함 판매 UX) | **로컬 완료** (`/orders/ship` DIRECT+STOCK). 배정 UI(3B)는 후순위. main 미머지 |
-| Stage 5C = S 판매/출고 OUT | Core+HTTP 완료. Mobile UI = Stage 6. **DEC-019 APPROVED**(선입금 배분은 단계 4 구현 대기) · DEC-020 저장 필드 OPEN |
+| OPEN-PROD-01~03 | **CLOSED** (설계). Core·운영 반영 범위는 [현재 운영 기준](#현재-운영-기준--stage-표-2026-08-21) |
+| Stage 3A/5A allocation | **운영 반영 완료** (`fd963e0` 계열). *(역사: 2026-08-19 당시 main 미머지)* |
+| Stage 5B 재고조회 | **운영 반영 완료** |
+| Stage 6 (판매/출고 UX) | **운영 반영 완료** (`/orders/ship` + Order→Ship Step1~3 · `fd963e0`). 배정 UI(3B)는 후순위 |
+| Stage 5C = S 판매/출고 OUT | **운영 반영 완료**. **DEC-019 APPROVED**(선입금 배분은 다음 개발순서 4) · DEC-020 저장 필드 OPEN |
 | 생산확정→바로판매 A안 | 설계 CLOSED. 코드 = P + 5C |
+| **다음 구현** | [2026-08-21 절](#2026-08-21--선입금수금-정책-확정) 1~8 (Stage 6 재포함 금지) |
 
 ## 운영 테스트데이터 초기화 (2026-08-17 대표 완료)
 
@@ -301,7 +336,9 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 - HTTP: 400 검증 · 409 충돌/SCHEMA_PRECONDITION · 404 주문없음
 - 주문 전용 `/orders/{order_no}/ship` 미생성
 
-## Stage 6 — 판매/출고 UX (2026-08-19)
+## Stage 6 — 판매/출고 UX (역사적 기록 · 2026-08-19 로컬)
+
+> **현재:** Stage 6 및 Order→Ship Step1~3는 **운영 반영 완료** (`fd963e0`). 아래는 당시 로컬 구현 기록.
 
 - 문서: [04 §9](./04_mobile_screen.md). Vue **1차 구현** `ShipConfirmView` `/orders/ship`
 - 한 화면 · 세 진입(생산 바로판매 / 주문출고 / 재고직접판매)
@@ -309,13 +346,13 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 - 연속출고 UI · 로트 수동선택 · STOCK/DIRECT 용어 노출 **1차 제외**
 - 생산 1차: 주문검색 없음(무주문 DIRECT)
 
-## Stage 6-1 DIRECT E2E (2026-08-19 로컬)
+## Stage 6-1 DIRECT E2E (역사적 기록 · 2026-08-19 로컬)
 
 - **상태:** DIRECT E2E ✅ (로컬 개발 API + 로컬 개발 SQLite DB)
 - 판매: `20260819-01` 무주문 DIRECT · `20260819-02` 무주문 DIRECT · `20260819-03` 주문 DIRECT `ORD20260819-001` → `ST010300`
 - **Stage 6-2 STOCK/Allocation 전환:** 로컬 A안 적용 (reserved 103 해제 + AUDIT, HOLD 보존, 백필 없음, active reserved-only preflight)
 
-## Stage 6-2 로컬 Allocation + STOCK E2E (2026-08-19)
+## Stage 6-2 로컬 Allocation + STOCK E2E (역사적 기록 · 2026-08-19)
 
 - 대상 DB: 로컬 개발 `orchard_platform.db` only. 운영/Lightsail 미변경
 - A안: stock_seq=156 reserved 103→0 + `t_stock_log` AUDIT 1건. HOLD 9 / CANCEL_HOLD 3 원문 보존. `t_order_alloc` 백필 없음
@@ -326,9 +363,10 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 - **OPEN-DATA-NEG-STOCK:** 로컬 2025 음수 3로트(seq 151/169/170, real 합 -273)는 Stage 6과 분리. 운영 이관 전 원인 분석. 아래 절
 - 참고: 기존 `ORD20260817-002` 줄 harvest_year=2026 vs 해당 규격 재고 2025 → DIRECT 시 STOCK_UNAVAILABLE 가능. 이번 C는 2026 재고와 맞는 신규 주문으로 검증
 
-## Stage 6 로컬 마감 (2026-08-19)
+## Stage 6 로컬 마감 (역사적 기록 · 2026-08-19)
 
-- **상태:** 로컬 완료. push는 feature branch만. **main merge / mirror / production 금지**
+- **상태 (당시):** 로컬 완료. push는 feature branch만. **당시** main merge / mirror / production 금지  
+  → **이후** Stage 6·Step1~3·compact 목록은 운영 반영됨 (`fd963e0`). 당시 금지 문구를 현재로 읽지 말 것.
 - DIRECT E2E + STOCK E2E + allocation schema(로컬) + 레거시 reserved 103 정리
 - 경계 테스트: `test_stock_ship_e2e.py` (음수 로트 비후보 · 정상 로트 계속 · reserved>real 차단 · 음수+reserved 차단)
 
@@ -341,7 +379,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | DEC | 내용 | 상태 |
 |-----|------|------|
 | DEC-019 | 부분출고 선입금 **순차 배분**. 회차 적용액 = `min(선입금 잔액, 그 판매금액)`. 초과 적용·기존 CONFIRMED 판매 재작성 금지 | **APPROVED** |
-| DEC-028 | 주문 **선입금 결제수단**. `pre_pay_amt=0` → NULL, `>0` → 필수. 제안 컬럼 `t_order_master.pre_pay_method_cd TEXT NULL`. **DDL 미실행** | **APPROVED** (설계) |
+| DEC-028 | 주문 **선입금 결제수단**. `pre_pay_amt=0` → NULL, `>0` → 필수. 제안 컬럼 `t_order_master.pre_pay_method_cd TEXT NULL`. **DDL 미실행**. 결제수단 = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 제외 | **APPROVED** (설계) |
 | DEC-029 | **판매상태 ≠ 수금상태.** `sales_status`는 DRAFT/CONFIRMED만. 수금상태는 금액 계산값 | **APPROVED** |
 
 정리된 개념:
@@ -370,7 +408,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | # | 항목 | 내용 | 선행 확인 |
 |---|------|------|-----------|
 | 1 | **설계서 정합성 완료** | 본 문서 세트에 DEC-019/028/029 반영 | — |
-| 2 | **선입금 결제수단 기반** | `pre_pay_method_cd` 저장·검증(`0`→NULL, `>0`→필수)·결제수단 목록 조회. 주문 단계 전표 없음 | 운영 `PRAGMA table_info(t_order_master)` |
+| 2 | **선입금 결제수단 기반** | `pre_pay_method_cd` 저장·검증(`0`→NULL, `>0`→필수)·**현금성** 결제수단 목록 조회. 주문 단계 전표 없음. 채권계정 제외 | 운영 `PRAGMA table_info(t_order_master)` · `m_account_code` · PC 수금계정 분포 → 현금성 범위 확정 |
 | 3 | **판매 수금 Core** | CONFIRMED 판매 수금 저장 Core 1곳. `t_cash_ledger` → `AccountManager` → `t_ledger` → paid/unpaid. DRAFT 금지 | 운영 `PRAGMA table_info(t_cash_ledger)` · 기존 계정코드 사용 실태 |
 | 4 | **출고 시 선입금 자동배분** | `OrderShipService.confirm()`에 순차 배분 + 회계 연동 (DEC-019) | 3번 Core 완료 · 선입금/추가수금 구분키 확인 |
 | 5 | **판매목록** | 판매금액·수금액·미수금·수금상태 배지. 판매상태 배지와 분리 | 3·4 |
@@ -382,9 +420,10 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 
 | 항목 | 확인 내용 | 단계 |
 |------|-----------|------|
-| `t_order_master.pre_pay_method_cd` | 동일 목적 컬럼 유무 → ALTER 여부 | 2 전 |
+| `t_order_master.pre_pay_method_cd` | 동일 목적 컬럼 유무 → ALTER 여부 (**OPEN** · 임의 확정 금지) | 2 전 |
 | `t_cash_ledger` 실제 컬럼 | 선입금 적용분 vs 추가수금 **구분·연결 키** 존재 여부. 없으면 OPEN 유지, 임의 DDL 금지 | 3·4 전 |
-| 결제수단 계정코드 | 현금/예금 `AS0101` 하위 · 외상 `AS02…` 실사용 코드. 신규 코드 정의 금지 | 2·3 전 |
+| 선입금·수금 **결제수단** 계정 범위 | **현금성 자산 계정**만. 운영 `m_account_code` + PC 수금 사용분포 확인 후 범위 확정. 채권(`AS02…`) 제외. `get_account_codes('AS', target_level=4)` 전체를 SSOT로 두지 않음 | 2 전 |
+| DEC-016 가락 배송 | 가락 확정 시 `t_sales_delivery` — **OPEN** 유지 | 8 전 |
 
 DEC-016(가락 배송행)은 계속 **OPEN**이며 2026-08-21에 승인하지 않았다.
 

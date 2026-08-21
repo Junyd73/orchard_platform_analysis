@@ -432,7 +432,7 @@
 | | |
 |--|--|
 | 상태 | **APPROVED** (Accepted) |
-| 관련 Stage | 5C (규칙 불변). Core+HTTP 구현 · Mobile UI 후속 |
+| 관련 Stage | 5C (규칙 불변). Core+HTTP·Mobile 출고 UX **운영 반영** (`fd963e0`). 선입금·수금은 다음 개발순서 |
 | 결정 | 아래 11항. |
 
 1. `t_stock_master.stock_seq`는 **추적키**. 업무 natural key(9필드)를 대체하지 않음. 생산·조회·Allocation은 9필드 유지. UPSERT 후 `stock_seq`는 natural key로 SELECT (lastrowid 금지).
@@ -463,9 +463,9 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | 상태 | **APPROVED** (설계). **이번 작업 DDL 없음** |
 | 결정 | 선입금에는 **결제수단**을 함께 받는다. `pre_pay_amt = 0` → 결제수단 **NULL**(입력 UI 노출 안 함). `pre_pay_amt > 0` → 결제수단 **필수**. |
 | 전표 | 주문 저장 시 전표·수금줄 **생성 없음** (DEC-009 유지). 판매확정(CONFIRMED) 시 그 결제수단으로 선입금 적용분을 회계 반영. |
-| 계정코드 | `AccountManager`의 기존 현금/예금 계정(`AS0101` 하위, 예 `AS010101`)과 외상 계열(`AS02…`)을 **그대로 재사용**. 모바일 전용 결제수단 코드 **하드코딩 금지**. 화면 목록은 `get_account_codes` 계열 조회로 받는다. |
+| 계정코드 | 선입금은 **실제 받은 돈**이다. 결제수단은 **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정)만 허용. **외상매출금·미수금 등 채권계정(`AS02…` 계열)은 선입금 결제수단이 아니다.** `AccountManager` / `m_account_code`를 재사용하되, `get_account_codes('AS', target_level=4)` 전체를 모바일 결제수단 목록 SSOT로 **확정하지 않는다**. 모바일 전용 결제수단 코드 **하드코딩 금지**. |
 | 제안 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` (권장안. 신규 테이블 없음) |
-| 구현 전 확인 | 운영 `PRAGMA table_info(t_order_master)`로 동일 목적 컬럼 존재 여부 재확인. 기존 계정코드 사용 실태(어떤 `acct_cd`/`pay_method_cd`가 실제로 쓰이는지) 확인 후 ALTER 여부 결정. **이번 문서 작업에서 ALTER 하지 않는다.** |
+| 구현 전 확인 (2단계 착수 직전) | ① 운영 `PRAGMA table_info(t_order_master)`로 동일 목적 컬럼 유무 ② 운영 `m_account_code` ③ PC 실제 수금계정 사용분포 → **현금성 계정 범위 확정** 후 ALTER 여부 결정. **이번 문서 작업에서 ALTER·범위 확정하지 않는다.** |
 | UI 용어 | 「**결제수단**」 (「수금방법」 금지) |
 | 관련 | DEC-009 · DEC-014 · **DEC-019** · DEC-029 |
 | 승인 | **2026-08-21 대표** |
@@ -491,7 +491,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ## OPEN-PROD (CLOSED — 2026-08-19 대표 최종승인)
 
-설계 확정. Stage H/P/5B **로컬 구현 완료**. 운영 ALTER·5C OUT은 후속.
+설계 확정. Stage H/P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). 잔여 OPEN은 [06](./06_development_progress.md).
 
 | ID | 상태 | 확정 내용 | 후속 구현 |
 |----|------|-----------|-----------|
@@ -509,7 +509,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 |----|------|
 | DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | DEC-015, 016 | **OPEN** |
-| **OPEN-PROD-01~03** | **CLOSED** (P·H·5B·5C Core 로컬, API/UI 후속) |
+| **OPEN-PROD-01~03** | **CLOSED** (설계·Core 반영됨. 상세 현황은 [06 현재 운영 기준](./06_development_progress.md)) |
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.
 
@@ -519,4 +519,4 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 |------|-----------|
 | `t_order_master.pre_pay_method_cd` | 운영 PRAGMA로 동일 목적 컬럼 유무 확인 후 ALTER 여부 결정 (DEC-028) |
 | `t_cash_ledger` 선입금 구분 | 선입금 적용분 vs 이후 추가수금을 구분·연결할 **실제 컬럼**이 있는지 재확인. 없으면 OPEN 유지, 임의 DDL 금지 (DEC-019) |
-| 기존 결제수단 계정코드 | `AccountManager` 현금/예금(`AS0101` 하위)·외상(`AS02…`) 실사용 코드 확인. 신규 코드 정의 금지 (DEC-028) |
+| 선입금 결제수단 계정 범위 | **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 제외. `get_account_codes('AS', …)` 전체 노출을 SSOT로 두지 않음 (DEC-028) |

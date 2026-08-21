@@ -50,8 +50,8 @@
 | 항목 | 내용 |
 |------|------|
 | 제안 컬럼 | `t_order_master.pre_pay_method_cd TEXT NULL` |
-| 값 도메인 | `AccountManager` 기존 계정코드 재사용. 현금/예금 = `AS0101` 하위 4레벨(예 `AS010101`), 외상 계열 = `AS02…`. **모바일 전용 결제수단 코드 신설·하드코딩 금지** |
-| 목록 조회 | `AccountManager.get_account_codes` 계열. 화면에 코드 리터럴을 박지 않음 |
+| 값 도메인 | **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 선입금은 실제 받은 돈이므로 **채권계정(외상·미수 `AS02…`)은 허용하지 않음**. `AccountManager` / `m_account_code` 재사용. **모바일 전용 결제수단 코드 신설·하드코딩 금지** |
+| 목록 조회 | 구현 2단계 착수 전: 운영 `m_account_code` + PC 수금계정 사용분포로 현금성 범위를 확정한 뒤 그 범위만 노출. `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 **확정하지 않음**. 화면에 코드 리터럴 하드코딩 금지 |
 | 규칙 | `pre_pay_amt = 0` → NULL · `pre_pay_amt > 0` → 필수 |
 | 회계 | 주문 저장 시 전표·수금줄 **없음** (DEC-009). 판매확정 시 이 결제수단으로 선입금 적용분을 회계 반영 |
 | 신규 테이블 | 없음 |
@@ -108,7 +108,7 @@ DIRECT 출고: allocation/HOLD 없이 `shipped_qty` 증가 가능. 생산수량 
 | 신규 주문 | 0 |
 | 출고 후 | **유지**. 0 리셋 금지 |
 | 배정해제 | `allocated_qty − release_qty`. 미출고분 초과 금지 |
-| 줄 vs 행 | 총량만 저장. 행 분해는 `t_order_alloc` (DEC-018. 로컬 CREATE, 운영 미적용) |
+| 줄 vs 행 | 총량만 저장. 행 분해는 `t_order_alloc` (DEC-018. **운영 반영됨** — 당시 문서: 로컬 CREATE) |
 
 기존 주문 초기값: **백필 없음** (DEC-015). schema DEFAULT 0. active reserved가 있으면 DDL 중단.  
 migration 직전 운영 점검 필수 → §15.
@@ -266,7 +266,7 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 | 수금 상세 | `t_cash_ledger` |
 | 전표 | `t_ledger` (+ `t_ledger_history`) |
 | 전표 생성 | `AccountManager.sync_ledger_by_basket('SALE', sales_no, work_date, basket, user_id)` |
-| 계정코드 | 기존 자산 계정. 현금/예금 `AS0101` 하위, 외상 `AS02…` |
+| 계정코드 | 수금·선입금 **결제수단** = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`)은 결제수단이 아님. 매출채권 등 상대계정은 `AccountManager` 전표 쪽에서 기존 규칙대로 처리 |
 
 **확인된 `t_cash_ledger` INSERT 컬럼** (`ui/pages/sales_page.py` 판매 저장 경로):
 

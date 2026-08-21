@@ -2,7 +2,7 @@
 
 > **역할:** 실제 농장 업무·기존 PC `StockPage`를 기준으로 한 **생산/재고** SSOT.  
 > 주문/판매 상세는 [02_domain_flow.md](./02_domain_flow.md). 데이터 계약은 [03_data_contract.md](./03_data_contract.md).  
-> OPEN-PROD-01~03 **CLOSED**. Stage P/5B **구현 완료** (main 미머지). Stage 5C·DDL 운영 적용 **미실행**.
+> OPEN-PROD-01~03 **CLOSED**. Stage P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). *(역사 스냅샷의「main 미머지」는 [06](./06_development_progress.md) 역사 절 참고)*. 생산/재고 범위 재설계 없음.
 
 ---
 

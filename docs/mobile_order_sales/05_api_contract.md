@@ -89,7 +89,7 @@ POST / PUT 공통 필드. **컬럼 ALTER 전이므로 구현 상태 아님.**
 | `pre_pay_amt` | number | 기본 0. 음수 거부 |
 | `pre_pay_method_cd` | string \| null | `pre_pay_amt = 0` → **null 강제**(값이 오면 400). `pre_pay_amt > 0` → **필수**(누락/공백이면 400) |
 
-값 도메인은 기존 `AccountManager` 계정코드(현금/예금 `AS0101` 하위, 외상 `AS02…`). **API·클라이언트에 결제수단 코드를 하드코딩하지 않는다.** 모바일 전용 결제수단 코드 정의 금지.
+값 도메인은 **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 선입금은 실제 받은 돈이므로 **채권계정(외상·미수 `AS02…`)을 결제수단으로 쓰지 않는다.** `get_account_codes('AS', target_level=4)` 전체를 결제수단 SSOT로 확정하지 않는다. **API·클라이언트에 결제수단 코드 하드코딩 금지.** 모바일 전용 결제수단 코드 정의 금지.
 
 **주문 API는 회계를 만들지 않는다.** 결제수단을 받아도 `t_cash_ledger` / `t_ledger` INSERT·전표 채번은 **금지** (DEC-009). 회계는 판매확정에서만.
 
@@ -237,7 +237,7 @@ DELETE 1차 비공개 (전표 역분개 전).
 |------|------|
 | 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT는 409** |
 | 수금액 | `> 0`. **그 판매의 미수금(`tot_unpaid_amt`) 초과 금지** → 400/409 |
-| 결제수단 | **필수**. 기존 `AccountManager` 계정코드 (`AS0101` 하위 / `AS02…`). 모바일 전용 코드 금지 |
+| 결제수단 | **필수**. **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`) 금지. 모바일 전용 코드 하드코딩 금지 |
 | 수금상태 | 응답 계산값 — `미수` / `부분수금` / `수금완료` ([03 §4.1](./03_data_contract.md)). DB 컬럼 아님 |
 
 **단일 트랜잭션:** `t_cash_ledger` → `AccountManager.sync_ledger_by_basket('SALE', …)` → `t_ledger` → 판매마스터 `tot_paid_amt` / `tot_unpaid_amt`. 실패 시 전체 rollback.
