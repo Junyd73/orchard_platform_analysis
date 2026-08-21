@@ -225,6 +225,21 @@ export function formatOrderAmt(n: number): string {
   return v.toLocaleString('ko-KR')
 }
 
+/** 국내 전화 하이픈 — PC sales_page 정책과 동일 */
+export function formatPhoneKr(raw: string): string {
+  const numbers = String(raw || '').replace(/[^0-9]/g, '')
+  const length = numbers.length
+  if (length < 4) return numbers
+  if (numbers.startsWith('02')) {
+    if (length < 6) return `${numbers.slice(0, 2)}-${numbers.slice(2)}`
+    if (length < 10) return `${numbers.slice(0, 2)}-${numbers.slice(2, 5)}-${numbers.slice(5)}`
+    return `${numbers.slice(0, 2)}-${numbers.slice(2, 6)}-${numbers.slice(6, 10)}`
+  }
+  if (length < 7) return `${numbers.slice(0, 3)}-${numbers.slice(3)}`
+  if (length < 11) return `${numbers.slice(0, 3)}-${numbers.slice(3, 6)}-${numbers.slice(6)}`
+  return `${numbers.slice(0, 3)}-${numbers.slice(3, 7)}-${numbers.slice(7, 11)}`
+}
+
 export function isParcelDelivery(codeCd: string): boolean {
   return String(codeCd || '').trim() === DELIVERY_TP_PARCEL
 }

@@ -205,6 +205,9 @@ def _confirm_direct(
             user_id="T",
             dlvry_tp="LO010200",
             ship_fee=fee,
+            snd_name="삼육농원",
+            snd_tel="010-0000-0000",
+            snd_addr="과수원주소",
             lines=[
                 ShipLineIn(
                     qty=qty,
@@ -255,6 +258,42 @@ class ShipDelivery2CTest(unittest.TestCase):
         self.assertEqual(len(dels), 3)
         groups = {d["dlvry_group_no"] for d in dels}
         self.assertEqual(len(groups), 3)
+        for d in dels:
+            self.assertEqual(d["snd_name"], "삼육농원")
+            self.assertEqual(d["snd_tel"], "010-0000-0000")
+            self.assertEqual(d["snd_addr"], "과수원주소")
+
+    def test_c1b_sender_required(self) -> None:
+        _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        with self.assertRaises(ShipValidationError) as ctx:
+            OrderShipService(self.conn).confirm(
+                ShipConfirmIn(
+                    farm_cd=FARM,
+                    ship_mode=SHIP_MODE_DIRECT,
+                    sales_dt="2026-08-20",
+                    custm_id=CUST,
+                    user_id="T",
+                    dlvry_tp="LO010200",
+                    ship_fee=0,
+                    snd_name="",
+                    snd_tel="",
+                    lines=[
+                        ShipLineIn(
+                            qty=1,
+                            item_cd=ITEM,
+                            variety_cd=VARIETY,
+                            grade_cd=GRADE,
+                            size_cd=SIZE,
+                            weight=WEIGHT,
+                            harvest_year=YEAR,
+                            wh_cd=WH,
+                            unit_price=1000,
+                            delivery_allocations=[_alloc(1, name="홍")],
+                        )
+                    ],
+                )
+            )
+        self.assertEqual(getattr(ctx.exception, "code", ""), "SENDER_REQUIRED")
 
     def test_c2_a2_b1_success(self) -> None:
         _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)
@@ -602,6 +641,29 @@ class ShipDelivery2CTest(unittest.TestCase):
                 dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
                 rcv_name TEXT, rcv_tel TEXT, rcv_addr TEXT,
                 dlvry_qty REAL, dlvry_msg TEXT, dlvry_group_no TEXT,
+                PRIMARY KEY (dlvry_no, farm_cd)
+            )
+            """
+        )
+        self.conn.commit()
+        with self.assertRaises(ShipError) as ctx:
+            _confirm_direct(
+                self.conn,
+                qty=1,
+                allocs=[_alloc(1, name="홍")],
+            )
+        self.assertEqual(getattr(ctx.exception, "code", ""), "SCHEMA_PRECONDITION")
+        self._assert_no_sale_side_effects(seq)
+
+    def test_p5_missing_snd_cols_fail_closed(self) -> None:
+        seq = _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=5)
+        self.conn.execute("DROP TABLE t_sales_delivery")
+        self.conn.execute(
+            """
+            CREATE TABLE t_sales_delivery (
+                dlvry_no TEXT, sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                rcv_name TEXT, rcv_tel TEXT, rcv_addr TEXT,
+                dlvry_qty REAL, dlvry_msg TEXT, dlvry_group_no TEXT, ship_fee REAL,
                 PRIMARY KEY (dlvry_no, farm_cd)
             )
             """

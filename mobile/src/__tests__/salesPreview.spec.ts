@@ -28,7 +28,17 @@ vi.mock('@/composables/stores/app', async () => {
   return {
     useAppStore: () => ({
       farmCd: ref('OR001'),
-      farm: ref({ farm_cd: 'OR001', farm_nm: '테스트농장' }),
+      farm: ref({
+        farm_cd: 'OR001',
+        farm_nm: '테스트농장',
+        owner_nm: null,
+        address: '경기도 화성시 테스트로 1',
+        lat: null,
+        lon: null,
+        nx: null,
+        ny: null,
+        reg_dt: null,
+      }),
       refreshAll: vi.fn(),
     }),
   }
@@ -445,6 +455,7 @@ describe('SalesPreviewView 2B', () => {
     store.updateShipLine(0, { unit_price: 1000 })
     store.setCustomer('C1', '홍길동')
     store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    store.setSender({ name: '삼육농원', tel: '010-0000-0000', addr: '과수원주소' })
     const r = router()
     await r.push('/orders/sales-preview')
     await r.isReady()
@@ -504,6 +515,7 @@ describe('SalesPreviewView 2B', () => {
     store.updateShipLine(0, { unit_price: 1000 })
     store.setCustomer('C1', '홍길동')
     store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    store.setSender({ name: '삼육농원', tel: '010-0000-0000', addr: '과수원주소' })
     store.setShipLineDeliveries(0, [
       {
         draft_id: 'd1',
@@ -536,9 +548,11 @@ describe('SalesPreviewView 2B', () => {
     await flushPromises()
     const body = confirmShipment.mock.calls[0][1] as {
       ship_fee: number
+      snd_name: string
       lines: { delivery_allocations: unknown[] }[]
     }
     expect(body.ship_fee).toBe(3000)
+    expect(body.snd_name).toBe('삼육농원')
     expect(body.lines[0].delivery_allocations).toHaveLength(2)
     expect(store.shipLines).toHaveLength(0)
     wrapper.unmount()
@@ -691,5 +705,90 @@ describe('SalesPreviewView 2B', () => {
     expect(store.shipLines).toHaveLength(1)
     expect(store.shipLines[0].qty).toBe(1)
     expect(store.shipLines[0].unit_price).toBe(1000)
+  })
+
+  it('보내는 사람 sheet · 과수원주소 · prefill 유지 · confirm snd_*', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock({ available_qty: 10 }), 2)
+    store.updateShipLine(0, { unit_price: 1000 })
+    store.setCustomer('C1', '홍길동')
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    store.setShipLineDeliveries(0, [
+      {
+        draft_id: 'd1',
+        qty: 2,
+        rcv_name: '김수령',
+        rcv_tel: '010-1111-2222',
+        rcv_addr: '서울',
+        dlvry_msg: '',
+        ship_fee: 3000,
+      },
+    ])
+    const r = router()
+    await r.push('/orders/sales-preview')
+    await r.isReady()
+    const wrapper = mount(SalesPreviewView, {
+      attachTo: document.body,
+      ...mountOpts(r),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="sales-preview-sender-summary"]').text()).toContain('미설정')
+    expect(wrapper.find('[data-testid="sales-preview-submit"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="sales-preview-parcel-setup"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="sales-preview-sender-setup"]').trigger('click')
+    await flushPromises()
+    const sheet = document.querySelector('[data-testid="sales-preview-sender-sheet"]')!
+    expect(sheet).toBeTruthy()
+    expect(sheet.textContent || '').toContain('판매 전체 공통 적용')
+    expect(
+      (sheet.querySelector('[data-testid="sales-preview-sender-farm-addr"]') as HTMLElement)
+        .textContent || '',
+    ).toContain('경기도 화성시')
+
+    await new DOMWrapper(
+      sheet.querySelector('[data-testid="sales-preview-sender-name"]')!,
+    ).setValue('삼육농원')
+    await new DOMWrapper(
+      sheet.querySelector('[data-testid="sales-preview-sender-tel"]')!,
+    ).setValue('01012345678')
+    await flushPromises()
+    expect(
+      (sheet.querySelector('[data-testid="sales-preview-sender-tel"]') as HTMLInputElement).value,
+    ).toBe('010-1234-5678')
+    ;(sheet.querySelector('[data-testid="sales-preview-sender-apply"]') as HTMLButtonElement).click()
+    await flushPromises()
+
+    expect(store.senderName).toBe('삼육농원')
+    expect(store.senderTel).toBe('010-1234-5678')
+    expect(store.senderAddr).toBe('경기도 화성시 테스트로 1')
+    expect(wrapper.find('[data-testid="sales-preview-sender-summary"]').text()).toContain('삼육농원')
+    expect(wrapper.find('[data-testid="sales-preview-sender-setup"]').text()).toContain('편집')
+
+    await wrapper.find('[data-testid="sales-preview-submit"]').trigger('click')
+    await flushPromises()
+    expect(confirmShipment).toHaveBeenCalled()
+    const body = confirmShipment.mock.calls[0][1] as Record<string, unknown>
+    expect(body.snd_name).toBe('삼육농원')
+    expect(body.snd_tel).toBe('010-1234-5678')
+    expect(body.snd_addr).toBe('경기도 화성시 테스트로 1')
+    expect(body.lines).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('보내는 사람 · 직접입력 · 재고 왕복 유지 · clear', async () => {
+    const store = useSalesPrefillStore()
+    store.addStockLine(stock(), 1)
+    store.setSender({ name: '직접발신', tel: '010-9999-8888', addr: '직접주소 99' })
+    store.setDelivery({ dlvryTp: DELIVERY_TP_PARCEL })
+    expect(store.senderName).toBe('직접발신')
+    store.addStockLine(stock({ available_qty: 5 }), 1)
+    expect(store.senderName).toBe('직접발신')
+    expect(store.senderAddr).toBe('직접주소 99')
+    store.clear()
+    expect(store.senderName).toBe('')
+    expect(store.senderTel).toBe('')
+    expect(store.senderAddr).toBe('')
   })
 })

@@ -143,6 +143,9 @@ export function buildShipConfirmRequest(input: {
   rcvTel?: string
   rcvAddr?: string
   dlvryMsg?: string
+  sndName?: string
+  sndTel?: string
+  sndAddr?: string
   /** true면 각 line에 delivery_allocations 배열 포함 (STOCK 택배 2C) */
   includeDeliveryAllocations?: boolean
 }): ShipConfirmRequest {
@@ -184,6 +187,9 @@ export function buildShipConfirmRequest(input: {
     rcv_tel: input.rcvTel || '',
     rcv_addr: input.rcvAddr || '',
     dlvry_msg: input.dlvryMsg || '',
+    snd_name: input.sndName || '',
+    snd_tel: input.sndTel || '',
+    snd_addr: input.sndAddr || '',
     lines,
   }
 }

@@ -23,6 +23,7 @@ import {
   LABEL_RCV_NAME,
   LABEL_RCV_TEL,
   formatOrderAmt,
+  formatPhoneKr,
   formatWeightLabel,
   isJuiceItemCd,
   isParcelDelivery,
@@ -58,7 +59,23 @@ const LABEL_GO_SALE = '판매 진행'
 const LABEL_EMPTY_LINES = '판매 품목이 없습니다.'
 const LABEL_DLVRY_METHOD = '배송방법'
 const LABEL_DLVRY_SHORT = '배송'
-const LABEL_PARCEL_SETUP = '설정 ›'
+const LABEL_SENDER = '보내는 사람'
+const LABEL_SENDER_TEL = '전화번호'
+const LABEL_SENDER_UNSET = '미설정'
+const LABEL_SENDER_SETUP = '설정 ›'
+const LABEL_SENDER_EDIT = '편집 ›'
+const LABEL_SENDER_SHEET = '보내는 사람 설정'
+const LABEL_SENDER_HINT = '판매 전체 공통 적용'
+const LABEL_SENDER_APPLY = '전체 적용'
+const LABEL_SENDER_ADDR = '주소'
+const LABEL_SENDER_ADDR_ORCHARD = '과수원 주소'
+const LABEL_SENDER_ADDR_CUSTOM = '직접 입력'
+const SENDER_ADDR_ORCHARD = 'orchard'
+const SENDER_ADDR_CUSTOM = 'custom'
+const SENDER_ADDR_OPTIONS = [
+  { value: SENDER_ADDR_ORCHARD, label: LABEL_SENDER_ADDR_ORCHARD },
+  { value: SENDER_ADDR_CUSTOM, label: LABEL_SENDER_ADDR_CUSTOM },
+] as const
 const LABEL_VIEW_DEST = '배송지 편집 ›'
 const LABEL_LINES = '판매 품목'
 const LABEL_COL_ITEM = '품목'
@@ -85,6 +102,8 @@ const DEST_COMMON_MEMO_OPTIONS = [
   { value: DEST_MEMO_MODE_CUSTOM, label: '직접입력' },
 ] as const
 const MSG_NEED_CUSTOMER = '고객을 선택해 주세요.'
+const MSG_NEED_SENDER = '보내는 사람 정보를 입력해 주세요.'
+const MSG_NEED_SENDER_ADDR = '과수원 주소가 없어 직접 입력해 주세요.'
 const MSG_SHIP_FEE_NEG = '배송비는 0 이상이어야 합니다.'
 const MSG_SUCCESS = '판매가 완료되었습니다.'
 const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까?'
@@ -95,7 +114,8 @@ const DEST_TIP_MS = 1800
 const HINT_PARCEL_DONE = '배송지 지정 완료'
 
 const router = useRouter()
-const { farmCd } = storeToRefs(useAppStore())
+const appStore = useAppStore()
+const { farmCd, farm } = storeToRefs(appStore)
 const prefill = useSalesPrefillStore()
 
 const busy = ref(false)
@@ -147,6 +167,24 @@ const qtyIssue = computed(() => findShipQtyIssue(lines.value))
 const parcelIssue = computed(() =>
   isParcel.value ? findParcelDeliveryIssue(lines.value) : '',
 )
+const farmAddress = computed(() => String(farm.value?.address || '').trim())
+const senderConfigured = computed(() => {
+  const name = String(prefill.senderName || '').trim()
+  const tel = String(prefill.senderTel || '').trim()
+  return Boolean(name && tel)
+})
+const senderSummary = computed(() => {
+  if (!senderConfigured.value) return LABEL_SENDER_UNSET
+  return joinDot([prefill.senderName, prefill.senderTel])
+})
+const senderIssue = computed(() => {
+  if (!isParcel.value) return ''
+  const name = String(prefill.senderName || '').trim()
+  const tel = String(prefill.senderTel || '').trim()
+  const addr = String(prefill.senderAddr || '').trim()
+  if (!name || !tel || !addr) return MSG_NEED_SENDER
+  return ''
+})
 const unitHint = computed(() =>
   lines.value[0]?.item_cd === 'FR010300' ? '통' : '박스',
 )
@@ -192,6 +230,7 @@ const canSubmit = computed(() => {
   if (qtyIssue.value) return false
   if (lines.value.some((ln) => Number(ln.unit_price) < 0)) return false
   if (isParcel.value) {
+    if (senderIssue.value) return false
     if (parcelIssue.value) return false
   } else if (Number(prefill.shipFee) < 0) {
     return false
@@ -265,10 +304,80 @@ function editLineInStock() {
   goStockTab()
 }
 
-/** 상단 미지정 bar → 첫 미완료 품목 배송지 sheet */
-function openFirstIncompleteDest() {
-  const idx = lines.value.findIndex((_, i) => deliveryTone(i) !== 'ok')
-  if (idx >= 0) openDestSheet(idx)
+const senderSheetOpen = ref(false)
+const senderDraftName = ref('')
+const senderDraftTel = ref('')
+const senderAddrMode = ref<typeof SENDER_ADDR_ORCHARD | typeof SENDER_ADDR_CUSTOM>(
+  SENDER_ADDR_ORCHARD,
+)
+const senderDraftAddr = ref('')
+const senderSheetErr = ref('')
+
+function openSenderSheet() {
+  senderDraftName.value = String(prefill.senderName || '')
+  senderDraftTel.value = String(prefill.senderTel || '')
+  const farmAddr = farmAddress.value
+  const saved = String(prefill.senderAddr || '').trim()
+  if (saved && farmAddr && saved === farmAddr) {
+    senderAddrMode.value = SENDER_ADDR_ORCHARD
+    senderDraftAddr.value = farmAddr
+  } else if (saved) {
+    senderAddrMode.value = SENDER_ADDR_CUSTOM
+    senderDraftAddr.value = saved
+  } else if (farmAddr) {
+    senderAddrMode.value = SENDER_ADDR_ORCHARD
+    senderDraftAddr.value = farmAddr
+  } else {
+    senderAddrMode.value = SENDER_ADDR_CUSTOM
+    senderDraftAddr.value = ''
+  }
+  senderSheetErr.value = ''
+  senderSheetOpen.value = true
+}
+
+function closeSenderSheet() {
+  senderSheetOpen.value = false
+  senderSheetErr.value = ''
+}
+
+function onSenderTelInput(raw: string) {
+  senderDraftTel.value = formatPhoneKr(raw)
+}
+
+function onSenderAddrMode(raw: string) {
+  const mode = String(raw) === SENDER_ADDR_CUSTOM ? SENDER_ADDR_CUSTOM : SENDER_ADDR_ORCHARD
+  senderAddrMode.value = mode
+  if (mode === SENDER_ADDR_ORCHARD) {
+    if (!farmAddress.value) {
+      senderAddrMode.value = SENDER_ADDR_CUSTOM
+      senderSheetErr.value = MSG_NEED_SENDER_ADDR
+      return
+    }
+    senderDraftAddr.value = farmAddress.value
+    senderSheetErr.value = ''
+  }
+}
+
+function commitSenderSheet() {
+  const name = String(senderDraftName.value || '').trim()
+  const tel = formatPhoneKr(senderDraftTel.value).trim()
+  let addr = ''
+  if (senderAddrMode.value === SENDER_ADDR_ORCHARD) {
+    addr = farmAddress.value
+    if (!addr) {
+      senderAddrMode.value = SENDER_ADDR_CUSTOM
+      senderSheetErr.value = MSG_NEED_SENDER_ADDR
+      return
+    }
+  } else {
+    addr = String(senderDraftAddr.value || '').trim()
+  }
+  if (!name || !tel || !addr) {
+    senderSheetErr.value = MSG_NEED_SENDER
+    return
+  }
+  prefill.setSender({ name, tel, addr })
+  closeSenderSheet()
 }
 
 function cancelSalePrep() {
@@ -539,6 +648,7 @@ function validateBeforeConfirm(): string {
   if (qtyIssue.value) return qtyIssue.value
   if (!String(prefill.custmId || '').trim()) return MSG_NEED_CUSTOMER
   if (isParcel.value) {
+    if (senderIssue.value) return senderIssue.value
     if (parcelIssue.value) return parcelIssue.value
   } else if (Number(prefill.shipFee) < 0) {
     return MSG_SHIP_FEE_NEG
@@ -581,6 +691,9 @@ async function onSubmit() {
         rcvTel: parcel ? (firstAlloc?.rcv_tel || '') : prefill.rcvTel,
         rcvAddr: parcel ? (firstAlloc?.rcv_addr || '') : prefill.rcvAddr,
         dlvryMsg: parcel ? (firstAlloc?.dlvry_msg || '') : prefill.dlvryMsg,
+        sndName: parcel ? prefill.senderName : '',
+        sndTel: parcel ? prefill.senderTel : '',
+        sndAddr: parcel ? prefill.senderAddr : '',
         includeDeliveryAllocations: parcel,
       }),
     )
@@ -679,6 +792,26 @@ onBeforeUnmount(() => {
               </OdsSelect>
             </div>
             <div
+              v-if="isParcel"
+              class="header-row header-row--sender"
+              data-testid="sales-preview-sender"
+            >
+              <span class="header-row__lbl">{{ LABEL_SENDER }}</span>
+              <span
+                class="header-row__sender-val"
+                :class="{ 'header-row__sender-val--unset': !senderConfigured }"
+                data-testid="sales-preview-sender-summary"
+              >{{ senderSummary }}</span>
+              <button
+                type="button"
+                class="header-hint__act"
+                data-testid="sales-preview-sender-setup"
+                @click="openSenderSheet"
+              >
+                {{ senderConfigured ? LABEL_SENDER_EDIT : LABEL_SENDER_SETUP }}
+              </button>
+            </div>
+            <div
               v-if="isParcel && parcelHeaderHint"
               class="header-hint"
               :class="{
@@ -688,15 +821,6 @@ onBeforeUnmount(() => {
               data-testid="sales-preview-parcel-hint"
             >
               <span class="header-hint__txt">{{ parcelHeaderHint }}</span>
-              <button
-                v-if="parcelIssue"
-                type="button"
-                class="header-hint__act"
-                data-testid="sales-preview-parcel-setup"
-                @click="openFirstIncompleteDest"
-              >
-                {{ LABEL_PARCEL_SETUP }}
-              </button>
             </div>
           </div>
         </OdsCard>
@@ -1180,6 +1304,110 @@ onBeforeUnmount(() => {
         {{ destTip.text }}
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="senderSheetOpen"
+        class="dest-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="LABEL_SENDER_SHEET"
+        data-testid="sales-preview-sender-sheet"
+        @click.self="closeSenderSheet"
+      >
+        <div class="dest-sheet dest-sheet--sender">
+          <header class="dest-sheet__head">
+            <div class="dest-sheet__head-main">
+              <div class="dest-sheet__title-row">
+                <h3 class="dest-sheet__title">{{ LABEL_SENDER_SHEET }}</h3>
+                <button
+                  type="button"
+                  class="dest-sheet__x"
+                  aria-label="닫기"
+                  data-testid="sales-preview-sender-close"
+                  @click="closeSenderSheet"
+                >
+                  ✕
+                </button>
+              </div>
+              <p class="dest-sheet__sender-hint">{{ LABEL_SENDER_HINT }}</p>
+            </div>
+          </header>
+
+          <div class="dest-sheet__body">
+            <OdsFormField :label="LABEL_SENDER">
+              <OdsInput
+                :model-value="senderDraftName"
+                variant="form"
+                bare
+                data-testid="sales-preview-sender-name"
+                :aria-label="LABEL_SENDER"
+                @update:model-value="senderDraftName = String($event)"
+              />
+            </OdsFormField>
+            <OdsFormField :label="LABEL_SENDER_TEL">
+              <OdsInput
+                :model-value="senderDraftTel"
+                variant="form"
+                bare
+                inputmode="tel"
+                data-testid="sales-preview-sender-tel"
+                :aria-label="LABEL_SENDER_TEL"
+                @update:model-value="onSenderTelInput(String($event))"
+              />
+            </OdsFormField>
+            <OdsFormField :label="LABEL_SENDER_ADDR">
+              <OdsSelect
+                :model-value="senderAddrMode"
+                variant="form"
+                data-testid="sales-preview-sender-addr-mode"
+                :aria-label="LABEL_SENDER_ADDR"
+                @update:model-value="onSenderAddrMode(String($event))"
+              >
+                <option
+                  v-for="opt in SENDER_ADDR_OPTIONS"
+                  :key="opt.value"
+                  :value="opt.value"
+                >
+                  {{ opt.label }}
+                </option>
+              </OdsSelect>
+            </OdsFormField>
+            <p
+              v-if="senderAddrMode === SENDER_ADDR_ORCHARD"
+              class="dest-sheet__farm-addr"
+              data-testid="sales-preview-sender-farm-addr"
+            >
+              {{ farmAddress || MSG_NEED_SENDER_ADDR }}
+            </p>
+            <OdsFormField v-else :label="LABEL_RCV_ADDR">
+              <OdsInput
+                :model-value="senderDraftAddr"
+                variant="form"
+                bare
+                data-testid="sales-preview-sender-addr"
+                :aria-label="LABEL_RCV_ADDR"
+                @update:model-value="senderDraftAddr = String($event)"
+              />
+            </OdsFormField>
+            <p v-if="senderSheetErr" class="dest-sheet__err" data-testid="sales-preview-sender-err">
+              {{ senderSheetErr }}
+            </p>
+          </div>
+
+          <footer class="dest-sheet__foot">
+            <OdsButton
+              type="button"
+              class="dest-sheet__cta"
+              data-testid="sales-preview-sender-apply"
+              @click="commitSenderSheet"
+            >
+              {{ LABEL_SENDER_APPLY }}
+            </OdsButton>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1257,6 +1485,22 @@ onBeforeUnmount(() => {
   font: var(--ods-font-form-label);
   color: var(--ods-color-text-label);
   white-space: nowrap;
+}
+.header-row--sender {
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+  column-gap: var(--ods-space-8);
+}
+.header-row__sender-val {
+  min-width: 0;
+  font: var(--ods-font-body);
+  color: var(--ods-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.header-row__sender-val--unset {
+  color: var(--ods-color-text-muted, #888);
 }
 .header-row__ctrl {
   min-width: 0;
@@ -1942,6 +2186,28 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--ods-color-danger, #b00020);
   font: var(--ods-font-footnote, 12px);
+}
+.dest-sheet__sender-hint {
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.dest-sheet__farm-addr {
+  margin: calc(var(--ods-space-8) * -1) 0 var(--ods-space-8);
+  padding: 0 var(--ods-space-4);
+  font: var(--ods-font-body);
+  color: var(--ods-color-text-secondary);
+  line-height: 1.4;
+  word-break: keep-all;
+}
+.dest-sheet--sender .dest-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+.dest-sheet__cta {
+  width: 100%;
+  min-height: 44px;
 }
 .dest-tip {
   position: fixed;

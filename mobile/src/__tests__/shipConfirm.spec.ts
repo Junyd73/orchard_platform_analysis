@@ -314,11 +314,17 @@ describe('shipConfirmModel / ShipConfirmView', () => {
       orderNo: store.orderNo,
       custmId: store.custmId,
       lines: store.shipLines,
+      sndName: '발신',
+      sndTel: '010-1111-2222',
+      sndAddr: '과수원',
     })
     expect(JSON.stringify(req)).not.toContain('stock_seq')
     expect(JSON.stringify(STOCK)).not.toContain('stock_seq')
     expect(req.ship_mode).toBe(SHIP_MODE_DIRECT)
     expect(req.order_no).toBeNull()
+    expect(req.snd_name).toBe('발신')
+    expect(req.snd_tel).toBe('010-1111-2222')
+    expect(req.snd_addr).toBe('과수원')
   })
 
   it('재고 여러 줄 prefill', () => {

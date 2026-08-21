@@ -33,6 +33,7 @@ from core.order_ship_constants import (
     MSG_PARCEL_SHIP_FEE_NEG,
     MSG_REMARK_SALE_OUT,
     MSG_SCHEMA_PRECONDITION,
+    MSG_SENDER_REQUIRED,
     MSG_SHIP_LINES_REQUIRED,
     MSG_SHIP_MODE_INVALID,
     MSG_SHIP_QTY_INVALID,
@@ -104,6 +105,9 @@ class ShipConfirmIn:
     rcv_tel: str = ""
     rcv_addr: str = ""
     dlvry_msg: str = ""
+    snd_name: str = ""
+    snd_tel: str = ""
+    snd_addr: str = ""
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -377,6 +381,11 @@ class OrderShipService:
             # 방문/직접: allocation 미사용(legacy 유지). 명시해도 무시.
             return False
 
+        snd_name = str(getattr(payload, "snd_name", "") or "").strip()
+        snd_tel = str(getattr(payload, "snd_tel", "") or "").strip()
+        if not (snd_name and snd_tel):
+            raise ShipValidationError(MSG_SENDER_REQUIRED, code="SENDER_REQUIRED")
+
         fee_total = 0.0
         for line in payload.lines:
             allocs = line.delivery_allocations
@@ -435,8 +444,19 @@ class OrderShipService:
             raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
         has_group = _column_exists(cur, "t_sales_delivery", "dlvry_group_no")
         has_fee = _column_exists(cur, "t_sales_delivery", "ship_fee")
+        has_snd = (
+            _column_exists(cur, "t_sales_delivery", "snd_name")
+            and _column_exists(cur, "t_sales_delivery", "snd_tel")
+            and _column_exists(cur, "t_sales_delivery", "snd_addr")
+        )
         if not (has_group and has_fee):
             raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
+        if not has_snd:
+            raise ShipError(MSG_DELIVERY_SCHEMA, code="SCHEMA_PRECONDITION")
+
+        snd_name = str(getattr(payload, "snd_name", "") or "").strip() or None
+        snd_tel = str(getattr(payload, "snd_tel", "") or "").strip() or None
+        snd_addr = str(getattr(payload, "snd_addr", "") or "").strip() or None
 
         group_seq = 1
         for line_idx, line in enumerate(payload.lines):
@@ -458,15 +478,19 @@ class OrderShipService:
                     """
                     INSERT INTO t_sales_delivery (
                         dlvry_no, sale_detail_no, sales_no, farm_cd,
+                        snd_name, snd_tel, snd_addr,
                         rcv_name, rcv_tel, rcv_addr, dlvry_qty, dlvry_msg,
                         dlvry_group_no, ship_fee, reg_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["dlvry_no"],
                         row["sale_detail_no"],
                         sales_no,
                         farm,
+                        snd_name,
+                        snd_tel,
+                        snd_addr,
                         row["rcv_name"] or None,
                         row["rcv_tel"] or None,
                         row["rcv_addr"] or None,

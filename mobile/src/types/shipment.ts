@@ -38,6 +38,10 @@ export type ShipConfirmRequest = {
   rcv_tel?: string
   rcv_addr?: string
   dlvry_msg?: string
+  /** 판매 전체 공통 보내는 사람 → t_sales_delivery.snd_* */
+  snd_name?: string
+  snd_tel?: string
+  snd_addr?: string
   lines: ShipConfirmLine[]
 }
 

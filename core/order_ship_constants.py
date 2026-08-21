@@ -33,4 +33,5 @@ MSG_PARCEL_DEST_INCOMPLETE = "택배 수령인·연락처·주소를 모두 입�
 MSG_PARCEL_QTY_MISMATCH = "택배 배송수량 합계가 판매수량과 같아야 합니다."
 MSG_PARCEL_SHIP_FEE_NEG = "배송비는 0 이상이어야 합니다."
 MSG_PARCEL_SHIP_FEE_MISMATCH = "배송비 합계가 일치하지 않습니다."
+MSG_SENDER_REQUIRED = "보내는 사람 정보를 입력해 주세요."
 MSG_DELIVERY_SCHEMA = "배송 다건 저장에 필요한 컬럼이 없습니다."

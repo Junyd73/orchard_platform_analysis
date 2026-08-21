@@ -111,6 +111,10 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   const rcvTel = ref('')
   const rcvAddr = ref('')
   const dlvryMsg = ref('')
+  /** 판매 전체 공통 — 보내는 사람 (택배) */
+  const senderName = ref('')
+  const senderTel = ref('')
+  const senderAddr = ref('')
 
   const draftCount = computed(() => shipLines.value.length)
   /** STOCK 판매는 규격키, 그 외는 기존 draft key */
@@ -323,6 +327,12 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     if (input.dlvryMsg != null) dlvryMsg.value = input.dlvryMsg
   }
 
+  function setSender(input: { name?: string; tel?: string; addr?: string }) {
+    if (input.name != null) senderName.value = String(input.name || '').trim()
+    if (input.tel != null) senderTel.value = String(input.tel || '').trim()
+    if (input.addr != null) senderAddr.value = String(input.addr || '').trim()
+  }
+
   function resetDelivery() {
     dlvryTp.value = DELIVERY_TP_VISIT
     shipFee.value = 0
@@ -330,6 +340,9 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     rcvTel.value = ''
     rcvAddr.value = ''
     dlvryMsg.value = ''
+    senderName.value = ''
+    senderTel.value = ''
+    senderAddr.value = ''
   }
 
   function consume(): ProductionPrefillLine[] {
@@ -387,6 +400,9 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     rcvTel,
     rcvAddr,
     dlvryMsg,
+    senderName,
+    senderTel,
+    senderAddr,
     draftCount,
     draftKeys,
     stockDraftTotalQty,
@@ -407,6 +423,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     setShipLineDeliveries,
     setCustomer,
     setDelivery,
+    setSender,
     resetDelivery,
     consume,
     rememberResult,
