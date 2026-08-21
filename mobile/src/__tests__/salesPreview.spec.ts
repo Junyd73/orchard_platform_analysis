@@ -626,7 +626,7 @@ describe('SalesPreviewView 2B', () => {
     wrapper.unmount()
   })
 
-  it('주문량 초과 — 수량 clamp · 배송지 추가 차단', async () => {
+  it('주문량 초과 — 수량 미상승 · tip · 배송지 추가 차단', async () => {
     const store = useSalesPrefillStore()
     store.addStockLine(stock({ available_qty: 10 }), 5)
     store.updateShipLine(0, { unit_price: 1000 })
@@ -646,8 +646,8 @@ describe('SalesPreviewView 2B', () => {
 
     ;(sheet.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement).click()
     await flushPromises()
-    let row = sheet.querySelector('[data-testid="sales-preview-dest-row"]')!
-    let inputs = row.querySelectorAll('input')
+    const row = sheet.querySelector('[data-testid="sales-preview-dest-row"]')!
+    const inputs = row.querySelectorAll('input')
     await new DOMWrapper(inputs[0]).setValue('A')
     await new DOMWrapper(inputs[1]).setValue('010')
     await new DOMWrapper(sheet.querySelector('[data-testid="sales-preview-dest-qty"]')!).setValue(
@@ -656,20 +656,30 @@ describe('SalesPreviewView 2B', () => {
     await flushPromises()
     expect(
       (sheet.querySelector('[data-testid="sales-preview-dest-qty"]') as HTMLInputElement).value,
-    ).toBe('5')
-    expect(sheet.querySelector('[data-testid="sales-preview-dest-err"]')?.textContent || '').toContain(
+    ).toBe('1')
+    expect(document.querySelector('[data-testid="sales-preview-dest-tip"]')?.textContent || '').toContain(
       '주문량을 초과',
     )
-    await new DOMWrapper(inputs[4]).setValue('서울')
+    expect(sheet.querySelector('[data-testid="sales-preview-dest-err"]')).toBeFalsy()
+
+    await new DOMWrapper(
+      sheet.querySelector('[data-testid="sales-preview-dest-qty"]')!,
+    ).setValue('5')
+    await flushPromises()
+    const inputsAfter = sheet
+      .querySelector('[data-testid="sales-preview-dest-row"]')!
+      .querySelectorAll('input')
+    await new DOMWrapper(inputsAfter[4]).setValue('서울')
     ;(sheet.querySelector('[data-testid="sales-preview-dest-save"]') as HTMLButtonElement).click()
     await flushPromises()
 
     ;(sheet.querySelector('[data-testid="sales-preview-dest-add"]') as HTMLButtonElement).click()
     await flushPromises()
     expect(sheet.querySelector('[data-testid="sales-preview-dest-row"]')).toBeFalsy()
-    expect(sheet.querySelector('[data-testid="sales-preview-dest-err"]')?.textContent || '').toContain(
+    expect(document.querySelector('[data-testid="sales-preview-dest-tip"]')?.textContent || '').toContain(
       '모두 지정',
     )
+    expect(sheet.querySelector('[data-testid="sales-preview-dest-err"]')).toBeFalsy()
     wrapper.unmount()
   })
 

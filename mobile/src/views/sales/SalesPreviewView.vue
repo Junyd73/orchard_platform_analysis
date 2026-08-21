@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
@@ -91,6 +91,7 @@ const MSG_CANCEL_PREP = '진행 중인 판매 준비를 취소하시겠습니까
 const MSG_DEST_INCOMPLETE = '수령인·연락처·주소를 입력해 주세요.'
 const MSG_DEST_QTY_OVER = '주문량을 초과할 수 없습니다.'
 const MSG_DEST_ADD_OVER = '주문량이 모두 지정되어 배송지를 추가할 수 없습니다.'
+const DEST_TIP_MS = 1800
 const HINT_PARCEL_DONE = '배송지 지정 완료'
 
 const router = useRouter()
@@ -112,6 +113,10 @@ const destEditIdx = ref<number | null>(null)
 const destFormIdx = ref<number | null>(null)
 const destDrafts = ref<ShipDeliveryDraft[]>([])
 const destSheetErr = ref('')
+/** 초과 안내 — 하단 문구 대신 입력/버튼 옆 고정 tip (경량, 라이브러리 없음) */
+const destTip = ref<{ text: string; top: number; left: number } | null>(null)
+const destQtyInputKey = ref(0)
+let destTipTimer: ReturnType<typeof setTimeout> | null = null
 /** 공통 배송메모 — 상품정보 | 주문자 | 직접입력 */
 const destCommonMemoMode = ref<string>(DEST_MEMO_MODE_PRODUCT)
 /** 선택값 채우기 + 직접 수정 공용 텍스트 */
@@ -291,6 +296,7 @@ function closeDestSheet() {
   destSheetErr.value = ''
   destCommonMemoMode.value = DEST_MEMO_MODE_PRODUCT
   destCommonMemoText.value = ''
+  hideDestTip()
 }
 
 function customerDefaults() {
@@ -378,30 +384,40 @@ function destMaxQtyForRow(di: number): number {
   return Math.max(0, destSaleQtyNum() - destAssignedSumExcept(di))
 }
 
-function clearDestOverErr() {
-  if (
-    destSheetErr.value === MSG_DEST_QTY_OVER ||
-    destSheetErr.value === MSG_DEST_ADD_OVER
-  ) {
-    destSheetErr.value = ''
+function hideDestTip() {
+  destTip.value = null
+  if (destTipTimer != null) {
+    clearTimeout(destTipTimer)
+    destTipTimer = null
   }
 }
 
-/** 수량 입력 — 주문량 초과분 강제 clamp + 안내 */
+function showDestTipNear(selector: string, text: string) {
+  const el = document.querySelector(selector) as HTMLElement | null
+  const r = el?.getBoundingClientRect()
+  destTip.value = {
+    text,
+    top: r ? r.top - 6 : 96,
+    left: r ? r.left + r.width / 2 : Math.round(window.innerWidth / 2),
+  }
+  if (destTipTimer != null) clearTimeout(destTipTimer)
+  destTipTimer = setTimeout(() => {
+    destTip.value = null
+    destTipTimer = null
+  }, DEST_TIP_MS)
+}
+
+/** 수량 입력 — 초과 시 값 유지(미상승) + 입력 옆 tip */
 function setDestQty(di: number, raw: string) {
   const maxForRow = destMaxQtyForRow(di)
   const wanted = Math.max(1, Math.floor(Number(String(raw).replace(/,/g, '')) || 1))
-  if (maxForRow < 1) {
-    destSheetErr.value = MSG_DEST_QTY_OVER
-    return
-  }
-  if (wanted > maxForRow) {
-    patchDestDraft(di, { qty: maxForRow })
-    destSheetErr.value = MSG_DEST_QTY_OVER
+  if (wanted > maxForRow || maxForRow < 1) {
+    destQtyInputKey.value += 1
+    showDestTipNear('[data-testid="sales-preview-dest-qty"]', MSG_DEST_QTY_OVER)
     return
   }
   patchDestDraft(di, { qty: wanted })
-  clearDestOverErr()
+  hideDestTip()
 }
 
 /** 편집 폼 → 상단 요약. 유효하지 않으면 false */
@@ -418,11 +434,13 @@ function collapseDestForm(): boolean {
     return false
   }
   if (destAssignedSum() > destSaleQtyNum()) {
-    destSheetErr.value = MSG_DEST_QTY_OVER
+    destQtyInputKey.value += 1
+    showDestTipNear('[data-testid="sales-preview-dest-qty"]', MSG_DEST_QTY_OVER)
     return false
   }
   destFormIdx.value = null
   destSheetErr.value = ''
+  hideDestTip()
   return true
 }
 
@@ -431,7 +449,7 @@ function addDestDraft() {
   const sale = destSaleQtyNum()
   const got = destAssignedSum()
   if (got >= sale) {
-    destSheetErr.value = MSG_DEST_ADD_OVER
+    showDestTipNear('[data-testid="sales-preview-dest-add"]', MSG_DEST_ADD_OVER)
     return
   }
   const defs = customerDefaults()
@@ -446,7 +464,8 @@ function addDestDraft() {
     }),
   ]
   destFormIdx.value = destDrafts.value.length - 1
-  clearDestOverErr()
+  destSheetErr.value = ''
+  hideDestTip()
 }
 
 function editDestDraft(di: number) {
@@ -606,6 +625,10 @@ onMounted(async () => {
   } catch {
     /* 로컬 기본 유지 */
   }
+})
+
+onBeforeUnmount(() => {
+  hideDestTip()
 })
 </script>
 
@@ -1066,6 +1089,7 @@ onMounted(async () => {
                 </OdsFormField>
                 <OdsFormField :label="LABEL_DEST_QTY" required>
                   <OdsInput
+                    :key="`dest-qty-${destFormIdx}-${destQtyInputKey}`"
                     :model-value="String(destDrafts[destFormIdx].qty)"
                     type="number"
                     min="1"
@@ -1145,6 +1169,15 @@ onMounted(async () => {
             </OdsButton>
           </footer>
         </div>
+      </div>
+      <div
+        v-if="destTip"
+        class="dest-tip"
+        data-testid="sales-preview-dest-tip"
+        role="status"
+        :style="{ top: `${destTip.top}px`, left: `${destTip.left}px` }"
+      >
+        {{ destTip.text }}
       </div>
     </Teleport>
   </div>
@@ -1909,6 +1942,23 @@ onMounted(async () => {
   margin: 0;
   color: var(--ods-color-danger, #b00020);
   font: var(--ods-font-footnote, 12px);
+}
+.dest-tip {
+  position: fixed;
+  z-index: 90;
+  transform: translate(-50%, -100%);
+  max-width: min(280px, calc(100vw - 24px));
+  padding: var(--ods-space-4) var(--ods-space-8);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-text) 88%, transparent);
+  color: var(--ods-color-white, #fff);
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  white-space: normal;
 }
 .dest-sheet__foot {
   padding: var(--ods-space-12) var(--ods-space-16) calc(var(--ods-space-12) + env(safe-area-inset-bottom, 0px));
