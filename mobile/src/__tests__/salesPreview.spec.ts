@@ -372,6 +372,9 @@ describe('SalesPreviewView 2B', () => {
     expect(line.find('.line__title').exists()).toBe(true)
     expect(line.find('[data-testid="sales-preview-qty"]').text()).toBe('3')
     expect(line.find('[data-testid="sales-preview-price"]').exists()).toBe(true)
+    expect((line.find('[data-testid="sales-preview-price"]').element as HTMLInputElement).value).toBe(
+      '50,000',
+    )
     expect(line.find('[data-testid="sales-preview-edit"]').exists()).toBe(true)
     expect(line.find('[data-testid="sales-preview-remove"]').exists()).toBe(true)
     expect(line.find('.qty__btn').exists()).toBe(false)

@@ -147,9 +147,14 @@ const parcelHeaderHint = computed(() => {
 })
 
 function normalizeShipFee(raw: unknown): number {
-  const n = Number(raw)
+  const n = Number(String(raw ?? '').replace(/,/g, ''))
   if (!Number.isFinite(n) || n < 0) return 0
   return Math.round(n)
+}
+
+/** 화면 금액 표시 — #,##0 */
+function formatAmt(n: number): string {
+  return formatOrderAmt(n)
 }
 
 const canSubmit = computed(() => {
@@ -540,14 +545,12 @@ onMounted(async () => {
                   <span class="line__title">{{ formatPreviewLineSpec(ln) }}</span>
                   <span class="line__qty" data-testid="sales-preview-qty">{{ ln.qty }}</span>
                   <OdsInput
-                    :model-value="String(ln.unit_price)"
-                    type="number"
-                    min="0"
-                    step="1"
+                    :model-value="formatAmt(Number(ln.unit_price))"
+                    type="text"
                     inputmode="numeric"
                     variant="form"
                     bare
-                    class="line__price"
+                    class="line__price amt-input"
                     data-testid="sales-preview-price"
                     aria-label="단가"
                     @update:model-value="setPrice(idx, $event)"
@@ -661,24 +664,22 @@ onMounted(async () => {
           <div class="footer__panel">
             <p class="footer__top">
               <span class="footer__count">{{ lines.length }}품목 · {{ totalQty }}{{ unitHint }}</span>
-              <span class="footer__item-amt">상품 {{ formatOrderAmt(itemAmt) }}원</span>
+              <span class="footer__item-amt">상품 {{ formatAmt(itemAmt) }}원</span>
             </p>
             <p class="footer__row">
               <span class="footer__lbl">{{ LABEL_SHIP_FEE }}</span>
               <span class="footer__val footer__val--fee">
                 <template v-if="isParcel">
-                  <span data-testid="sales-preview-ship-fee-sum">{{ formatOrderAmt(safeShipFee) }}</span>원
+                  <span data-testid="sales-preview-ship-fee-sum">{{ formatAmt(safeShipFee) }}</span>원
                 </template>
                 <template v-else>
                   <OdsInput
-                    :model-value="String(safeShipFee)"
-                    type="number"
-                    min="0"
-                    step="1"
+                    :model-value="formatAmt(safeShipFee)"
+                    type="text"
                     inputmode="numeric"
                     variant="form"
                     bare
-                    class="footer__fee"
+                    class="footer__fee amt-input"
                     data-testid="sales-preview-ship-fee"
                     aria-label="배송비"
                     @update:model-value="setShipFee($event)"
@@ -690,7 +691,7 @@ onMounted(async () => {
             <div class="footer__divider" aria-hidden="true" />
             <p class="footer__total">
               <span class="footer__lbl">{{ LABEL_TOTAL }}</span>
-              <strong>{{ formatOrderAmt(payAmt) }}원</strong>
+              <strong>{{ formatAmt(payAmt) }}원</strong>
             </p>
           </div>
           <OdsButton
@@ -785,13 +786,12 @@ onMounted(async () => {
               </OdsFormField>
               <OdsFormField label="배송비" required>
                 <OdsInput
-                  :model-value="String(d.ship_fee)"
-                  type="number"
-                  min="0"
-                  step="1"
+                  :model-value="formatAmt(Number(d.ship_fee))"
+                  type="text"
                   inputmode="numeric"
                   variant="form"
                   bare
+                  class="amt-input"
                   data-testid="sales-preview-dest-fee"
                   @update:model-value="patchDestDraft(di, { ship_fee: normalizeShipFee($event) })"
                 />
@@ -884,7 +884,7 @@ onMounted(async () => {
   overflow: hidden;
   /* header / row 공통 column — 동일 변수 공유 */
   --line-col-qty: 42px;
-  --line-col-price: 100px;
+  --line-col-price: 72px;
   --line-col-actions: 80px;
   --line-gap: var(--ods-space-8);
   --line-pad-x: var(--ods-space-16);
@@ -897,14 +897,13 @@ onMounted(async () => {
 }
 .header-row {
   display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr);
+  grid-template-columns: 3.25rem minmax(0, 1fr);
   column-gap: var(--ods-space-8);
   align-items: center;
   min-width: 0;
 }
 .header-row__lbl {
-  font: var(--ods-font-caption);
-  font-weight: 700;
+  font: var(--ods-font-form-label);
   color: var(--ods-color-text-label);
   white-space: nowrap;
 }
@@ -1076,6 +1075,12 @@ onMounted(async () => {
   font-variant-numeric: tabular-nums;
   border-radius: var(--ods-radius-button);
   box-sizing: border-box;
+}
+.amt-input :deep(input.ods-input),
+:deep(input.amt-input.ods-input),
+:deep(.amt-input.ods-input) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .line :deep(input.line__price.ods-input::-webkit-outer-spin-button),
 .line :deep(input.line__price.ods-input::-webkit-inner-spin-button) {
@@ -1263,6 +1268,7 @@ onMounted(async () => {
 }
 .footer__val {
   font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--ods-color-text);
 }
 .footer__val--fee {
@@ -1290,6 +1296,7 @@ onMounted(async () => {
   font: var(--ods-font-title-2);
   color: var(--ods-color-primary);
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .footer__fee {
   display: inline-block;
@@ -1331,7 +1338,7 @@ onMounted(async () => {
 @media (max-width: 360px) {
   .preview-card--lines {
     --line-col-qty: 40px;
-    --line-col-price: 88px;
+    --line-col-price: 64px;
     --line-col-actions: 80px;
     --line-gap: var(--ods-space-4);
   }
