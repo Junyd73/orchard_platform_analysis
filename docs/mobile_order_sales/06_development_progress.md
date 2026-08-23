@@ -8,7 +8,9 @@
 > **Stage6B:** 수금내역 GET + Mobile read-only — **완료 · private main 반영 · 운영 미배포**.  
 > **Stage6C:** 신규 일반수금 POST + Mobile inline form — **완료 · private main 반영 · 운영 미배포**.  
 > **DEC-030:** **APPROVED · IMPLEMENTED** (Core `add_payment` · blank/future/before-sales validation).  
-> **다음:** Stage7 **PC 판매관리 정합성** (미착수).  
+> **Stage7A:** PC 출고확정 CONFIRMED read-only — **완료 · private main 반영 · 운영 미배포**.  
+> **DEC-031:** **APPROVED · IMPLEMENTED**. **DEC-032:** **APPROVED · Stage7B 예정**.  
+> **다음:** Stage7B **PC 수금/회계 SalesPaymentService 공용화** (미착수).  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED**. DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
@@ -31,7 +33,8 @@
 | — | Stage6A 판매상세 read-only | **완료 · private main · 운영 미배포** |
 | — | Stage6B 수금내역 read-only | **완료 · private main · 운영 미배포** |
 | — | Stage6C 수금등록 POST | **완료 · private main · 운영 미배포** |
-| — | **다음:** Stage7 PC 판매관리 정합성 | [08 A13](./08_pc_change_scope.md) · [07 DEC-030](./07_decisions.md#dec-030) |
+| — | Stage7A PC 출고확정 판매 보호 | **완료 · private main · 운영 미배포** |
+| — | **다음:** Stage7B PC 수금/회계 SalesPaymentService 공용화 | [08 A13](./08_pc_change_scope.md) · [07 DEC-032](./07_decisions.md#dec-032) |
 | 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
 | 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
 
@@ -43,10 +46,10 @@
 3 판매 수금 Core        ← 완료 · 운영
 4 출고 시 선입금 자동배분  ← 완료 · 운영
 → 5 판매목록  →  6-0 수금상태 계약  →  6A 상세  →  6B 수금내역  →  6C 수금등록
-→ 7 PC 판매관리 정합성  →  8 가락 DRAFT→CONFIRMED
+→ 7A PC 출고확정 판매 보호  →  7B PC 수금 공용화  →  8 가락 DRAFT→CONFIRMED
 ```
 
-SHA 스냅샷: Stage6-0 merge = `5782681` · Stage6A merge = `8a1a596` · Stage6B merge = `0983540` · Stage6C merge = `e8b62f9` · feature `2492813` · review `cb4ceed` · 운영 backend = `b48ca8b`(Stage5) · Stage6-0/6A/6B/6C = **완료 · private main · 운영 미배포**.
+SHA 스냅샷: Stage6C merge = `e8b62f9` · Stage7A merge = `82dba73` · feature `6181f69` · review `86af693` · 운영 backend = `b48ca8b`(Stage5) · Stage6-0/6A/6B/6C/7A = **완료 · private main · 운영 미배포**.
 
 ---
 
@@ -416,7 +419,8 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 6A 판매상세 read-only  ← 완료 · private main · 운영 미배포
 6B 수금내역 read-only  ← 완료 · private main · 운영 미배포
 6C 수금등록 POST  ← 완료 · private main · 운영 미배포
-7 PC 판매관리 정합성  ← 다음 (미착수)
+7A PC 출고확정 판매 보호  ← 완료 · private main · 운영 미배포
+7B PC 수금/회계 공용화  ← 다음 (미착수)
 8  가락 DRAFT→CONFIRMED
 ```
 
@@ -431,7 +435,9 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | 6A | **판매상세 read-only** | **완료 · private main · 운영 미배포** | `GET /sales/{sales_no}` · `SalesDetailView` · cash SUM SSOT · FIFO UI grouping · 배송 제외 · SELECT only | 6-0 |
 | 6B | **수금내역 read-only** | **완료 · private main · 운영 미배포** | `GET /sales/{sales_no}/payments` · cash 행 SSOT · GENERAL/ORDER_PREPAY · method명 · SELECT only | 6A |
 | 6C | **수금등록** | **완료 · private main · 운영 미배포** | `POST /sales/{sales_no}/payments` · `SalesPaymentService.add_payment` · Mobile inline form · DEC-030 Core validation · PUT/수정/삭제 없음 | 6B |
-| 7 | **PC 판매관리 정합성** | **예정 · 미착수** | PC `SalesPage` 회계 호출부를 공용 Core로 위임 ([08 A13](./08_pc_change_scope.md)). **검토대상:** `order_detail_id` 재저장 보존 · shipment-generated CONFIRMED 수정경계 · 판매삭제 ledger/cash 정합 · PC↔모바일 수금계약 정합 | 6C |
+| 7A | **PC 출고확정 판매 보호** | **완료 · private main · 운영 미배포** | DEC-031: CONFIRMED + (`order_no` \| `order_detail_id` \| `stock_seq`) → PC read-only · UI disable + save/delete backstop + 배송 edit 차단 | 6C |
+| 7B | **PC 수금/회계 공용화** | **예정 · 미착수** | DEC-032: 기존 수금 수정/삭제 금지 · 신규 append-only · `SalesPaymentService` · DEC-030 | 7A |
+| 7 | **PC 판매관리 정합성 (잔여)** | **예정 · 미착수** | `order_detail_id` 재저장 보존 · 판매삭제 ledger/cash · PC↔모바일 수금계약 ([08 A13](./08_pc_change_scope.md)) | 7B |
 | 8 | **가락 DRAFT→CONFIRMED** | **예정** | confirm TX + 선택 수금 (DEC-010). DEC-016 OPEN 선결 | 3·7 |
 
 **스키마 확인 결과 (2026-08-21 조사 · Stage4 DDL 0):**

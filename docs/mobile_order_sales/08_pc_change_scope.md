@@ -40,6 +40,7 @@
 | 15 | 수금/회계 공용화 | `sales_page.execute_full_save` 안에 `t_cash_ledger` INSERT + slip 매핑이 페이지에 있음 | PC와 모바일이 **같은 AccountManager Core 경로**를 쓴다 (DEC-007 · DEC-029). 페이지별 회계 SQL 복제 금지 |
 | 16 | 수금상태 표현 | 미수 표시가 화면 로컬 계산·색상 로직 | `tot_paid_amt`/`tot_unpaid_amt` 기준 계산 규칙 통일 (DEC-029). `sales_status`에 수금 의미 넣지 않음 |
 | 17 | 선입금 결제수단 | `t_order_master`에 컬럼 없음 | `pre_pay_method_cd` 제안 (DEC-028). **DDL 미실행** |
+| 18 | 출고확정 CONFIRMED read-only | PC `execute_full_save`가 출고 판매도 재저장 | DEC-031: CONFIRMED + 추적키 → read-only · **Stage7A private main · 운영 미배포** |
 
 P1: 판매 삭제 시 `t_ledger` (1차는 삭제 비활성).  
 P2: 배송 팝업 키 `delivery_qty` vs `dlvry_qty`, `load_existing_data` 주석화.
@@ -120,6 +121,17 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 | 수금상태 | 컬럼 신설 없음. `tot_paid_amt`/`tot_unpaid_amt`에서 미수/부분수금/수금완료 계산 (DEC-029) |
 | 선입금 | 출고확정 TX에서 `min(선입금 잔액, 판매금액)` 순차 적용 (DEC-019). PC 출고 경로도 동일 규칙 |
 | 비범위 | **PC SalesPage 전면 재작성**. 화면 레이아웃·기존 판매 저장 UX는 유지하고 회계 호출부만 Core로 위임 |
+
+### A14. 출고확정 CONFIRMED read-only — P0 (DEC-031 · Stage7A)
+
+| | |
+|--|--|
+| 현재 | 출고 생성 CONFIRMED 판매도 PC `execute_full_save` DELETE→INSERT 재저장 가능 |
+| 문제 | `order_detail_id`/`stock_seq`/`order_no` 정합성 훼손 · 재고·주문 추적 불일치 |
+| 확정 | CONFIRMED + (`order_no` \| `order_detail_id` \| `stock_seq`) → read-only. UI disable + save/delete DB backstop |
+| helper | `core/pc_sales_provenance.py` — `is_shipment_confirmed_sale_locked` · `assert_sale_mutable` |
+| Stage7A | **완료 · private main · 운영 미배포** — protected 판매 수금 버튼 disable + 배송 edit 차단. DEC-032 본구현은 Stage7B |
+| 금지 | `order_detail_id` 재INSERT 우회 · protected 판매 partial edit |
 
 ---
 

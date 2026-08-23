@@ -39,6 +39,8 @@
 | DEC-028 | 주문 선입금 **결제수단** (금액>0이면 필수) | DEC-028 |
 | DEC-029 | **판매상태 ≠ 수금상태** (수금상태는 금액 계산값) | DEC-029 |
 | DEC-030 | **신규 수금일** `sales_dt ≤ pay_dt ≤ today` (legacy 조회만) | DEC-030 |
+| DEC-031 | **출고확정 CONFIRMED** PC read-only | DEC-031 |
+| DEC-032 | **PC 수금 append-only** (구현 Stage7B) | DEC-032 |
 
 ---
 
@@ -511,6 +513,38 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ---
 
+## DEC-031
+
+**출고로 생성된 CONFIRMED 판매는 PC에서 read-only로 취급한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | `sales_status='CONFIRMED'` AND (`t_sales_master.order_no` OR `t_sales_detail.order_detail_id` OR `t_sales_detail.stock_seq` 실값) → PC `SalesPage` full-save·삭제·수금 mutation **금지** |
+| 판정 | UI flag만 신뢰 금지. `load_sales_data` + `execute_full_save`/`delete_sales_data` 직전 DB 재확인 |
+| 제외 | DRAFT · 일반 PC 직접판매(CONFIRMED·추적키 없음) |
+| 정정 | 별도 취소/정정 절차만 (이번 범위 아님) |
+| 구현 | **APPROVED · IMPLEMENTED** · Stage7A private main merge(`82dba73`) · `core/pc_sales_provenance.py` |
+| 영향 | [03 §4](./03_data_contract.md) · [08 A13+](./08_pc_change_scope.md) · PC `SalesPage` |
+| 승인 | **2026-08-23 대표** |
+
+---
+
+## DEC-032
+
+**PC 수금은 append-only로 통일한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 기존 수금 **수정/삭제 금지** · 신규 일반수금만 append · Core = `SalesPaymentService` · DEC-030 동일 |
+| Stage7A | protected 판매 수금 등록/수정/삭제 버튼 disable (full-save 경유 차단) |
+| 구현 | **Stage7B 예정** (PC 수금 UI → `SalesPaymentService` append) |
+| 영향 | [08 A13](./08_pc_change_scope.md) · PC `SalesPage` 수금 탭 |
+| 승인 | **2026-08-23 대표** |
+
+---
+
 ## OPEN-PROD (CLOSED — 2026-08-19 대표 최종승인)
 
 설계 확정. Stage H/P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). 잔여 OPEN은 [06](./06_development_progress.md).
@@ -529,12 +563,12 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | ID | 상태 |
 |----|------|
-| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029, 030** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
+| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029, 030, 031, 032** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | DEC-015, 016 | **OPEN** |
 | **OPEN-PROD-01~03** | **CLOSED** (설계·Core 반영됨. 상세 현황은 [06 현재 운영 기준](./06_development_progress.md)) |
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.  
-2026-08-23 갱신: **DEC-030 신규 APPROVED**(신규 수금일 `sales_dt ≤ pay_dt ≤ today` · legacy 조회만) · **Stage6C private main merge**(`e8b62f9`) · DEC-030 **IMPLEMENTED**.
+2026-08-23 갱신: **Stage7A private main merge**(`82dba73`) · **DEC-031 IMPLEMENTED** · DEC-032 **Stage7B 예정**.
 
 ### 스키마 확인 (2026-08-22)
 

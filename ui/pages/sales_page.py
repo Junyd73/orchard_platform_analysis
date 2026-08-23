@@ -14,10 +14,17 @@ from ui.styles import MainStyles
 from core.account_manager import AccountManager
 from core.pc_sales_provenance import (
     MSG_PREPAY_CASH_IMMUTABLE,
+    MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED,
+    MSG_SHIPMENT_CONFIRMED_SALE_SAVE_BLOCKED,
     PcPrepayImmutableError,
+    PcShipmentConfirmedSaleLockedError,
+    apply_protected_confirmed_sale_ui_lock,
+    assert_sale_mutable,
     cash_order_no_on_resave,
     fetch_master_order_no,
     fetch_master_sales_dt,
+    is_shipment_confirmed_sale_locked,
+    is_protected_delivery_edit_blocked,
     validate_pc_prepay_save,
 )
 from ui.ops_qdate import qdate_today_ops
@@ -1015,6 +1022,7 @@ class SalesPage(QWidget):
         self.current_sales_status = self.SALES_STATUS_CONFIRMED
         self.current_sales_source = self.SALES_SOURCE_ORDER
         self.custm_id = None          # 선택된 거래처 코드 (상태 관리용)
+        self.is_protected_confirmed_sale = False
         
         # 디자인 가이드 적용 및 UI 초기화
 
@@ -1283,6 +1291,14 @@ class SalesPage(QWidget):
 
         self.master_group.setLayout(master_layout)
         self.main_layout.addWidget(self.master_group)
+
+        self.lbl_protected_sale_hint = QLabel("")
+        self.lbl_protected_sale_hint.setWordWrap(True)
+        self.lbl_protected_sale_hint.setStyleSheet(
+            "color: #C62828; font-size: 11px; padding: 4px 8px;"
+        )
+        self.lbl_protected_sale_hint.setVisible(False)
+        self.main_layout.addWidget(self.lbl_protected_sale_hint)
 
         # ---------------------------------------------------------
         # 2. 품목 및 물류 설정 영역 (2단)
@@ -1559,9 +1575,14 @@ class SalesPage(QWidget):
 
         return tab
 
+    def _apply_protected_confirmed_sale_ui(self, locked: bool) -> None:
+        """DEC-031 — 출고확정 CONFIRMED 판매 UI read-only."""
+        apply_protected_confirmed_sale_ui_lock(self, locked)
+
     # 판매관리마스터 화면 초기화
     def clear_sales_form(self):
         """화면의 모든 데이터를 초기화하고 신규 등록 모드로 전환합니다."""
+        self._apply_protected_confirmed_sale_ui(False)
         # 1. 상태 변수 및 메모리 데이터 초기화
         self.current_sales_no = None
         self.current_sales_status = self.SALES_STATUS_CONFIRMED
@@ -1788,7 +1809,13 @@ class SalesPage(QWidget):
             self.calculate_amounts()
             # 혹시 남아있을지 모를 깃발도 초기화
             self.is_financial_changed = False
-            self.is_info_changed = False 
+            self.is_info_changed = False
+            locked = is_shipment_confirmed_sale_locked(
+                dict(m).get("sales_status"),
+                dict(m).get("order_no"),
+                [dict(row) for row in items],
+            )
+            self._apply_protected_confirmed_sale_ui(locked)
             QMessageBox.information(self, "조회", f"판매번호 [{sales_no}] 로드 완료")
 
         except Exception as e:
@@ -1804,6 +1831,17 @@ class SalesPage(QWidget):
         # 1. 대상 확인
         if not self.current_sales_no:
             QMessageBox.warning(self, "알림", "삭제할 판매 건을 먼저 조회해주세요.")
+            return
+
+        try:
+            assert_sale_mutable(
+                self.db.conn.cursor(),
+                self.farm_cd,
+                self.current_sales_no,
+                action="delete",
+            )
+        except PcShipmentConfirmedSaleLockedError as e:
+            QMessageBox.warning(self, "삭제 불가", str(e) or MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED)
             return
 
         # 2. 사용자 확인 (중요 비즈니스 로직)
@@ -1923,6 +1961,8 @@ class SalesPage(QWidget):
     # 테이블 더블클릭 이벤트 실행 함수
     def on_dlvry_table_double_clicked(self, row, column):
         """[지기님 로직] 더블클릭한 row 번호를 그대로 사용하여 배송지 수정"""
+        if is_protected_delivery_edit_blocked(self.is_protected_confirmed_sale):
+            return
         # 1. 상단 품목 테이블에서 선택된 행 번호 확인 (데이터 맵의 주소)
         active_sales_row = getattr(self, 'active_row', 0)
         
@@ -2638,6 +2678,14 @@ class SalesPage(QWidget):
             if not s_no:
                 s_no = self.generate_sales_no(sales_date_str)
                 self.sales_no.setText(s_no)
+            else:
+                cur = self.db.conn.cursor()
+                cur.execute(
+                    "SELECT 1 FROM t_sales_master WHERE farm_cd = ? AND sales_no = ?",
+                    (self.farm_cd, s_no),
+                )
+                if cur.fetchone():
+                    assert_sale_mutable(cur, self.farm_cd, s_no, action="save")
 
             def get_amt(w): return float(w.text().replace(',', '') or 0)
             
@@ -2867,6 +2915,12 @@ class SalesPage(QWidget):
 
         except PcPrepayImmutableError as e:
             QMessageBox.warning(self, "선입금 변경 불가", str(e) or MSG_PREPAY_CASH_IMMUTABLE)
+        except PcShipmentConfirmedSaleLockedError as e:
+            QMessageBox.warning(
+                self,
+                "저장 불가",
+                str(e) or MSG_SHIPMENT_CONFIRMED_SALE_SAVE_BLOCKED,
+            )
         except Exception as e:
             QMessageBox.critical(self, "치명적 오류", f"❌ 저장 중 예외 발생: {str(e)}")
             traceback.print_exc()
@@ -2907,6 +2961,8 @@ class SalesPage(QWidget):
     # 배송지 상세 내역 수정 기능
     def on_item_double_clicked(self, row, column):
         """행 더블클릭 시 해당 품목의 배송지 팝업 오픈 (수정 모드)"""
+        if is_protected_delivery_edit_blocked(self.is_protected_confirmed_sale):
+            return
         # [조건 체크] 배송 방식이 '택배' 또는 '화물'일 때만 작동하게 제한 (선택 사항)
         dlvry_tp_cb = self.item_table.cellWidget(row, 11)
         if dlvry_tp_cb:
@@ -2921,6 +2977,8 @@ class SalesPage(QWidget):
 
     def open_delivery_popup_for_row(self, row):
         """특정 행의 배송지 관리 팝업을 실행하고 결과를 저장 (sender_info 에러 해결)"""
+        if is_protected_delivery_edit_blocked(self.is_protected_confirmed_sale):
+            return
         # 1. 기존 데이터 및 상품 정보 준비
         existing_data = self.delivery_map.get(row, [])
         item_nm = self.item_table.cellWidget(row, 1).currentText()
