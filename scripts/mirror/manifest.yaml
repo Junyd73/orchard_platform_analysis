@@ -144,6 +144,9 @@ include:
   - src: core/work_log_integrated_save_service.py
     dest: core/work_log_integrated_save_service.py
 
+  - src: core/pc_sales_provenance.py
+    dest: core/pc_sales_provenance.py
+
   - src: ui/pages/sales_page.py
     dest: ui/pages/sales_page.py
 
