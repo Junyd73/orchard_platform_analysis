@@ -95,3 +95,9 @@ export interface SalesPaymentHistory {
   payment_status: PaymentStatus
   payments: SalesPaymentItem[]
 }
+
+export interface SalesPaymentCreatePayload {
+  pay_dt: string
+  pay_amt: number
+  pay_method_cd: string
+}

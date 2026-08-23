@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 _HERE = Path(__file__).resolve()
 _SERVER = _HERE.parents[1]
@@ -24,8 +25,14 @@ from core.sales_payment_constants import (  # noqa: E402
     COLLECTION_STATUS_PAID,
     COLLECTION_STATUS_PARTIAL,
     COLLECTION_STATUS_UNPAID,
+    ERR_PAY_DT_BEFORE_SALES,
+    ERR_PAY_DT_FUTURE,
+    ERR_PAY_DT_INVALID,
     MSG_PAY_AMT_INVALID,
     MSG_PAY_AMT_OVER_UNPAID,
+    MSG_PAY_DT_BEFORE_SALES,
+    MSG_PAY_DT_FUTURE,
+    MSG_PAY_DT_INVALID,
     MSG_PAY_METHOD_INVALID,
     MSG_SALES_DRAFT_PAYMENT_FORBIDDEN,
     MSG_SALES_NOT_FOUND,
@@ -48,6 +55,10 @@ FARM_B = "OR002"
 SALES_A = "20260821-01"
 SALES_B = "20260821-02"
 SALES_DT = "2026-08-21"
+
+
+def _iso_offset(iso: str, days: int) -> str:
+    return (date.fromisoformat(iso) + timedelta(days=days)).isoformat()
 
 
 def _schema_sql() -> str:
@@ -105,6 +116,7 @@ def _insert_sales(
     sales_no: str = SALES_A,
     farm_cd: str = FARM,
     status: str = SALES_STATUS_CONFIRMED,
+    sales_dt: str = SALES_DT,
     tot: float = 300000,
     paid: float | None = None,
     unpaid: float | None = None,
@@ -119,7 +131,7 @@ def _insert_sales(
             tot_sales_amt, tot_paid_amt, tot_unpaid_amt, order_no
         ) VALUES (?,?,?,?,?,?,?,?)
         """,
-        (sales_no, farm_cd, SALES_DT, status, tot, p, u, order_no),
+        (sales_no, farm_cd, sales_dt, status, tot, p, u, order_no),
     )
 
 
@@ -869,6 +881,183 @@ class SalesPaymentHistoryStage6BTest(unittest.TestCase):
         self.conn.commit()
         s = self.svc.get_payment_summary(FARM, SALES_A)
         self.assertEqual(s["payments"][0]["pay_method_nm"], "AS999999")
+
+
+class SalesPaymentDec030Tests(unittest.TestCase):
+    """DEC-030 — 일반수금 pay_dt validation (source_order_no=None only)."""
+
+    def setUp(self) -> None:
+        AccountManager._shared_seq_cache.clear()
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.conn = sqlite3.connect(self.path)
+        self.conn.row_factory = sqlite3.Row
+        cur = self.conn.cursor()
+        cur.executescript(_schema_sql())
+        _seed_accounts(cur)
+        self.conn.commit()
+        self.svc = SalesPaymentService(self.conn)
+        self.today = today_ops_iso()
+        self.sales_dt = _iso_offset(self.today, -2)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+    def _insert(self, *, sales_dt: str | None = None, tot: float = 100000) -> None:
+        _insert_sales(
+            self.conn.cursor(),
+            sales_dt=sales_dt or self.sales_dt,
+            tot=tot,
+        )
+        self.conn.commit()
+
+    def _add(self, pay_dt: str, amt: float = 10000) -> dict:
+        return self.svc.add_payment(
+            PaymentAddIn(
+                farm_cd=FARM,
+                sales_no=SALES_A,
+                pay_amt=amt,
+                pay_method_cd="AS010101",
+                pay_dt=pay_dt,
+                user_id="T",
+                source_order_no=None,
+            )
+        )
+
+    def _counts(self) -> tuple[int, int, float, float]:
+        cash_n = self.conn.execute(
+            "SELECT COUNT(*) FROM t_cash_ledger WHERE farm_cd=? AND sales_no=?",
+            (FARM, SALES_A),
+        ).fetchone()[0]
+        ledger_n = self.conn.execute(
+            """
+            SELECT COUNT(*) FROM t_ledger
+             WHERE farm_cd=? AND ref_id LIKE ?
+            """,
+            (FARM, f"SALE-{SALES_A}-%"),
+        ).fetchone()[0]
+        master = self.conn.execute(
+            "SELECT tot_paid_amt, tot_unpaid_amt FROM t_sales_master WHERE farm_cd=? AND sales_no=?",
+            (FARM, SALES_A),
+        ).fetchone()
+        return cash_n, ledger_n, float(master[0]), float(master[1])
+
+    def test_pay_dt_before_sales_rejected(self) -> None:
+        self._insert()
+        before = self._counts()
+        with self.assertRaises(PaymentValidationError) as ctx:
+            self._add(_iso_offset(self.sales_dt, -1))
+        self.assertIn(MSG_PAY_DT_BEFORE_SALES, str(ctx.exception))
+        self.assertEqual(ctx.exception.code, ERR_PAY_DT_BEFORE_SALES)
+        self.assertEqual(self._counts(), before)
+
+    def test_pay_dt_equals_sales_allowed(self) -> None:
+        self._insert()
+        out = self._add(self.sales_dt)
+        self.assertEqual(out["tot_paid_amt"], 10000)
+        self.assertEqual(self._counts()[0], 1)
+
+    def test_pay_dt_between_sales_and_today_allowed(self) -> None:
+        self._insert()
+        mid = _iso_offset(self.today, -1)
+        self.assertTrue(self.sales_dt < mid < self.today)
+        out = self._add(mid)
+        self.assertEqual(out["tot_paid_amt"], 10000)
+
+    def test_pay_dt_today_allowed(self) -> None:
+        self._insert(sales_dt=self.today)
+        out = self._add(self.today)
+        self.assertEqual(out["tot_paid_amt"], 10000)
+
+    def test_pay_dt_future_rejected(self) -> None:
+        self._insert()
+        before = self._counts()
+        with self.assertRaises(PaymentValidationError) as ctx:
+            self._add(_iso_offset(self.today, 1))
+        self.assertIn(MSG_PAY_DT_FUTURE, str(ctx.exception))
+        self.assertEqual(ctx.exception.code, ERR_PAY_DT_FUTURE)
+        self.assertEqual(self._counts(), before)
+
+    def test_invalid_pay_dt_rejected(self) -> None:
+        self._insert()
+        before = self._counts()
+        with self.assertRaises(PaymentValidationError) as ctx:
+            self._add("not-a-date")
+        self.assertIn(MSG_PAY_DT_INVALID, str(ctx.exception))
+        self.assertEqual(ctx.exception.code, ERR_PAY_DT_INVALID)
+        self.assertEqual(self._counts(), before)
+
+    def test_general_source_order_no_none(self) -> None:
+        self._insert()
+        self._add(self.today)
+        row = self.conn.execute(
+            "SELECT order_no FROM t_cash_ledger WHERE sales_no=?",
+            (SALES_A,),
+        ).fetchone()
+        self.assertIsNone(row[0])
+
+    def test_prepay_skips_dec030_before_sales(self) -> None:
+        order_no = "ORD20260821-001"
+        _insert_sales(
+            self.conn.cursor(),
+            sales_dt=self.today,
+            order_no=order_no,
+        )
+        self.conn.commit()
+        out = self.svc.add_payment(
+            PaymentAddIn(
+                farm_cd=FARM,
+                sales_no=SALES_A,
+                pay_amt=10000,
+                pay_method_cd="AS010101",
+                pay_dt=_iso_offset(self.today, -5),
+                source_order_no=order_no,
+                user_id="T",
+            )
+        )
+        self.assertEqual(out["tot_paid_amt"], 10000)
+
+    def test_prepay_pay_dt_sales_dt_ok(self) -> None:
+        order_no = "ORD20260821-002"
+        _insert_sales(
+            self.conn.cursor(),
+            sales_dt=self.sales_dt,
+            order_no=order_no,
+        )
+        self.conn.commit()
+        out = self.svc.add_payment(
+            PaymentAddIn(
+                farm_cd=FARM,
+                sales_no=SALES_A,
+                pay_amt=10000,
+                pay_method_cd="AS010101",
+                pay_dt=self.sales_dt,
+                source_order_no=order_no,
+                user_id="T",
+            )
+        )
+        self.assertEqual(out["tot_paid_amt"], 10000)
+
+    def test_legacy_cash_read_unaffected(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur, sales_dt=_iso_offset(self.today, -30))
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, _iso_offset(self.today, -40), "AS010101", 5000, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(len(s["payments"]), 1)
+        self.assertEqual(s["tot_paid_amt"], 5000)
 
 
 if __name__ == "__main__":

@@ -504,7 +504,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | 선입금 자동적용 | Stage4 기존 정책 유지 — cash `pay_dt` = 판매 생성 시점 `sales_dt` |
 | legacy | 기존 DB row는 **수정/삭제/자동보정하지 않음**. 조회만 허용 |
 | 회계 날짜 | `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt`. DEC-030 때문에 `trans_dt`를 `pay_dt`로 바꾸지 않음 |
-| 적용 범위 | **6C 신규 write validation만**. 이번 Stage6B(조회)에는 코드 미적용 |
+| 적용 범위 | **6C POST write validation** · Core `add_payment` / `source_order_no=None` · **IMPLEMENTED IN FEATURE** |
 | 이유 | 미래 수금일은 미발생 데이터 · 판매 이전 일반수금은 판매 수금 흐름과 불일치 · 주문 선입금은 별도 경로 |
 | 영향 | [02 §8.7](./02_domain_flow.md) · [03 §4](./03_data_contract.md) · [05 §8](./05_api_contract.md) · Stage6C |
 | 승인 | **2026-08-23 대표** |

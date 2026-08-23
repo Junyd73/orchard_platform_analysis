@@ -380,7 +380,20 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 | `GENERAL` | NULL/blank | 일반수금 |
 | `ORDER_PREPAY` | 실값 존재 | 선입금 자동적용 (+ `source_order_no`) |
 
-DRAFT도 GET 허용 · `payment_status=null` · legacy cash 숨기지 않음. 수금등록(PUT)은 6C.
+DRAFT도 GET 허용 · `payment_status=null` · legacy cash 숨기지 않음.
+
+### 8.8 수금등록 (Stage6C)
+
+`POST /farms/{farm_cd}/sales/{sales_no}/payments` · Core `SalesPaymentService.add_payment` · **append only**.
+
+| 조건 | UX |
+|------|-----|
+| `sales_status=CONFIRMED` AND `unpaid_amt>0` | Mobile 수금내역 section **[수금 등록]** |
+| DRAFT / 수금완료 | 버튼 없음 |
+
+**provenance:** API adapter `source_order_no=None` → `cash.order_no NULL` → `GENERAL`.
+
+**DEC-030:** Core general-payment write 경계에서 `sales_dt ≤ pay_dt ≤ today`. 선입금 자동적용(`source_order_no` 실값)은 Stage4 기존 정책 · DEC-030 대상 아님.
 
 **DEC-030 (6C write 전용 · 2026-08-23 대표 승인):** 신규 일반 수금등록 `pay_dt`는 `sales_dt ≤ pay_dt ≤ today`만 허용. 판매 이전·미래 수금일 거부. 선입금 자동적용은 기존대로 `sales_dt`를 cash `pay_dt`로 사용. legacy DB 자동보정 없음 · 조회만. `t_ledger.trans_dt = sales_dt` 불변.
 

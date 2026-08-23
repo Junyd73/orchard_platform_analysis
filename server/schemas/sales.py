@@ -100,3 +100,11 @@ class SalesPaymentHistory(BaseModel):
     unpaid_amt: float
     payment_status: str | None = None
     payments: list[SalesPaymentItem]
+
+
+class SalesPaymentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pay_dt: str
+    pay_amt: float
+    pay_method_cd: str

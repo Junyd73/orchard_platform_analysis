@@ -160,7 +160,7 @@ migration 직전 운영 점검 필수 → §15.
 **현재 구현:** 출고 TX에서 판매 INSERT 후 `SalesPaymentService.add_payment_in_tx`로 선입금 적용. `tot_paid_amt`/`tot_unpaid_amt`는 cash SUM 동기화 (DEC-019). **Stage4 · Stage3 Core 완료 · 운영.**  
 **Stage6-0:** `SalesQueryService` · `SalesPaymentService.get_payment_summary`가 동일 `compute_payment_status` helper 사용.  
 **Stage6B:** 수금내역 SSOT = `t_cash_ledger` 행. `payment_source` = `cash.order_no`만으로 `GENERAL`/`ORDER_PREPAY` 파생 (DB 컬럼 추가 없음). rmk/slip/id 패턴 추론 금지.  
-**DEC-030 (6C write):** 신규 일반 수금 `pay_dt`는 `sales_dt ≤ pay_dt ≤ today`. legacy cash는 조회만 · 자동보정 없음. `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt` (불변).  
+**DEC-030 (6C write · feature):** 신규 일반 수금 `pay_dt`는 Core `add_payment`에서 `sales_dt ≤ pay_dt ≤ today` 검증. legacy cash는 조회만 · 자동보정 없음. `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt` (불변).  
 **적용액:** `min(remaining_prepay, 이번 판매 tot_sales_amt)`. 기존 CONFIRMED 판매는 수정하지 않는다.
 
 ---
