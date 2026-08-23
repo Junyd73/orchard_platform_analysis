@@ -138,6 +138,11 @@ def _apply_widget_lock(widget: Any, locked: bool) -> None:
         widget.setReadOnly(locked)
 
 
+def is_protected_delivery_edit_blocked(is_protected_confirmed_sale: bool) -> bool:
+    """DEC-031 — protected 판매 배송 수정/등록 popup 진입 차단."""
+    return bool(is_protected_confirmed_sale)
+
+
 def apply_protected_confirmed_sale_ui_lock(page: Any, locked: bool) -> None:
     """DEC-031 UI read-only. SalesPage가 위임한다. PyQt import 없음."""
     page.is_protected_confirmed_sale = locked

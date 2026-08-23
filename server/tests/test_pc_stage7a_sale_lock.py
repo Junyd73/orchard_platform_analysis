@@ -27,6 +27,7 @@ from core.pc_sales_provenance import (  # noqa: E402
     apply_protected_confirmed_sale_ui_lock,
     assert_sale_mutable,
     fetch_sale_lock_from_db,
+    is_protected_delivery_edit_blocked,
     is_shipment_confirmed_sale_locked,
 )
 
@@ -371,6 +372,54 @@ class Stage7aSaleLockUiTests(unittest.TestCase):
         apply_protected_confirmed_sale_ui_lock(page, False)
         self.assertTrue(page.btn_save.enabled)
         self.assertTrue(page.btn_delete.enabled)
+
+
+def _simulate_dlvry_double_click(
+    *,
+    is_protected: bool,
+    delivery_map: dict,
+    active_row: int,
+    row: int,
+) -> tuple[bool, dict]:
+    """SalesPage.on_dlvry_table_double_clicked guard + mutation stub."""
+    if is_protected_delivery_edit_blocked(is_protected):
+        return False, delivery_map
+    deliveries = delivery_map.get(active_row, [])
+    if not deliveries or row >= len(deliveries):
+        return False, delivery_map
+    updated = dict(deliveries[row])
+    updated["rcv_name"] = "CHANGED"
+    delivery_map[active_row][row] = updated
+    return True, delivery_map
+
+
+class Stage7aDeliveryBypassTests(unittest.TestCase):
+    def test_protected_dlvry_double_click_no_dialog_no_map_change(self) -> None:
+        delivery_map = {0: [{"rcv_name": "ORIGINAL", "delivery_qty": 1}]}
+        original = {0: [{"rcv_name": "ORIGINAL", "delivery_qty": 1}]}
+        opened, result = _simulate_dlvry_double_click(
+            is_protected=True,
+            delivery_map=delivery_map,
+            active_row=0,
+            row=0,
+        )
+        self.assertFalse(opened)
+        self.assertEqual(result, original)
+
+    def test_ordinary_direct_sale_dlvry_double_click_mutates(self) -> None:
+        delivery_map = {0: [{"rcv_name": "ORIGINAL", "delivery_qty": 1}]}
+        opened, result = _simulate_dlvry_double_click(
+            is_protected=False,
+            delivery_map=delivery_map,
+            active_row=0,
+            row=0,
+        )
+        self.assertTrue(opened)
+        self.assertEqual(result[0][0]["rcv_name"], "CHANGED")
+
+    def test_protected_delivery_edit_blocked_helper(self) -> None:
+        self.assertTrue(is_protected_delivery_edit_blocked(True))
+        self.assertFalse(is_protected_delivery_edit_blocked(False))
 
 
 if __name__ == "__main__":

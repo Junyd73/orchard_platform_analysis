@@ -24,6 +24,7 @@ from core.pc_sales_provenance import (
     fetch_master_order_no,
     fetch_master_sales_dt,
     is_shipment_confirmed_sale_locked,
+    is_protected_delivery_edit_blocked,
     validate_pc_prepay_save,
 )
 from ui.ops_qdate import qdate_today_ops
@@ -1960,6 +1961,8 @@ class SalesPage(QWidget):
     # 테이블 더블클릭 이벤트 실행 함수
     def on_dlvry_table_double_clicked(self, row, column):
         """[지기님 로직] 더블클릭한 row 번호를 그대로 사용하여 배송지 수정"""
+        if is_protected_delivery_edit_blocked(self.is_protected_confirmed_sale):
+            return
         # 1. 상단 품목 테이블에서 선택된 행 번호 확인 (데이터 맵의 주소)
         active_sales_row = getattr(self, 'active_row', 0)
         
@@ -2958,6 +2961,8 @@ class SalesPage(QWidget):
     # 배송지 상세 내역 수정 기능
     def on_item_double_clicked(self, row, column):
         """행 더블클릭 시 해당 품목의 배송지 팝업 오픈 (수정 모드)"""
+        if is_protected_delivery_edit_blocked(self.is_protected_confirmed_sale):
+            return
         # [조건 체크] 배송 방식이 '택배' 또는 '화물'일 때만 작동하게 제한 (선택 사항)
         dlvry_tp_cb = self.item_table.cellWidget(row, 11)
         if dlvry_tp_cb:
@@ -2972,6 +2977,8 @@ class SalesPage(QWidget):
 
     def open_delivery_popup_for_row(self, row):
         """특정 행의 배송지 관리 팝업을 실행하고 결과를 저장 (sender_info 에러 해결)"""
+        if is_protected_delivery_edit_blocked(self.is_protected_confirmed_sale):
+            return
         # 1. 기존 데이터 및 상품 정보 준비
         existing_data = self.delivery_map.get(row, [])
         item_nm = self.item_table.cellWidget(row, 1).currentText()
