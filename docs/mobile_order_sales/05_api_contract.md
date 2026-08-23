@@ -302,6 +302,18 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 **Stage 5 (main 반영 · 운영 미배포):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록.
 
+판매목록 대표상품(`rep_*`) — optional schema 방어:
+
+| 필드 | 의미 | 비고 |
+|------|------|------|
+| `rep_variety_nm` | 품종 | `m_common_code` 조인 |
+| `rep_size_nm` | 규격(kg·박스 등) | `size_cd` → 공통코드 명칭 |
+| `rep_grade_nm` | 등급 | `grade_cd` → 공통코드 명칭 |
+| `rep_crop_nm` | 과수(예: 16~20과) | `t_sales_detail.crop_nm` 존재 시만; 코드면 공통코드 명칭으로 resolve |
+| `rep_weight` | 레거시 호환 | DB `weight` 컬럼 없으면 `0` (표시용 kg 생성 금지) |
+
+`t_sales_detail.weight` / `crop_nm` 컬럼 부재·대표 detail 없음·코드 미매칭 시에도 GET 200, 가능 필드만 반환.
+
 **Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock.
 
 **Stage P (구현 완료 · 로컬):** GET harvest-records, GET raw-stock, POST production/confirm.  
