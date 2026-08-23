@@ -539,8 +539,37 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | 상태 | **APPROVED** |
 | 결정 | 기존 수금 **수정/삭제 금지** · 신규 일반수금만 append · Core = `SalesPaymentService` · DEC-030 동일 |
 | Stage7A | protected 판매 수금 등록/수정/삭제 버튼 disable (full-save 경유 차단) |
-| 구현 | **Stage7B 예정** (PC 수금 UI → `SalesPaymentService` append) |
+| 구현 | **APPROVED · Stage7B-1 일부 구현** — full-save cash/ledger mutation 제거 · 기존 수금 read-only · delete backstop. 신규 append UI는 Stage7B-2 |
 | 영향 | [08 A13](./08_pc_change_scope.md) · PC `SalesPage` 수금 탭 |
+| 승인 | **2026-08-23 대표** |
+
+---
+
+## DEC-033
+
+**신규 판매는 저장 후 별도 수금등록한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 신규 판매 저장 **전** 수금등록 금지 · 판매 먼저 저장 · CONFIRMED 저장 후 별도 수금 (Stage7B-2) |
+| Stage7B-1 | clear/new·조회 화면 수금 add/edit/delete **항상 disable** |
+| 영향 | PC `SalesPage` 수금 탭 · [03 §4](./03_data_contract.md) |
+| 승인 | **2026-08-23 대표** |
+
+---
+
+## DEC-034
+
+**판매금액은 실제 누적수금액 미만으로 감액할 수 없다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 일반 직접판매 수정 시 `new tot_sales_amt >= actual paid(cash SSOT)` · 미만이면 저장 전체 차단 |
+| SSOT | `SalesPaymentService.get_payment_summary` → `tot_paid_amt` (master `tot_paid_amt` 신뢰 금지) |
+| 구현 | **Stage7B-1** — `assert_sales_total_not_below_paid` · `execute_full_save` DELETE/INSERT 전 |
+| 영향 | PC `SalesPage` · [03 §4](./03_data_contract.md) |
 | 승인 | **2026-08-23 대표** |
 
 ---
@@ -563,12 +592,12 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | ID | 상태 |
 |----|------|
-| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029, 030, 031, 032** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
+| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029, 030, 031, 032, 033, 034** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | DEC-015, 016 | **OPEN** |
 | **OPEN-PROD-01~03** | **CLOSED** (설계·Core 반영됨. 상세 현황은 [06 현재 운영 기준](./06_development_progress.md)) |
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.  
-2026-08-23 갱신: **Stage7A private main merge**(`82dba73`) · **DEC-031 IMPLEMENTED** · DEC-032 **Stage7B 예정**.
+2026-08-23 갱신: **Stage7A private main merge**(`82dba73`) · **DEC-031 IMPLEMENTED** · DEC-032 **Stage7B-1 일부 구현** · DEC-033/034 **APPROVED**.
 
 ### 스키마 확인 (2026-08-22)
 

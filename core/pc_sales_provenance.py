@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """PC 판매 재저장 — order_no 보존(P1) + 선입금 행 불변(P2) + 판매일 우회차단(P2b)
-+ 출고확정 CONFIRMED 판매 read-only(DEC-031 · Stage7A).
++ 출고확정 CONFIRMED 판매 read-only(DEC-031 · Stage7A)
++ 기존 수금 immutable + 판매금액 backstop(DEC-032/034 · Stage7B-1).
 
 Service 계층이 아님. SalesPage.execute_full_save와 테스트가 동일 규칙을 쓴다.
 """
@@ -27,8 +28,15 @@ MSG_SHIPMENT_CONFIRMED_SALE_SAVE_BLOCKED = (
 MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED = (
     "출고 확정 판매는 삭제할 수 없습니다."
 )
+MSG_SALES_AMT_BELOW_PAID = (
+    "판매금액은 이미 수금된 금액보다 작게 변경할 수 없습니다."
+)
+MSG_SALES_DELETE_HAS_PAYMENTS = (
+    "수금 내역이 있는 판매는 삭제할 수 없습니다."
+)
 
 SALES_STATUS_CONFIRMED = "CONFIRMED"
+_AMT_EPSILON = 1e-9
 
 
 class PcPrepayImmutableError(Exception):
@@ -42,6 +50,20 @@ class PcShipmentConfirmedSaleLockedError(Exception):
     """DEC-031 — 출고 생성 CONFIRMED 판매 mutation 차단."""
 
     def __init__(self, message: str = MSG_SHIPMENT_CONFIRMED_SALE_LOCKED):
+        super().__init__(message)
+
+
+class PcSalesAmtBelowPaidError(Exception):
+    """DEC-034 — 판매금액 < 실제 누적수금액."""
+
+    def __init__(self, message: str = MSG_SALES_AMT_BELOW_PAID):
+        super().__init__(message)
+
+
+class PcSalesDeleteHasPaymentsError(Exception):
+    """DEC-032 — 수금 존재 판매 삭제 차단."""
+
+    def __init__(self, message: str = MSG_SALES_DELETE_HAS_PAYMENTS):
         super().__init__(message)
 
 
@@ -175,9 +197,6 @@ def apply_protected_confirmed_sale_ui_lock(page: Any, locked: bool) -> None:
         getattr(page, "btn_form_down", None),
         getattr(page, "btn_excel_upload", None),
         getattr(page, "btn_excel_down", None),
-        getattr(page, "btn_pay_add", None),
-        getattr(page, "btn_pay_edit", None),
-        getattr(page, "btn_pay_del", None),
     ]
     for widget in master_inputs + master_buttons:
         _apply_widget_lock(widget, locked)
@@ -199,6 +218,116 @@ def apply_protected_confirmed_sale_ui_lock(page: Any, locked: bool) -> None:
         handler = getattr(page, "handle_delivery_tp_change", None)
         if active_row >= 0 and callable(handler):
             handler(active_row)
+
+
+def apply_payment_immutable_ui_lock(page: Any) -> None:
+    """DEC-032 Stage7B-1 — 기존 수금 read-only, add/edit/delete 버튼 항상 disable."""
+    for name in ("btn_pay_add", "btn_pay_edit", "btn_pay_del"):
+        widget = getattr(page, name, None)
+        if widget is not None:
+            widget.setEnabled(False)
+
+    pay_table = getattr(page, "pay_table", None)
+    if pay_table is None:
+        return
+    for r in range(pay_table.rowCount()):
+        for c in range(5):
+            _apply_widget_lock(pay_table.cellWidget(r, c), True)
+
+
+def fetch_actual_paid_amt(conn: sqlite3.Connection, farm_cd: str, sales_no: str) -> float:
+    """기존 판매 actual paid SSOT — SalesPaymentService cash 합계."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT 1
+              FROM t_sales_master
+             WHERE farm_cd = ? AND sales_no = ?
+            """,
+            (farm_cd, sales_no),
+        )
+        if not cur.fetchone():
+            return 0.0
+        from core.sales_payment_service import SalesPaymentService
+
+        summary = SalesPaymentService(conn).get_payment_summary(farm_cd, sales_no)
+        return float(summary.get("tot_paid_amt") or 0)
+    finally:
+        cur.close()
+
+
+def assert_sales_total_not_below_paid(new_total: float, actual_paid: float) -> None:
+    """DEC-034 — DELETE/INSERT 전 판매금액 backstop."""
+    if float(new_total) + _AMT_EPSILON < float(actual_paid):
+        raise PcSalesAmtBelowPaidError()
+
+
+def compute_master_paid_unpaid(new_total: float, actual_paid: float) -> tuple[float, float]:
+    """master tot_paid/tot_unpaid — UI pay_table 합계가 아닌 actual_paid 기준."""
+    paid = float(actual_paid)
+    unpaid = max(0.0, float(new_total) - paid)
+    return paid, unpaid
+
+
+def assert_no_cash_for_delete(
+    cur: sqlite3.Cursor, farm_cd: str, sales_no: str
+) -> None:
+    """DEC-032 — 수금 1건 이상이면 판매 삭제 차단 (confirm dialog 이전)."""
+    cur.execute(
+        """
+        SELECT 1
+          FROM t_cash_ledger
+         WHERE farm_cd = ? AND sales_no = ?
+         LIMIT 1
+        """,
+        (farm_cd, sales_no),
+    )
+    if cur.fetchone():
+        raise PcSalesDeleteHasPaymentsError()
+
+
+def validate_protected_prepay_sales_dt_from_db(
+    cur: sqlite3.Cursor,
+    farm_cd: str,
+    sales_no: str,
+    *,
+    original_sales_dt: Any,
+    current_sales_dt: Any,
+) -> None:
+    """DB cash 실값으로 선입금 판매일 변경 차단 (full-save cash mutation 제거 후)."""
+    cur.execute(
+        """
+        SELECT pay_dt, pay_method_cd, pay_amt, order_no, slip_no, paid_detail_no
+          FROM t_cash_ledger
+         WHERE farm_cd = ? AND sales_no = ?
+        """,
+        (farm_cd, sales_no),
+    )
+    pay_basket: list[dict[str, Any]] = []
+    for row in cur.fetchall():
+        orig = dict(row) if isinstance(row, sqlite3.Row) else {
+            "pay_dt": row[0],
+            "pay_method_cd": row[1],
+            "pay_amt": row[2],
+            "order_no": row[3],
+            "slip_no": row[4],
+            "paid_detail_no": row[5],
+        }
+        pay_basket.append(
+            {
+                "status": "ORG",
+                "orig_data": orig,
+                "pay_dt": orig.get("pay_dt"),
+                "method": orig.get("pay_method_cd"),
+                "pay_method_cd": orig.get("pay_method_cd"),
+                "amt": orig.get("pay_amt"),
+                "pay_amt": orig.get("pay_amt"),
+            }
+        )
+    validate_protected_prepay_sales_dt(
+        pay_basket, original_sales_dt, current_sales_dt
+    )
 
 
 def _norm_pay_dt(raw: Any) -> str:

@@ -147,6 +147,12 @@ include:
   - src: core/pc_sales_provenance.py
     dest: core/pc_sales_provenance.py
 
+  - src: core/sales_payment_service.py
+    dest: core/sales_payment_service.py
+
+  - src: core/sales_payment_constants.py
+    dest: core/sales_payment_constants.py
+
   - src: ui/pages/sales_page.py
     dest: ui/pages/sales_page.py
 
