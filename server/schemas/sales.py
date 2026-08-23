@@ -38,3 +38,41 @@ class SalesListPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class SalesDetailLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sale_detail_no: str
+    order_detail_id: str | None = None
+    item_cd: str = ""
+    variety_cd: str = ""
+    variety_nm: str = ""
+    grade_cd: str = ""
+    grade_nm: str = ""
+    size_cd: str = ""
+    size_nm: str = ""
+    crop_nm: str = ""
+    qty: float = 0
+    unit_price: float = 0
+    item_amt: float = 0
+    wh_cd: str | None = None
+    dlvry_tp: str | None = None
+    stock_seq: int | None = None
+
+
+class SalesDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sales_no: str
+    sales_dt: str
+    custm_id: str
+    customer: str
+    order_no: str | None = None
+    sales_status: str
+    sales_source: str = ""
+    tot_sales_amt: float
+    paid_amt: float
+    unpaid_amt: float
+    payment_status: str | None = None
+    lines: list[SalesDetailLine]

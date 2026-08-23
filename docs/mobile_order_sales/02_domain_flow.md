@@ -363,6 +363,12 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 
 상세: [§12](#12-선입금--수금-dec-009--dec-019--dec-028--dec-029-approved).
 
+### 8.6 판매상세 read-only (Stage6A)
+
+판매목록 행 → `GET /farms/{farm_cd}/sales/{sales_no}` → Mobile `/orders/sales/:salesNo`. **SELECT only** — 수금등록·수정·취소·ledger/cash write 없음.
+
+뒤로가기는 `/orders?tab=sales`로 복귀 (`router.replace`). 배송(`t_sales_delivery`) read-only 표시는 schema 가변성으로 **6A 제외**.
+
 ---
 
 ## 9. 취소

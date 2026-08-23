@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import get_sales_api_service
-from app.schemas.sales import SalesListPage
+from app.schemas.sales import SalesDetail, SalesListPage
 from app.services.sales_api_service import SalesApiService
 
 from core.sales_query_constants import (  # noqa: E402
@@ -45,3 +45,12 @@ def list_sales(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{sales_no}", response_model=SalesDetail)
+def get_sale_detail(
+    farm_cd: str,
+    sales_no: str,
+    service: SalesApiService = Depends(get_sales_api_service),
+) -> SalesDetail:
+    return service.get_sale_detail(farm_cd, sales_no)

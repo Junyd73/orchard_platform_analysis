@@ -233,7 +233,25 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 **응답:** `{ items[], total, page, page_size }` · item: `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`, `rep_*`.
 
-**미구현(Stage 5 범위 외):** GET/POST/PUT 상세·저장 · §8 payments HTTP.
+**미구현(Stage 5 범위 외):** POST/PUT 저장 · §8 payments HTTP.
+
+### 7.2 GET 상세 (Stage6A · read-only · private main · 운영 미배포)
+
+**Core:** `SalesQueryService.get_sale_detail(farm_cd, sales_no)` — SELECT only.
+
+**Path:** `GET /farms/{farm_cd}/sales/{sales_no}`
+
+**Master:** `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`.
+
+**수금 SSOT:** 목록(§7.1)과 동일 — `SUM(t_cash_ledger.pay_amt)` · Stage6-0 `compute_payment_status` / `compute_unpaid_amt`. master `tot_paid_amt`/`tot_unpaid_amt`는 조회에 사용하지 않음.
+
+**Lines:** DB `t_sales_detail` 원본 행을 `sale_detail_no ASC`로 반환. optional schema 방어: `crop_nm`, `wh_cd`, `dlvry_tp`, `stock_seq`, `order_detail_id`, `weight` 부재 시에도 200. `item_amt`는 `tot_item_amt` → `item_amt` → `qty*unit_price` 순 fallback.
+
+**404:** `farm_cd`+`sales_no` 없음 → `SalesQueryNotFoundError` → `EntityNotFoundError` → HTTP 404. 타 farm 격리 필수.
+
+**Mobile UI grouping (API 아님):** FIFO로 분할된 raw N행은 화면에서 `order_detail_id`+`item_cd`+규격+`unit_price`가 같을 때만 qty·item_amt 합산. 첫 등장 위치 유지. `order_detail_id` NULL은 raw 유지.
+
+**미구현(6A 범위 외):** `t_sales_delivery` read-only 표시 · §8 payments GET/PUT · POST/PUT 저장.
 
 PUT: 자식 재INSERT 시 **`order_no` / `sales_status` / `sales_source` 보존**. 재고는 ship/confirm만.  
 DELETE 1차 비공개 (전표 역분개 전).
@@ -246,7 +264,7 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 > **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **완료 · 운영** (Stage4와 함께).  
 > **Stage6-0:** `get_payment_summary`가 `payment_status` 영문 코드 + `collection_status`(UI label 호환) 반환.  
-> **HTTP GET/PUT:** 아직 **미구현** (개발순서 6 판매상세/수금등록).
+> **HTTP GET/PUT:** payments GET/PUT **미구현** (개발순서 6B·6C). **판매상세 GET는 Stage6A read-only 구현** (private main · 운영 미배포).
 
 | method | path | 용도 | 상태 |
 |--------|------|------|------|
@@ -304,6 +322,8 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 `router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, sales(GET 목록), customers, fruit-stock, fruit-stock/adjust, production, shipments**.
 
 **Stage 5 (완료 · 운영):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록 · 운영 backend `b48ca8b`.
+
+**Stage6A (완료 · private main · 운영 미배포):** `GET /farms/{farm_cd}/sales/{sales_no}` · `SalesQueryService.get_sale_detail` · Mobile `SalesDetailView` (`/orders/sales/:salesNo`).
 
 판매목록 대표상품(`rep_*`) — optional schema 방어:
 
