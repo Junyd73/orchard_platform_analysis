@@ -37,6 +37,7 @@ from core.sales_payment_constants import (  # noqa: E402
     MSG_PAY_AMT_OVER_UNPAID,
     MSG_PAY_DT_BEFORE_SALES,
     MSG_PAY_DT_FUTURE,
+    MSG_PAY_DT_INVALID,
     MSG_SALES_DRAFT_PAYMENT_FORBIDDEN,
     PAYMENT_STATUS_PAID,
     PAYMENT_STATUS_PARTIAL,
@@ -349,6 +350,13 @@ class SalesApiStage6CPostTest(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 400)
         self.assertIn(MSG_PAY_DT_FUTURE, res.json()["detail"])
+
+    def test_post_blank_pay_dt_400(self) -> None:
+        res = self._post(
+            {"pay_dt": "", "pay_amt": 1000, "pay_method_cd": "AS010101"}
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn(MSG_PAY_DT_INVALID, res.json()["detail"])
 
     def test_post_not_found_404(self) -> None:
         res = self.client.post(

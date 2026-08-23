@@ -442,6 +442,7 @@ class SalesPaymentServiceTests(unittest.TestCase):
                 sales_no=SALES_A,
                 pay_amt=100000,
                 pay_method_cd="AS010102",
+                pay_dt=today_ops_iso(),
                 user_id="t",
             ),
         )
@@ -987,6 +988,25 @@ class SalesPaymentDec030Tests(unittest.TestCase):
         before = self._counts()
         with self.assertRaises(PaymentValidationError) as ctx:
             self._add("not-a-date")
+        self.assertIn(MSG_PAY_DT_INVALID, str(ctx.exception))
+        self.assertEqual(ctx.exception.code, ERR_PAY_DT_INVALID)
+        self.assertEqual(self._counts(), before)
+
+    def test_blank_pay_dt_rejected(self) -> None:
+        self._insert()
+        before = self._counts()
+        with self.assertRaises(PaymentValidationError) as ctx:
+            self.svc.add_payment(
+                PaymentAddIn(
+                    farm_cd=FARM,
+                    sales_no=SALES_A,
+                    pay_amt=10000,
+                    pay_method_cd="AS010101",
+                    pay_dt="",
+                    user_id="T",
+                    source_order_no=None,
+                )
+            )
         self.assertIn(MSG_PAY_DT_INVALID, str(ctx.exception))
         self.assertEqual(ctx.exception.code, ERR_PAY_DT_INVALID)
         self.assertEqual(self._counts(), before)

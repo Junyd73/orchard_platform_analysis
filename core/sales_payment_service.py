@@ -193,19 +193,24 @@ class SalesPaymentService:
         if pay_amt - unpaid > 1e-9:
             raise PaymentValidationError(MSG_PAY_AMT_OVER_UNPAID)
 
-        pay_dt_raw = _norm_text(payload.pay_dt) or today_ops_iso()
+        pay_dt_input = _norm_text(payload.pay_dt)
         user_id = _norm_text(payload.user_id) or "SYSTEM"
         rmk = _norm_text(payload.rmk) or f"판매입금({sales_no})"
         now_dt = now_ops_str()
         cash_order_no = self._resolve_cash_order_no(payload, sales)
         if _norm_text(payload.source_order_no):
+            pay_dt_raw = pay_dt_input or today_ops_iso()
             try:
                 pay_dt = to_iso_date(pay_dt_raw)
             except OrderValidationError:
                 pay_dt = pay_dt_raw
         else:
+            if not pay_dt_input:
+                raise PaymentValidationError(
+                    MSG_PAY_DT_INVALID, code=ERR_PAY_DT_INVALID
+                )
             pay_dt = self._validate_general_pay_dt(
-                pay_dt_raw, _norm_text(sales.get("sales_dt"))
+                pay_dt_input, _norm_text(sales.get("sales_dt"))
             )
 
         existing = self._load_cash_raw(cur, farm, sales_no)

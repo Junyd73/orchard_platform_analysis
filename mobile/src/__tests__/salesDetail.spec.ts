@@ -286,6 +286,17 @@ describe('SalesDetailView', () => {
     expect(wrapper.text()).toContain('판매상세')
   })
 
+  it('수금일 비우면 submit disabled', async () => {
+    const { wrapper } = await mountDetail()
+    await openForm(wrapper)
+    await wrapper.find('[data-testid="payment-method-select"]').setValue('AS010101')
+    const dateInput = wrapper.find('input[type="date"]')
+    await dateInput.setValue('')
+    await flushPromises()
+    expect((wrapper.find('[data-testid="payment-submit-btn"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(createSalePayment).not.toHaveBeenCalled()
+  })
+
   it('network ambiguity → GET refresh·자동 POST retry 없음', async () => {
     createSalePayment.mockRejectedValue(new Error('network'))
     const { wrapper } = await mountDetail()
@@ -299,6 +310,40 @@ describe('SalesDetailView', () => {
     expect(fetchSaleDetail.mock.calls.length).toBeGreaterThan(detailCalls)
     expect(fetchSalePayments.mock.calls.length).toBeGreaterThan(paymentCalls)
     expect(wrapper.text()).toContain(MSG_PAYMENT_RESULT_CHECK)
+  })
+
+  it('ApiClientError status undefined → MSG_PAYMENT_RESULT_CHECK', async () => {
+    const { ApiClientError } = await import('@/api/client')
+    createSalePayment.mockRejectedValue(new ApiClientError('서버에 연결하지 못했습니다.'))
+    const { wrapper } = await mountDetail()
+    const detailCalls = fetchSaleDetail.mock.calls.length
+    const paymentCalls = fetchSalePayments.mock.calls.length
+    await openForm(wrapper)
+    await wrapper.find('[data-testid="payment-method-select"]').setValue('AS010101')
+    await wrapper.find('[data-testid="payment-submit-btn"]').trigger('click')
+    await flushPromises()
+    expect(createSalePayment).toHaveBeenCalledTimes(1)
+    expect(fetchSaleDetail.mock.calls.length).toBeGreaterThan(detailCalls)
+    expect(fetchSalePayments.mock.calls.length).toBeGreaterThan(paymentCalls)
+    expect(wrapper.text()).toContain(MSG_PAYMENT_RESULT_CHECK)
+    expect(wrapper.text()).not.toContain('서버에 연결하지 못했습니다.')
+  })
+
+  it('ApiClientError 500 → MSG_PAYMENT_RESULT_CHECK', async () => {
+    const { ApiClientError } = await import('@/api/client')
+    createSalePayment.mockRejectedValue(new ApiClientError('요청 실패 (HTTP 500)', { status: 500 }))
+    const { wrapper } = await mountDetail()
+    const detailCalls = fetchSaleDetail.mock.calls.length
+    const paymentCalls = fetchSalePayments.mock.calls.length
+    await openForm(wrapper)
+    await wrapper.find('[data-testid="payment-method-select"]').setValue('AS010101')
+    await wrapper.find('[data-testid="payment-submit-btn"]').trigger('click')
+    await flushPromises()
+    expect(createSalePayment).toHaveBeenCalledTimes(1)
+    expect(fetchSaleDetail.mock.calls.length).toBeGreaterThan(detailCalls)
+    expect(fetchSalePayments.mock.calls.length).toBeGreaterThan(paymentCalls)
+    expect(wrapper.text()).toContain(MSG_PAYMENT_RESULT_CHECK)
+    expect(wrapper.text()).not.toContain('HTTP 500')
   })
 
   it('payment API 실패 시 판매상세 유지', async () => {

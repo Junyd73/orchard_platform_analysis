@@ -95,7 +95,7 @@ const canShowPaymentButton = computed(
 
 const canSubmitPayment = computed(() => {
   if (submitting.value || payMethodsLoading.value) return false
-  if (!payMethodCd.value || !payMethodOptions.value.length) return false
+  if (!payDt.value.trim() || !payMethodCd.value || !payMethodOptions.value.length) return false
   const amt = num(payAmt.value)
   const unpaid = detail.value?.unpaid_amt ?? 0
   return amt > 0 && amt <= unpaid + 1e-9
@@ -209,8 +209,7 @@ async function submitPayment() {
     if (err instanceof ApiClientError && err.status === 400) {
       formError.value = err.message
     } else {
-      formError.value =
-        err instanceof ApiClientError ? err.message : MSG_PAYMENT_RESULT_CHECK
+      formError.value = MSG_PAYMENT_RESULT_CHECK
       await loadDetail()
       await loadPayments()
     }
