@@ -125,6 +125,76 @@ class SalesApiStage5Test(unittest.TestCase):
         res = self.client.get(f"/api/v1/farms/{FARM}/sales/NO-SUCH")
         self.assertEqual(res.status_code, 404)
 
+    def test_get_sale_payments(self) -> None:
+        res = self.client.get(f"/api/v1/farms/{FARM}/sales/20260822-01/payments")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["sales_no"], "20260822-01")
+        self.assertEqual(body["paid_amt"], 800000)
+        self.assertEqual(body["unpaid_amt"], 150000)
+        self.assertEqual(body["payment_status"], "PARTIAL")
+        self.assertEqual(len(body["payments"]), 1)
+        p = body["payments"][0]
+        self.assertEqual(p["payment_source"], "GENERAL")
+        self.assertIsNone(p["source_order_no"])
+        self.assertEqual(p["pay_method_nm"], "현금 (시재)")
+        self.assertNotIn("collection_status", body)
+        self.assertNotIn("slip_no", p)
+
+    def test_get_sale_payments_not_found(self) -> None:
+        res = self.client.get(f"/api/v1/farms/{FARM}/sales/NO-SUCH/payments")
+        self.assertEqual(res.status_code, 404)
+
+    def test_get_sale_payments_provenance_and_n_rows(self) -> None:
+        conn = sqlite3.connect(str(self.path))
+        cur = conn.cursor()
+        _insert_sale(
+            cur,
+            sales_no="20260822-02",
+            tot=200000,
+            order_no="ORD20260822-001",
+        )
+        _insert_cash(
+            cur,
+            paid_detail_no="20260822-02-P01",
+            sales_no="20260822-02",
+            pay_amt=50000,
+            pay_method_cd="AS010102",
+            order_no="ORD20260822-001",
+            slip_no="SL-SAME",
+        )
+        _insert_cash(
+            cur,
+            paid_detail_no="20260822-02-P02",
+            sales_no="20260822-02",
+            pay_amt=30000,
+            pay_method_cd="AS010102",
+            slip_no="SL-SAME",
+        )
+        conn.commit()
+        conn.close()
+        res = self.client.get(f"/api/v1/farms/{FARM}/sales/20260822-02/payments")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(len(body["payments"]), 2)
+        self.assertEqual(body["payments"][0]["payment_source"], "ORDER_PREPAY")
+        self.assertEqual(body["payments"][0]["source_order_no"], "ORD20260822-001")
+        self.assertEqual(body["payments"][1]["payment_source"], "GENERAL")
+        self.assertEqual(body["payments"][0]["pay_method_nm"], "농협은행")
+        self.assertEqual(body["paid_amt"], 80000)
+
+    def test_get_sale_payments_draft(self) -> None:
+        conn = sqlite3.connect(str(self.path))
+        cur = conn.cursor()
+        _insert_sale(cur, sales_no="20260822-D", tot=100000, sales_status="DRAFT")
+        conn.commit()
+        conn.close()
+        res = self.client.get(f"/api/v1/farms/{FARM}/sales/20260822-D/payments")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertIsNone(body["payment_status"])
+        self.assertEqual(body["payments"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

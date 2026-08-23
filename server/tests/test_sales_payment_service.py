@@ -657,5 +657,219 @@ class SalesPaymentServiceTests(unittest.TestCase):
         self.assertIsNotNone(rows[0]["slip_no"])
 
 
+class SalesPaymentHistoryStage6BTest(unittest.TestCase):
+    """Stage6B — get_payment_summary read-only cash 행 + provenance."""
+
+    def setUp(self) -> None:
+        fd, name = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.path = Path(name)
+        self.conn = sqlite3.connect(str(self.path))
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(_schema_sql())
+        _seed_accounts(self.conn.cursor())
+        self.conn.commit()
+        self.svc = SalesPaymentService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _cash_count(self) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM t_cash_ledger")
+        return int(cur.fetchone()[0])
+
+    def test_not_found(self) -> None:
+        with self.assertRaises(PaymentNotFoundError):
+            self.svc.get_payment_summary(FARM, "NO-SUCH")
+
+    def test_no_payments_empty(self) -> None:
+        _insert_sales(self.conn.cursor())
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(s["payments"], [])
+        self.assertEqual(s["payment_status"], PAYMENT_STATUS_UNPAID)
+        self.assertEqual(s["tot_paid_amt"], 0)
+
+    def test_general_payment_source(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, slip_no, order_no, reg_id
+            ) VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, "20260821", "AS010102", 100000, "SL1", None, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(len(s["payments"]), 1)
+        p = s["payments"][0]
+        self.assertEqual(p["payment_source"], "GENERAL")
+        self.assertIsNone(p["source_order_no"])
+        self.assertEqual(p["pay_method_nm"], "농협은행")
+        self.assertEqual(p["pay_dt"], "2026-08-21")
+
+    def test_order_prepay_payment_source(self) -> None:
+        order_no = "ORD20260821-001"
+        cur = self.conn.cursor()
+        _insert_sales(cur, order_no=order_no)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, slip_no, order_no, reg_id
+            ) VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, "2026-08-21", "AS010101", 50000, "SL1", order_no, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        p = s["payments"][0]
+        self.assertEqual(p["payment_source"], "ORDER_PREPAY")
+        self.assertEqual(p["source_order_no"], order_no)
+
+    def test_mixed_and_same_method_not_merged(self) -> None:
+        order_no = "ORD20260821-001"
+        cur = self.conn.cursor()
+        _insert_sales(cur, tot=300000, order_no=order_no)
+        rows = [
+            (f"{SALES_A}-P01", "AS010102", 100000, "SL-SHARED", None),
+            (f"{SALES_A}-P02", "AS010102", 50000, "SL-SHARED", None),
+            (f"{SALES_A}-P03", "AS010101", 80000, "SL-PRE", order_no),
+        ]
+        for pd, method, amt, slip, ono in rows:
+            cur.execute(
+                """
+                INSERT INTO t_cash_ledger(
+                    paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                    pay_amt, slip_no, order_no, reg_id
+                ) VALUES (?,?,?,?,?,?,?,?,?)
+                """,
+                (pd, SALES_A, FARM, SALES_DT, method, amt, slip, ono, "T"),
+            )
+        self.conn.commit()
+        before = self._cash_count()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(len(s["payments"]), 3)
+        self.assertEqual(s["tot_paid_amt"], 230000)
+        self.assertEqual(s["payment_status"], PAYMENT_STATUS_PARTIAL)
+        self.assertEqual(s["payments"][0]["payment_source"], "GENERAL")
+        self.assertEqual(s["payments"][1]["payment_source"], "GENERAL")
+        self.assertEqual(s["payments"][2]["payment_source"], "ORDER_PREPAY")
+        self.assertEqual(s["payments"][0]["slip_no"], s["payments"][1]["slip_no"])
+        self.assertEqual(self._cash_count(), before)
+
+    def test_farm_isolation(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur, sales_no=SALES_A, farm_cd=FARM, tot=100000)
+        _insert_sales(cur, sales_no=SALES_A, farm_cd=FARM_B, tot=200000)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            ("P-A", SALES_A, FARM, SALES_DT, "AS010101", 10000, "T"),
+        )
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            ("P-B", SALES_A, FARM_B, SALES_DT, "AS010101", 90000, "T"),
+        )
+        self.conn.commit()
+        s_a = self.svc.get_payment_summary(FARM, SALES_A)
+        s_b = self.svc.get_payment_summary(FARM_B, SALES_A)
+        self.assertEqual(len(s_a["payments"]), 1)
+        self.assertEqual(s_a["tot_paid_amt"], 10000)
+        self.assertEqual(len(s_b["payments"]), 1)
+        self.assertEqual(s_b["tot_paid_amt"], 90000)
+
+    def test_stale_master_ignored(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur, tot=100000, paid=999999, unpaid=0)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, SALES_DT, "AS010101", 40000, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(s["tot_paid_amt"], 40000)
+        self.assertEqual(s["tot_unpaid_amt"], 60000)
+        self.assertEqual(s["payment_status"], PAYMENT_STATUS_PARTIAL)
+
+    def test_draft_status_null_keeps_legacy_cash(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur, status=SALES_STATUS_DRAFT, tot=100000)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, SALES_DT, "AS010101", 10000, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertIsNone(s["payment_status"])
+        self.assertEqual(len(s["payments"]), 1)
+        self.assertEqual(s["tot_paid_amt"], 10000)
+
+    def test_zero_zero_unpaid(self) -> None:
+        _insert_sales(self.conn.cursor(), tot=0)
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(s["payment_status"], PAYMENT_STATUS_UNPAID)
+        self.assertEqual(s["tot_unpaid_amt"], 0)
+
+    def test_overpay_paid_clamp(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur, tot=100000)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, SALES_DT, "AS010101", 120000, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(s["payment_status"], PAYMENT_STATUS_PAID)
+        self.assertEqual(s["tot_unpaid_amt"], 0)
+        self.assertEqual(s["tot_paid_amt"], 120000)
+
+    def test_method_name_fallback_to_code(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sales(cur)
+        cur.execute(
+            """
+            INSERT INTO t_cash_ledger(
+                paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+                pay_amt, reg_id
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            (f"{SALES_A}-P01", SALES_A, FARM, SALES_DT, "AS999999", 10000, "T"),
+        )
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(s["payments"][0]["pay_method_nm"], "AS999999")
+
+
 if __name__ == "__main__":
     unittest.main()

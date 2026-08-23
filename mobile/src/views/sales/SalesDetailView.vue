@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { fetchSaleDetail } from '@/api/sales'
+import { fetchSaleDetail, fetchSalePayments } from '@/api/sales'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
@@ -15,6 +15,7 @@ import {
   LABEL_LINE_AMOUNT,
   LABEL_ORDER_NO,
   LABEL_PAID_AMOUNT,
+  LABEL_PAYMENT_HISTORY,
   LABEL_QTY,
   LABEL_SALES_AMOUNT,
   LABEL_SALES_DETAIL,
@@ -23,8 +24,11 @@ import {
   LABEL_SALES_SUMMARY,
   LABEL_UNIT_PRICE,
   LABEL_UNPAID_AMOUNT,
+  MSG_PAYMENT_HISTORY_EMPTY,
+  MSG_PAYMENT_HISTORY_LOAD_FAIL,
   MSG_SALES_DETAIL_LOAD_FAIL,
   groupSalesDetailLines,
+  paymentSourceLabelOf,
   paymentStatusLabelOf,
   paymentStatusToneOf,
   salesCustomerLabel,
@@ -34,7 +38,7 @@ import {
   salesStatusToneOf,
 } from '@/views/sales/salesConstants'
 import { useAppStore } from '@/composables/stores/app'
-import type { SalesDetail } from '@/types/sales'
+import type { SalesDetail, SalesPaymentItem } from '@/types/sales'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +47,10 @@ const { farmCd } = storeToRefs(useAppStore())
 const loading = ref(true)
 const errorMsg = ref('')
 const detail = ref<SalesDetail | null>(null)
+
+const paymentLoading = ref(false)
+const paymentError = ref('')
+const payments = ref<SalesPaymentItem[]>([])
 
 const salesNo = computed(() => String(route.params.salesNo || ''))
 
@@ -54,7 +62,7 @@ function goBackToSalesTab() {
   void router.replace({ name: 'orders', query: { tab: TAB_SALES } })
 }
 
-async function load() {
+async function loadDetail() {
   if (!salesNo.value) {
     detail.value = null
     errorMsg.value = MSG_SALES_DETAIL_LOAD_FAIL
@@ -71,6 +79,31 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadPayments() {
+  if (!salesNo.value) {
+    payments.value = []
+    paymentError.value = ''
+    paymentLoading.value = false
+    return
+  }
+  paymentLoading.value = true
+  paymentError.value = ''
+  try {
+    const hist = await fetchSalePayments(farmCd.value, salesNo.value)
+    payments.value = hist.payments
+  } catch (err) {
+    payments.value = []
+    paymentError.value =
+      err instanceof ApiClientError ? err.message : MSG_PAYMENT_HISTORY_LOAD_FAIL
+  } finally {
+    paymentLoading.value = false
+  }
+}
+
+async function load() {
+  await Promise.all([loadDetail(), loadPayments()])
 }
 
 onMounted(() => {
@@ -153,6 +186,29 @@ watch(salesNo, () => {
             </dl>
           </OdsCard>
         </section>
+
+        <section class="payments" :aria-label="LABEL_PAYMENT_HISTORY">
+          <h3 class="section-title">{{ LABEL_PAYMENT_HISTORY }}</h3>
+          <OdsSkeleton v-if="paymentLoading" />
+          <p v-else-if="paymentError" class="err" role="alert">{{ paymentError }}</p>
+          <p v-else-if="!payments.length" class="payments-empty">
+            {{ MSG_PAYMENT_HISTORY_EMPTY }}
+          </p>
+          <template v-else>
+            <OdsCard
+              v-for="pay in payments"
+              :key="pay.paid_detail_no"
+              class="payment-card"
+            >
+              <div class="payment-card__row">
+                <span class="payment-card__dt">{{ pay.pay_dt }}</span>
+                <span class="payment-card__method">{{ pay.pay_method_nm || pay.pay_method_cd }}</span>
+                <span class="payment-card__amt">{{ formatOrderAmt(pay.pay_amt) }}원</span>
+              </div>
+              <p class="payment-card__source">{{ paymentSourceLabelOf(pay) }}</p>
+            </OdsCard>
+          </template>
+        </section>
       </template>
     </main>
     <OdsBottomNav />
@@ -225,16 +281,45 @@ watch(salesNo, () => {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.products {
+.products,
+.payments {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-8);
+  margin-bottom: var(--ods-space-12);
 }
 .product-card__name {
   margin: 0 0 var(--ods-space-8);
   font: var(--ods-font-body-2);
   font-weight: 600;
   color: var(--ods-color-text);
+}
+.payments-empty {
+  margin: 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.payment-card__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--ods-space-8);
+  align-items: baseline;
+}
+.payment-card__dt,
+.payment-card__method {
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+}
+.payment-card__amt {
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+  color: var(--ods-color-text);
+  font-variant-numeric: tabular-nums;
+}
+.payment-card__source {
+  margin: var(--ods-space-6) 0 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
 }
 .err {
   margin: var(--ods-space-8) 0;

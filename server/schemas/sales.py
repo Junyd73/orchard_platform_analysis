@@ -76,3 +76,27 @@ class SalesDetail(BaseModel):
     unpaid_amt: float
     payment_status: str | None = None
     lines: list[SalesDetailLine]
+
+
+class SalesPaymentItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paid_detail_no: str
+    pay_dt: str
+    pay_method_cd: str
+    pay_method_nm: str = ""
+    pay_amt: float
+    payment_source: str
+    source_order_no: str | None = None
+
+
+class SalesPaymentHistory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sales_no: str
+    sales_status: str
+    tot_sales_amt: float
+    paid_amt: float
+    unpaid_amt: float
+    payment_status: str | None = None
+    payments: list[SalesPaymentItem]

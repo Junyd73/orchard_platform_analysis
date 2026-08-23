@@ -1,5 +1,7 @@
 export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | null
 
+export type PaymentSource = 'GENERAL' | 'ORDER_PREPAY'
+
 export interface SalesListItem {
   sales_no: string
   sales_dt: string
@@ -72,4 +74,24 @@ export interface SalesDetail {
   unpaid_amt: number
   payment_status: PaymentStatus
   lines: SalesDetailLine[]
+}
+
+export interface SalesPaymentItem {
+  paid_detail_no: string
+  pay_dt: string
+  pay_method_cd: string
+  pay_method_nm: string
+  pay_amt: number
+  payment_source: PaymentSource
+  source_order_no: string | null
+}
+
+export interface SalesPaymentHistory {
+  sales_no: string
+  sales_status: string
+  tot_sales_amt: number
+  paid_amt: number
+  unpaid_amt: number
+  payment_status: PaymentStatus
+  payments: SalesPaymentItem[]
 }

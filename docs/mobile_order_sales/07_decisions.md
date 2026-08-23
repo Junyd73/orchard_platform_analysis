@@ -6,7 +6,8 @@
 - **PROPOSED / OPEN**: 미확정. APPROVED와 섞어 확정으로 읽지 말 것.
 
 승인일 표기: 대표 검토 반영일 **2026-08-17**. 단계 0 **최종승인 완료** (2026-08-17 대표). 단계 0은 다시 열지 않음.  
-**2026-08-21 대표 승인:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**.
+**2026-08-21 대표 승인:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**.  
+**2026-08-23 대표 승인:** DEC-030 **신규 APPROVED** (6C write validation 전용).
 
 ---
 
@@ -37,6 +38,7 @@
 | DEC-019 | 선입금 부분출고 **순차 배분** 확정 | DEC-019 |
 | DEC-028 | 주문 선입금 **결제수단** (금액>0이면 필수) | DEC-028 |
 | DEC-029 | **판매상태 ≠ 수금상태** (수금상태는 금액 계산값) | DEC-029 |
+| DEC-030 | **신규 수금일** `sales_dt ≤ pay_dt ≤ today` (legacy 조회만) | DEC-030 |
 
 ---
 
@@ -489,6 +491,26 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ---
 
+## DEC-030
+
+**신규 일반 수금등록의 pay_dt 유효범위를 확정한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** |
+| 결정 | 신규 일반 수금등록(6C write)의 `pay_dt`는 **`sales_dt ≤ pay_dt ≤ today`** 만 허용한다. |
+| 거부 | `pay_dt < sales_dt` (판매 이전 수금) · `pay_dt > today` (미래 수금일) |
+| 허용 | `pay_dt = sales_dt` · `sales_dt < pay_dt ≤ today` |
+| 선입금 자동적용 | Stage4 기존 정책 유지 — cash `pay_dt` = 판매 생성 시점 `sales_dt` |
+| legacy | 기존 DB row는 **수정/삭제/자동보정하지 않음**. 조회만 허용 |
+| 회계 날짜 | `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt`. DEC-030 때문에 `trans_dt`를 `pay_dt`로 바꾸지 않음 |
+| 적용 범위 | **6C 신규 write validation만**. 이번 Stage6B(조회)에는 코드 미적용 |
+| 이유 | 미래 수금일은 미발생 데이터 · 판매 이전 일반수금은 판매 수금 흐름과 불일치 · 주문 선입금은 별도 경로 |
+| 영향 | [02 §8.7](./02_domain_flow.md) · [03 §4](./03_data_contract.md) · [05 §8](./05_api_contract.md) · Stage6C |
+| 승인 | **2026-08-23 대표** |
+
+---
+
 ## OPEN-PROD (CLOSED — 2026-08-19 대표 최종승인)
 
 설계 확정. Stage H/P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). 잔여 OPEN은 [06](./06_development_progress.md).
@@ -507,11 +529,12 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | ID | 상태 |
 |----|------|
-| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
+| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029, 030** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | DEC-015, 016 | **OPEN** |
 | **OPEN-PROD-01~03** | **CLOSED** (설계·Core 반영됨. 상세 현황은 [06 현재 운영 기준](./06_development_progress.md)) |
 
-2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.
+2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.  
+2026-08-23 갱신: **DEC-030 신규 APPROVED**(신규 수금일 `sales_dt ≤ pay_dt ≤ today` · legacy 조회만).
 
 ### 스키마 확인 (2026-08-22)
 

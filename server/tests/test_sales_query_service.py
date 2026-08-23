@@ -64,10 +64,18 @@ def _schema_sql() -> str:
             pay_dt TEXT NOT NULL, pay_method_cd TEXT NOT NULL,
             pay_amt REAL DEFAULT 0, slip_no TEXT, order_no TEXT
         );
+        CREATE TABLE m_account_code (
+            acct_cd TEXT PRIMARY KEY, acct_nm TEXT, acct_level INTEGER,
+            parent_cd TEXT, use_yn TEXT DEFAULT 'Y'
+        );
         INSERT INTO m_customer (custm_id, farm_cd, custm_nm, use_yn) VALUES
             ('C001', 'OR001', '홍길동', 'Y'),
             ('C002', 'OR001', '김고객', 'Y'),
             ('C001', 'OR002', '다른농장', 'Y');
+        INSERT INTO m_account_code (acct_cd, acct_nm, acct_level, parent_cd, use_yn) VALUES
+            ('AS010101', '현금 (시재)', 4, 'AS0101', 'Y'),
+            ('AS010102', '농협은행', 4, 'AS0101', 'Y'),
+            ('AS010103', '국민은행', 4, 'AS0101', 'Y');
         INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
             ('OR001', 'FR010101', '신고', 'FR010100'),
             ('OR001', 'GR010100', '특', 'GR01'),
@@ -174,14 +182,28 @@ def _insert_cash(
     sales_no: str,
     farm_cd: str = FARM_A,
     pay_amt: float,
+    pay_method_cd: str = "AS010101",
+    pay_dt: str = "2026-08-22",
+    order_no: str | None = None,
+    slip_no: str | None = None,
 ) -> None:
     cur.execute(
         """
         INSERT INTO t_cash_ledger(
-            paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt
-        ) VALUES (?,?,?,?,?,?)
+            paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd,
+            pay_amt, slip_no, order_no
+        ) VALUES (?,?,?,?,?,?,?,?)
         """,
-        (paid_detail_no, sales_no, farm_cd, "2026-08-22", "AS010101", pay_amt),
+        (
+            paid_detail_no,
+            sales_no,
+            farm_cd,
+            pay_dt,
+            pay_method_cd,
+            pay_amt,
+            slip_no,
+            order_no,
+        ),
     )
 
 

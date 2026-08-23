@@ -369,6 +369,21 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 
 뒤로가기는 `/orders?tab=sales`로 복귀 (`router.replace`). 배송(`t_sales_delivery`) read-only 표시는 schema 가변성으로 **6A 제외**.
 
+### 8.7 수금내역 read-only (Stage6B)
+
+`GET /farms/{farm_cd}/sales/{sales_no}/payments` · Core `SalesPaymentService.get_payment_summary`.
+
+**SSOT = `t_cash_ledger` 실제 행** (동일 method/slip 합산 금지 · `t_ledger`를 내역으로 표시 금지).
+
+| `payment_source` | 조건 (`cash.order_no`만) | UI |
+|------------------|--------------------------|-----|
+| `GENERAL` | NULL/blank | 일반수금 |
+| `ORDER_PREPAY` | 실값 존재 | 선입금 자동적용 (+ `source_order_no`) |
+
+DRAFT도 GET 허용 · `payment_status=null` · legacy cash 숨기지 않음. 수금등록(PUT)은 6C.
+
+**DEC-030 (6C write 전용 · 2026-08-23 대표 승인):** 신규 일반 수금등록 `pay_dt`는 `sales_dt ≤ pay_dt ≤ today`만 허용. 판매 이전·미래 수금일 거부. 선입금 자동적용은 기존대로 `sales_dt`를 cash `pay_dt`로 사용. legacy DB 자동보정 없음 · 조회만. `t_ledger.trans_dt = sales_dt` 불변.
+
 ---
 
 ## 9. 취소

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""판매 목록 Stage 5 라우터 — GET 목록 only."""
+"""판매 목록/상세/수금내역 라우터 — GET read-only."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import get_sales_api_service
-from app.schemas.sales import SalesDetail, SalesListPage
+from app.schemas.sales import SalesDetail, SalesListPage, SalesPaymentHistory
 from app.services.sales_api_service import SalesApiService
 
 from core.sales_query_constants import (  # noqa: E402
@@ -45,6 +45,15 @@ def list_sales(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{sales_no}/payments", response_model=SalesPaymentHistory)
+def get_sale_payments(
+    farm_cd: str,
+    sales_no: str,
+    service: SalesApiService = Depends(get_sales_api_service),
+) -> SalesPaymentHistory:
+    return service.get_sale_payments(farm_cd, sales_no)
 
 
 @router.get("/{sales_no}", response_model=SalesDetail)

@@ -1,11 +1,13 @@
 # 06. Development progress
 
-> **현재 기준 (2026-08-23):** private main **Stage6-0·6A 반영** · 운영 backend **`b48ca8b`**(Stage5).  
+> **현재 기준 (2026-08-23):** private main **Stage6-0·6A·6B 반영** · 운영 backend **`b48ca8b`**(Stage5).  
 > **Stage4:** Core + P1 + P2 + P2b **완료 · 운영**.  
 > **Stage5:** Core/API + Mobile + P1 + P2 **완료 · 운영**.  
 > **Stage6-0:** 수금상태 조회 계약 통일 — **완료 · private main 반영 · 운영 미배포** (write/ledger 불변).  
 > **Stage6A:** 판매상세 GET + Mobile read-only — **완료 · private main 반영 · 운영 미배포**.  
-> **다음:** Stage6 **6B 수금내역 read-only**.  
+> **Stage6B:** 수금내역 GET + Mobile read-only — **완료 · private main 반영 · 운영 미배포**.  
+> **DEC-030:** 신규 수금일 `sales_dt ≤ pay_dt ≤ today` — **APPROVED** (6C write validation 전용 · legacy 조회만).  
+> **다음:** Stage6 **6C 수금등록** (설계/구현).  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED**. DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
@@ -26,7 +28,8 @@
 | 6 | 모바일 출고·배정·판매 UX + Order→Ship Step1~3 | **완료 · 운영** |
 | — | Stage6-0 수금상태 계약 | **완료 · private main · 운영 미배포** |
 | — | Stage6A 판매상세 read-only | **완료 · private main · 운영 미배포** |
-| — | **다음:** Stage6 **6B 수금내역 read-only** | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
+| — | Stage6B 수금내역 read-only | **완료 · private main · 운영 미배포** |
+| — | **다음:** Stage6 **6C 수금등록** | [DEC-030](#2026-08-21--선입금수금-정책-확정) · [07 DEC-030](./07_decisions.md#dec-030) |
 | 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
 | 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
 
@@ -41,7 +44,7 @@
 → 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
 ```
 
-SHA 스냅샷: Stage6-0 merge = `5782681` · Stage6A merge = `8a1a596` · feature `9903993` · review `7e2e4ae` · 운영 backend = `b48ca8b`(Stage5) · Stage6-0/6A = **완료 · private main · 운영 미배포**.
+SHA 스냅샷: Stage6-0 merge = `5782681` · Stage6A merge = `8a1a596` · Stage6B merge = `0983540` · feature `96d690f` · review `b8b6ac2` · 운영 backend = `b48ca8b`(Stage5) · Stage6-0/6A/6B = **완료 · private main · 운영 미배포**.
 
 ---
 
@@ -409,8 +412,8 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 5  판매목록  ← 완료 · 운영 (Core/API + Mobile + P1 + P2)
 6-0 수금상태 계약  ← 완료 · private main · 운영 미배포
 6A 판매상세 read-only  ← 완료 · private main · 운영 미배포
-6B 수금내역 read-only  ← 다음
-6C 수금등록
+6B 수금내역 read-only  ← 완료 · private main · 운영 미배포
+6C 수금등록  ← 다음 (DEC-030 확정)
 7  PC 정합성
 8  가락 DRAFT→CONFIRMED
 ```
@@ -424,8 +427,8 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | 5 | **판매목록** | **완료 · 운영** | `SalesQueryService` + `GET /sales` + Mobile 판매탭. P1: 수금 filter 상호배타·malformed date 400. P2: `weight`/`crop_nm` optional schema · `rep_crop_nm`. cash SUM SSOT · DDL 0. 운영 backend `b48ca8b` | Stage4 운영 완료 |
 | 6-0 | **수금상태 조회 계약** | **완료 · private main · 운영 미배포** | `compute_payment_status` 공통화. API `UNPAID/PARTIAL/PAID/null` · UI label 분리. DRAFT=null · 0/0=UNPAID · overpay clamp PAID. AccountManager/ledger/pay_dt **불변** | 5 |
 | 6A | **판매상세 read-only** | **완료 · private main · 운영 미배포** | `GET /sales/{sales_no}` · `SalesDetailView` · cash SUM SSOT · FIFO UI grouping · 배송 제외 · SELECT only | 6-0 |
-| 6B | **수금내역 read-only** | **예정** | payments GET read-only · 6C 수금등록 선행 | 6A |
-| 6C | **수금등록** | **예정** | 수금액 ≤ 미수금 · 결제수단 필수 | 6B |
+| 6B | **수금내역 read-only** | **완료 · private main · 운영 미배포** | `GET /sales/{sales_no}/payments` · cash 행 SSOT · GENERAL/ORDER_PREPAY · method명 · SELECT only | 6A |
+| 6C | **수금등록** | **예정** | 수금액 ≤ 미수금 · 결제수단 필수 · **DEC-030** `sales_dt ≤ pay_dt ≤ today` (legacy 조회만) | 6B |
 | 7 | **PC 정합성** | **예정** | PC `SalesPage` 회계 호출부를 공용 Core로 위임 ([08 A13](./08_pc_change_scope.md)). 전면 재작성 아님. **OPEN P1:** `t_sales_detail.order_detail_id` 재저장 유실 | 3·4 |
 | 8 | **가락 DRAFT→CONFIRMED** | **예정** | confirm TX + 선택 수금 (DEC-010). DEC-016 OPEN 선결 | 3·7 |
 
