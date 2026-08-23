@@ -3,19 +3,31 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 
-import { fetchSaleDetail, fetchSalePayments } from '@/api/sales'
+import { createSalePayment, fetchSaleDetail, fetchSalePayments } from '@/api/sales'
+import { fetchWorkLogAccountCodes, type WorkLogAccountCodeOption } from '@/api/workLogs'
 import { ApiClientError } from '@/api/client'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
+import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
+import OdsFormField from '@/components/ods/OdsFormField.vue'
+import OdsInput from '@/components/ods/OdsInput.vue'
+import OdsSelect from '@/components/ods/OdsSelect.vue'
 import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
 import { formatOrderAmt, TAB_SALES } from '@/views/orders/ordersConstants'
+import { num } from '@/views/orders/orderFormModel'
 import {
   LABEL_LINE_AMOUNT,
   LABEL_ORDER_NO,
   LABEL_PAID_AMOUNT,
   LABEL_PAYMENT_HISTORY,
+  LABEL_PAYMENT_REGISTER,
+  LABEL_PAY_AMOUNT,
+  LABEL_PAY_CANCEL,
+  LABEL_PAY_DT,
+  LABEL_PAY_METHOD,
+  LABEL_PAY_SUBMIT,
   LABEL_QTY,
   LABEL_SALES_AMOUNT,
   LABEL_SALES_DETAIL,
@@ -26,7 +38,13 @@ import {
   LABEL_UNPAID_AMOUNT,
   MSG_PAYMENT_HISTORY_EMPTY,
   MSG_PAYMENT_HISTORY_LOAD_FAIL,
+  MSG_PAYMENT_RESULT_CHECK,
+  MSG_PAY_AMOUNT_INVALID,
+  MSG_PAY_METHOD_REQUIRED,
   MSG_SALES_DETAIL_LOAD_FAIL,
+  PAY_METHOD_ACCT_LEVEL,
+  PAY_METHOD_ACCT_PREFIX,
+  SALES_STATUS_CONFIRMED,
   groupSalesDetailLines,
   paymentSourceLabelOf,
   paymentStatusLabelOf,
@@ -37,6 +55,7 @@ import {
   salesStatusLabelOf,
   salesStatusToneOf,
 } from '@/views/sales/salesConstants'
+import { todayBizIso } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import type { SalesDetail, SalesPaymentItem } from '@/types/sales'
 
@@ -52,14 +71,71 @@ const paymentLoading = ref(false)
 const paymentError = ref('')
 const payments = ref<SalesPaymentItem[]>([])
 
+const showPaymentForm = ref(false)
+const payDt = ref(todayBizIso())
+const payAmt = ref('')
+const payMethodCd = ref('')
+const payMethodOptions = ref<WorkLogAccountCodeOption[]>([])
+const payMethodsLoading = ref(false)
+const formError = ref('')
+const submitting = ref(false)
+
 const salesNo = computed(() => String(route.params.salesNo || ''))
+const todayIso = computed(() => todayBizIso())
 
 const displayLines = computed(() =>
   detail.value ? groupSalesDetailLines(detail.value.lines) : [],
 )
 
+const canShowPaymentButton = computed(
+  () =>
+    detail.value?.sales_status === SALES_STATUS_CONFIRMED &&
+    (detail.value?.unpaid_amt ?? 0) > 0,
+)
+
+const canSubmitPayment = computed(() => {
+  if (submitting.value || payMethodsLoading.value) return false
+  if (!payDt.value.trim() || !payMethodCd.value || !payMethodOptions.value.length) return false
+  const amt = num(payAmt.value)
+  const unpaid = detail.value?.unpaid_amt ?? 0
+  return amt > 0 && amt <= unpaid + 1e-9
+})
+
 function goBackToSalesTab() {
   void router.replace({ name: 'orders', query: { tab: TAB_SALES } })
+}
+
+function resetPaymentFormDefaults() {
+  payDt.value = todayIso.value
+  payAmt.value = String(detail.value?.unpaid_amt ?? '')
+  payMethodCd.value = ''
+  formError.value = ''
+}
+
+function openPaymentForm() {
+  resetPaymentFormDefaults()
+  showPaymentForm.value = true
+}
+
+function closePaymentForm() {
+  if (submitting.value) return
+  showPaymentForm.value = false
+  formError.value = ''
+}
+
+async function loadPayMethods() {
+  payMethodsLoading.value = true
+  try {
+    payMethodOptions.value = await fetchWorkLogAccountCodes(
+      farmCd.value,
+      PAY_METHOD_ACCT_PREFIX,
+      PAY_METHOD_ACCT_LEVEL,
+    )
+  } catch {
+    payMethodOptions.value = []
+  } finally {
+    payMethodsLoading.value = false
+  }
 }
 
 async function loadDetail() {
@@ -103,7 +179,43 @@ async function loadPayments() {
 }
 
 async function load() {
-  await Promise.all([loadDetail(), loadPayments()])
+  await Promise.all([loadDetail(), loadPayments(), loadPayMethods()])
+}
+
+async function submitPayment() {
+  if (submitting.value || !canSubmitPayment.value || !detail.value) return
+  if (!payMethodCd.value) {
+    formError.value = MSG_PAY_METHOD_REQUIRED
+    return
+  }
+  const amt = num(payAmt.value)
+  if (amt <= 0 || amt > detail.value.unpaid_amt + 1e-9) {
+    formError.value = MSG_PAY_AMOUNT_INVALID
+    return
+  }
+
+  submitting.value = true
+  formError.value = ''
+  try {
+    await createSalePayment(farmCd.value, salesNo.value, {
+      pay_dt: payDt.value,
+      pay_amt: amt,
+      pay_method_cd: payMethodCd.value,
+    })
+    showPaymentForm.value = false
+    await loadDetail()
+    await loadPayments()
+  } catch (err) {
+    if (err instanceof ApiClientError && err.status === 400) {
+      formError.value = err.message
+    } else {
+      formError.value = MSG_PAYMENT_RESULT_CHECK
+      await loadDetail()
+      await loadPayments()
+    }
+  } finally {
+    submitting.value = false
+  }
 }
 
 onMounted(() => {
@@ -111,6 +223,7 @@ onMounted(() => {
 })
 
 watch(salesNo, () => {
+  showPaymentForm.value = false
   void load()
 })
 </script>
@@ -188,7 +301,84 @@ watch(salesNo, () => {
         </section>
 
         <section class="payments" :aria-label="LABEL_PAYMENT_HISTORY">
-          <h3 class="section-title">{{ LABEL_PAYMENT_HISTORY }}</h3>
+          <div class="payments-head">
+            <h3 class="section-title">{{ LABEL_PAYMENT_HISTORY }}</h3>
+            <OdsButton
+              v-if="canShowPaymentButton && !showPaymentForm"
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="payment-register-btn"
+              @click="openPaymentForm"
+            >
+              {{ LABEL_PAYMENT_REGISTER }}
+            </OdsButton>
+          </div>
+
+          <OdsCard v-if="showPaymentForm" class="payment-form" data-testid="payment-form">
+            <OdsFormField :label="LABEL_PAY_DT" required>
+              <div class="date-iso">
+                <span class="date-iso__value">{{ payDt }}</span>
+                <input
+                  v-model="payDt"
+                  class="date-iso__native"
+                  type="date"
+                  :aria-label="LABEL_PAY_DT"
+                  :min="detail.sales_dt"
+                  :max="todayIso"
+                  :disabled="submitting"
+                />
+              </div>
+            </OdsFormField>
+            <OdsFormField :label="LABEL_PAY_AMOUNT" required>
+              <OdsInput
+                v-model="payAmt"
+                type="number"
+                variant="form"
+                bare
+                :disabled="submitting"
+              />
+            </OdsFormField>
+            <OdsFormField :label="LABEL_PAY_METHOD" required>
+              <OdsSelect
+                v-model="payMethodCd"
+                variant="form"
+                required
+                data-testid="payment-method-select"
+                :disabled="submitting || payMethodsLoading || !payMethodOptions.length"
+              >
+                <option value="">선택</option>
+                <option
+                  v-for="opt in payMethodOptions"
+                  :key="opt.acct_cd"
+                  :value="opt.acct_cd"
+                >
+                  {{ opt.acct_nm }}
+                </option>
+              </OdsSelect>
+            </OdsFormField>
+            <p v-if="formError" class="err" role="alert">{{ formError }}</p>
+            <div class="payment-form__actions">
+              <OdsButton
+                type="button"
+                variant="secondary"
+                :disabled="submitting"
+                @click="closePaymentForm"
+              >
+                {{ LABEL_PAY_CANCEL }}
+              </OdsButton>
+              <OdsButton
+                type="button"
+                variant="primary"
+                data-testid="payment-submit-btn"
+                :disabled="!canSubmitPayment"
+                @click="submitPayment"
+              >
+                {{ LABEL_PAY_SUBMIT }}
+              </OdsButton>
+            </div>
+          </OdsCard>
+
           <OdsSkeleton v-if="paymentLoading" />
           <p v-else-if="paymentError" class="err" role="alert">{{ paymentError }}</p>
           <p v-else-if="!payments.length" class="payments-empty">
@@ -246,7 +436,7 @@ watch(salesNo, () => {
   color: var(--ods-color-text-secondary);
 }
 .section-title {
-  margin: 0 0 var(--ods-space-8);
+  margin: 0;
   font: var(--ods-font-card-emphasis);
   color: var(--ods-color-text);
 }
@@ -288,6 +478,12 @@ watch(salesNo, () => {
   gap: var(--ods-space-8);
   margin-bottom: var(--ods-space-12);
 }
+.payments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+}
 .product-card__name {
   margin: 0 0 var(--ods-space-8);
   font: var(--ods-font-body-2);
@@ -298,6 +494,34 @@ watch(salesNo, () => {
   margin: 0;
   font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
+}
+.payment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-8);
+}
+.payment-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ods-space-8);
+}
+.date-iso {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+}
+.date-iso__value {
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+}
+.date-iso__native {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
 }
 .payment-card__row {
   display: grid;

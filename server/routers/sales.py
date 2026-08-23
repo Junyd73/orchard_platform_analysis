@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
-"""판매 목록/상세/수금내역 라우터 — GET read-only."""
+"""판매 목록/상세/수금내역 라우터."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 
 from app.api.dependencies import get_sales_api_service
-from app.schemas.sales import SalesDetail, SalesListPage, SalesPaymentHistory
+from app.schemas.sales import (
+    SalesDetail,
+    SalesListPage,
+    SalesPaymentCreateRequest,
+    SalesPaymentHistory,
+)
 from app.services.sales_api_service import SalesApiService
 
 from core.sales_query_constants import (  # noqa: E402
@@ -19,6 +24,12 @@ router = APIRouter(
     prefix="/farms/{farm_cd}/sales",
     tags=["sales"],
 )
+
+
+def _user_header(
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+) -> str | None:
+    return x_user_id
 
 
 @router.get("", response_model=SalesListPage)
@@ -54,6 +65,17 @@ def get_sale_payments(
     service: SalesApiService = Depends(get_sales_api_service),
 ) -> SalesPaymentHistory:
     return service.get_sale_payments(farm_cd, sales_no)
+
+
+@router.post("/{sales_no}/payments", response_model=SalesPaymentHistory)
+def create_sale_payment(
+    farm_cd: str,
+    sales_no: str,
+    body: SalesPaymentCreateRequest,
+    user_id: str | None = Depends(_user_header),
+    service: SalesApiService = Depends(get_sales_api_service),
+) -> SalesPaymentHistory:
+    return service.add_sale_payment(farm_cd, sales_no, body, user_id=user_id)
 
 
 @router.get("/{sales_no}", response_model=SalesDetail)

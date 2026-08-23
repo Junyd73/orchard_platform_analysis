@@ -264,12 +264,12 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 > **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **완료 · 운영** (Stage4와 함께).  
 > **Stage6-0:** `get_payment_summary`가 `payment_status` 영문 코드 + `collection_status`(UI label 호환) 반환.  
-> **Stage6B:** payments **GET** read-only — `SalesPaymentService.get_payment_summary` 재사용 · **private main 반영 · 운영 미배포**. **PUT(6C) 미구현**.
+> **Stage6C:** payments **POST** append — `SalesPaymentService.add_payment` · `source_order_no=None` · **private main 반영 · 운영 미배포**. PUT/수정/삭제 **미구현**.
 
 | method | path | 용도 | 상태 |
 |--------|------|------|------|
 | GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 내역 + 판매금액/수금액/미수금/수금상태 | **Stage6B · private main · 운영 미배포** |
-| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 등록/갱신 | **미구현 (6C)** |
+| POST | `/farms/{farm_cd}/sales/{sales_no}/payments` | 신규 일반수금 append | **Stage6C · private main · 운영 미배포** |
 
 ### 8.1 GET 수금내역 (Stage6B · read-only)
 
@@ -293,14 +293,14 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 **404:** `PaymentNotFoundError` → `EntityNotFoundError` → HTTP 404.
 
-**검증 (DEC-029 · DEC-030 · Core write · 6C):**
+**검증 (DEC-029 · DEC-030 · Core write · 6C POST):**
 
 | 항목 | 규칙 |
 |------|------|
 | 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT 거부** |
 | 수금액 | `> 0`. 미수 = `MAX(0, tot_sales_amt − SUM(cash))`. 초과 write 금지 |
 | 결제수단 | **필수**. `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권 금지 |
-| 수금일 (DEC-030) | **신규 일반 수금등록만:** `sales_dt ≤ pay_dt ≤ today`. `pay_dt < sales_dt` · `pay_dt > today` 거부. legacy cash는 조회만 · 자동보정 없음 |
+| 수금일 (DEC-030) | **신규 일반 수금 POST만:** `sales_dt ≤ pay_dt ≤ today` · blank → `PAY_DT_INVALID`. Core `add_payment` · `source_order_no=None` 경로. legacy cash는 조회만 · 자동보정 없음 |
 | 수금상태 | 응답 `payment_status`: `UNPAID` / `PARTIAL` / `PAID` / `null`. UI label은 [03 §4.1](./03_data_contract.md) |
 
 **회계 날짜 (Stage6-0 불변):** `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt`. DEC-030 때문에 `trans_dt`를 `pay_dt`로 바꾸지 않음.
@@ -348,7 +348,23 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 **Stage6A (완료 · private main · 운영 미배포):** `GET /farms/{farm_cd}/sales/{sales_no}` · `SalesQueryService.get_sale_detail` · Mobile `SalesDetailView` (`/orders/sales/:salesNo`).
 
-**Stage6B (private main · 운영 미배포):** `GET /farms/{farm_cd}/sales/{sales_no}/payments` · `SalesPaymentService.get_payment_summary` · Mobile 수금내역 section.
+### 8.2 POST 수금등록 (Stage6C · append)
+
+**Request:** `{ pay_dt, pay_amt, pay_method_cd }` — memo 없음.
+
+**Core:** `SalesPaymentService.add_payment(PaymentAddIn(..., rmk="", source_order_no=None))`.
+
+**Response:** §8.1 `SalesPaymentHistory`와 동일 (성공 후 `get_payment_summary` 결과).
+
+**Header:** `X-User-Id` — 없으면 `MOBILE` (shipment write와 동일).
+
+**금지:** PUT · 수금 수정 · 수금 삭제 · idempotency table.
+
+---
+
+**Stage6C (private main · 운영 미배포):** `POST /farms/{farm_cd}/sales/{sales_no}/payments` · Mobile `SalesDetailView` inline form.
+
+**Stage6B (private main · 운영 미배포):** `GET .../payments` · Mobile 수금내역 section.
 
 판매목록 대표상품(`rep_*`) — optional schema 방어:
 
@@ -371,5 +387,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
 
-**미구현:** `sales/{sales_no}/payments` **PUT** HTTP (6C). GET는 Stage6B private main.  
+**미구현:** payments **PUT** · 수금 수정/삭제 HTTP. GET/POST는 Stage6B/6C feature(main: GET만).  
 **완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028) · Stage4 선입금 자동배분 Core (§6 · `fb413a3`).
