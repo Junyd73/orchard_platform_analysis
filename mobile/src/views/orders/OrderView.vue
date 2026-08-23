@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { fetchOrders } from '@/api/orders'
+import { fetchSales } from '@/api/sales'
 import { ApiClientError } from '@/api/client'
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
@@ -16,9 +17,23 @@ import OdsFab from '@/components/ods/OdsFab.vue'
 import OdsSkeleton from '@/components/ods/OdsSkeleton.vue'
 import OrderLookupPanel, {
   type StatusFilterOption,
-} from '@/views/orders/OrderLookupPanel.vue'
-import PackProdPanel from '@/views/production/PackProdPanel.vue'
-import StockView from '@/views/stock/StockView.vue'
+} from '@/features/orders/OrderLookupPanel.vue'
+import SalesLookupPanel from '@/views/sales/SalesLookupPanel.vue'
+import {
+  MSG_SALES_EMPTY_FILTER,
+  MSG_SALES_EMPTY_FILTER_DESC,
+  MSG_SALES_LOAD_FAIL,
+  SALES_LIST_PAGE_SIZE,
+  paymentStatusLabelOf,
+  paymentStatusToneOf,
+  salesCustomerLabel,
+  salesListAmountLine,
+  salesListSecondaryText,
+  salesStatusLabelOf,
+  salesStatusToneOf,
+} from '@/views/sales/salesConstants'
+import PackProdPanel from '@/features/production/PackProdPanel.vue'
+import StockView from '@/features/stock/StockView.vue'
 import {
   CODE_PARENT_STATUS,
   LABEL_FAB_ORDER,
@@ -55,16 +70,17 @@ import {
   orderListShipRemainText,
   orderStatusLabelOf,
   orderStatusToneOf,
-} from '@/views/orders/ordersConstants'
+} from '@/features/orders/ordersConstants'
 import {
   defaultOrderLookupRange,
   rangeForQuickKey,
   yearStartIso,
-} from '@/views/orders/orderLookup'
-import { todayIso } from '@/views/work-log/workLogConstants'
-import { useAppStore } from '@/composables/stores/app'
-import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+} from '@/features/orders/orderLookup'
+import { todayIso } from '@/features/work-log/workLogConstants'
+import { useAppStore } from '@/shared/stores/app'
+import { useSalesPrefillStore } from '@/shared/stores/salesPrefill'
 import type { OrderListItem } from '@/types/order'
+import type { SalesListItem } from '@/types/sales'
 
 const router = useRouter()
 const route = useRoute()
@@ -108,7 +124,6 @@ const isPackProdTab = computed(() => segment.value === TAB_PACK_PROD)
 const isStockTab = computed(() => segment.value === TAB_STOCK)
 const isOrderTab = computed(() => segment.value === TAB_ORDER)
 const isSalesTab = computed(() => segment.value === TAB_SALES)
-const isPlaceholderTab = computed(() => isSalesTab.value)
 const showFab = computed(() => isOrderTab.value || isSalesTab.value)
 const fabLabel = computed(() => (isOrderTab.value ? LABEL_FAB_ORDER : LABEL_FAB_SALES))
 const statusSelectOptions = computed(() => [
@@ -147,6 +162,67 @@ const totalPages = computed(() =>
 )
 const showPager = computed(
   () => isOrderTab.value && !loading.value && !loadError.value && total.value > 0,
+)
+
+const salesInitialRange = defaultOrderLookupRange()
+const salesFilterExpanded = ref(false)
+const salesDraftFrom = ref(salesInitialRange.from)
+const salesDraftTo = ref(salesInitialRange.to)
+const salesDraftStatus = ref('')
+const salesDraftPaymentStatus = ref('')
+const salesDraftKeyword = ref('')
+const salesAppliedFrom = ref(salesInitialRange.from)
+const salesAppliedTo = ref(salesInitialRange.to)
+const salesAppliedStatus = ref('')
+const salesAppliedPaymentStatus = ref('')
+const salesAppliedKeyword = ref('')
+const salesPage = ref(1)
+const salesTotal = ref(0)
+const salesPageSize = ref(SALES_LIST_PAGE_SIZE)
+
+const salesLoading = ref(false)
+const salesLoadError = ref('')
+const salesItems = ref<SalesListItem[]>([])
+
+const hasExtraSalesFilter = computed(() => {
+  const today = todayIso()
+  return (
+    Boolean(salesAppliedKeyword.value.trim()) ||
+    Boolean(salesAppliedStatus.value) ||
+    Boolean(salesAppliedPaymentStatus.value) ||
+    salesAppliedFrom.value !== yearStartIso(today) ||
+    salesAppliedTo.value !== today
+  )
+})
+const showSalesEmpty = computed(
+  () =>
+    isSalesTab.value &&
+    !salesLoading.value &&
+    !salesLoadError.value &&
+    salesItems.value.length === 0,
+)
+const showSalesList = computed(
+  () =>
+    isSalesTab.value &&
+    !salesLoading.value &&
+    !salesLoadError.value &&
+    salesItems.value.length > 0,
+)
+const salesTotalPages = computed(() =>
+  Math.max(1, Math.ceil(salesTotal.value / Math.max(1, salesPageSize.value))),
+)
+const showSalesPager = computed(
+  () =>
+    isSalesTab.value &&
+    !salesLoading.value &&
+    !salesLoadError.value &&
+    salesTotal.value > 0,
+)
+const salesEmptyTitle = computed(() =>
+  hasExtraSalesFilter.value ? MSG_SALES_EMPTY_FILTER : MSG_SALES_EMPTY_TITLE,
+)
+const salesEmptyDesc = computed(() =>
+  hasExtraSalesFilter.value ? MSG_SALES_EMPTY_FILTER_DESC : MSG_SALES_EMPTY_DESC,
 )
 
 function showToast(msg: string) {
@@ -197,6 +273,33 @@ async function loadOrders() {
   }
 }
 
+async function loadSales() {
+  salesLoading.value = true
+  salesLoadError.value = ''
+  try {
+    const res = await fetchSales(farmCd.value, {
+      from_date: salesAppliedFrom.value,
+      to_date: salesAppliedTo.value,
+      sales_status: salesAppliedStatus.value || undefined,
+      payment_status: salesAppliedPaymentStatus.value || undefined,
+      keyword: salesAppliedKeyword.value.trim() || undefined,
+      page: salesPage.value,
+      page_size: SALES_LIST_PAGE_SIZE,
+    })
+    salesItems.value = res.items
+    salesTotal.value = res.total
+    salesPage.value = res.page
+    salesPageSize.value = res.page_size
+  } catch (err) {
+    salesItems.value = []
+    salesTotal.value = 0
+    salesLoadError.value =
+      err instanceof ApiClientError ? err.message : MSG_SALES_LOAD_FAIL
+  } finally {
+    salesLoading.value = false
+  }
+}
+
 function applyLookup() {
   appliedFrom.value = draftFrom.value
   appliedTo.value = draftTo.value
@@ -232,6 +335,50 @@ function goNextPage() {
   if (page.value >= totalPages.value) return
   page.value += 1
   void loadOrders()
+}
+
+function applySalesLookup() {
+  salesAppliedFrom.value = salesDraftFrom.value
+  salesAppliedTo.value = salesDraftTo.value
+  salesAppliedStatus.value = salesDraftStatus.value
+  salesAppliedPaymentStatus.value = salesDraftPaymentStatus.value
+  salesAppliedKeyword.value = salesDraftKeyword.value.trim()
+  salesDraftKeyword.value = salesAppliedKeyword.value
+  salesPage.value = 1
+  void loadSales()
+}
+
+function resetSalesLookup() {
+  const range = defaultOrderLookupRange()
+  salesDraftFrom.value = range.from
+  salesDraftTo.value = range.to
+  salesDraftStatus.value = ''
+  salesDraftPaymentStatus.value = ''
+  salesDraftKeyword.value = ''
+  applySalesLookup()
+}
+
+function onSalesQuickRange(key: string) {
+  const range = rangeForQuickKey(key)
+  salesDraftFrom.value = range.from
+  salesDraftTo.value = range.to
+}
+
+function goSalesPrevPage() {
+  if (salesPage.value <= 1) return
+  salesPage.value -= 1
+  void loadSales()
+}
+
+function goSalesNextPage() {
+  if (salesPage.value >= salesTotalPages.value) return
+  salesPage.value += 1
+  void loadSales()
+}
+
+function reloadActiveTabList() {
+  if (segment.value === TAB_SALES) void loadSales()
+  else if (segment.value === TAB_ORDER) void loadOrders()
 }
 
 function onGoSalesFromProduction() {
@@ -273,9 +420,15 @@ function applyTabQuery(tab: unknown) {
 watch(
   () => route.path,
   (path) => {
-    if (isOrdersListPath(path)) void loadOrders()
+    if (isOrdersListPath(path)) reloadActiveTabList()
   },
 )
+
+watch(segment, (tab, prev) => {
+  if (!isOrdersListPath(route.path)) return
+  if (tab === TAB_SALES && prev !== TAB_SALES) void loadSales()
+  if (tab === TAB_ORDER && prev !== TAB_ORDER) void loadOrders()
+})
 
 watch(
   () => route.query.tab,
@@ -290,7 +443,7 @@ watch(
 watch(farmCd, () => {
   if (isOrdersListPath(route.path)) {
     void loadStatusOptions()
-    void loadOrders()
+    reloadActiveTabList()
   }
 })
 
@@ -298,7 +451,7 @@ onMounted(() => {
   applyTabQuery(route.query.tab)
   if (isOrdersListPath(route.path)) {
     void loadStatusOptions()
-    void loadOrders()
+    reloadActiveTabList()
   }
 })
 </script>
@@ -397,7 +550,73 @@ onMounted(() => {
         @go-sales="onGoSalesFromProduction"
       />
       <StockView v-else-if="isStockTab" :key="`stock-${farmCd}`" />
-      <OdsEmptyState v-else-if="isPlaceholderTab" :title="emptyTitle" :description="emptyDesc" />
+      <template v-else-if="isSalesTab">
+        <SalesLookupPanel
+          v-model:expanded="salesFilterExpanded"
+          v-model:from-date="salesDraftFrom"
+          v-model:to-date="salesDraftTo"
+          v-model:sales-status="salesDraftStatus"
+          v-model:payment-status="salesDraftPaymentStatus"
+          v-model:keyword="salesDraftKeyword"
+          :applied-from="salesAppliedFrom"
+          :applied-to="salesAppliedTo"
+          :searching="salesLoading"
+          @apply="applySalesLookup"
+          @reset="resetSalesLookup"
+          @quick-range="onSalesQuickRange"
+        />
+        <OdsSkeleton v-if="salesLoading" />
+        <p v-else-if="salesLoadError" class="err" role="alert">{{ salesLoadError }}</p>
+        <OdsEmptyState
+          v-else-if="showSalesEmpty"
+          :title="salesEmptyTitle"
+          :description="salesEmptyDesc"
+        />
+        <ul v-else-if="showSalesList" class="sales-list">
+          <li v-for="row in salesItems" :key="row.sales_no" class="sales-list__item">
+            <div class="sales-list__row">
+              <div class="sales-list__line1">
+                <span class="sales-list__cust">{{ salesCustomerLabel(row) }}</span>
+                <span class="sales-list__amt">{{ salesListAmountLine(row) }}</span>
+                <OdsBadge
+                  class="sales-list__pay"
+                  :tone="paymentStatusToneOf(row)"
+                >
+                  {{ paymentStatusLabelOf(row) }}
+                </OdsBadge>
+              </div>
+              <div class="sales-list__line2">
+                <span class="sales-list__meta">{{ salesListSecondaryText(row) }}</span>
+                <OdsBadge
+                  class="sales-list__status"
+                  :tone="salesStatusToneOf(row.sales_status)"
+                >
+                  {{ salesStatusLabelOf(row.sales_status) }}
+                </OdsBadge>
+              </div>
+            </div>
+          </li>
+        </ul>
+        <div v-if="showSalesPager" class="pager">
+          <OdsButton
+            variant="secondary"
+            :block="false"
+            :disabled="salesPage <= 1 || salesLoading"
+            @click="goSalesPrevPage"
+          >
+            {{ LABEL_PAGE_PREV }}
+          </OdsButton>
+          <span class="pager__pos">{{ salesPage }} / {{ salesTotalPages }}</span>
+          <OdsButton
+            variant="secondary"
+            :block="false"
+            :disabled="salesPage >= salesTotalPages || salesLoading"
+            @click="goSalesNextPage"
+          >
+            {{ LABEL_PAGE_NEXT }}
+          </OdsButton>
+        </div>
+      </template>
     </main>
     <!-- eslint-disable vue/attribute-hyphenation -->
     <OdsFab v-if="showFab" :label="fabLabel" :ariaLabel="fabLabel" @click="onFab">
@@ -563,6 +782,78 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
   color: var(--ods-color-text);
   font-weight: 600;
+}
+.sales-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--ods-color-white, #fff);
+}
+.sales-list__item {
+  border-bottom: 1px solid var(--ods-color-border);
+}
+.sales-list__item:last-child {
+  border-bottom: none;
+}
+.sales-list__row {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 60px;
+  padding: var(--ods-space-8) 0;
+}
+.sales-list__line1 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto;
+  align-items: center;
+  column-gap: var(--ods-space-6);
+  padding: 0 var(--ods-space-16);
+  font: var(--ods-font-body-2);
+}
+.sales-list__cust {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ods-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sales-list__amt {
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-color-text);
+}
+.sales-list__pay {
+  justify-self: end;
+  white-space: nowrap;
+}
+.sales-list__line2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  padding: 0 var(--ods-space-16);
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.sales-list__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sales-list__status {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .pager {
   display: flex;

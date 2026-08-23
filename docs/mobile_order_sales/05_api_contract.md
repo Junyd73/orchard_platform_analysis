@@ -213,6 +213,24 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 | POST | `/farms/{farm_cd}/sales` |
 | PUT | `/farms/{farm_cd}/sales/{sales_no}` |
 
+### 7.1 GET 목록 (Stage 5 · feature · main/운영 미반영)
+
+**Core:** `SalesQueryService.list_sales` (`core/sales_query_service.py`) — read-only.
+
+**Query:** `from_date`, `to_date`, `sales_status` (`CONFIRMED` \| `DRAFT`), `payment_status` (`UNPAID` \| `PARTIAL` \| `PAID`), `keyword`, `page`(default 1), `page_size`(default 20, max 100).
+
+**날짜:** `t_sales_master.sales_dt` · ISO·`YYYYMMDD` 혼재 조회(주문 목록과 동일 compact 비교). 일괄 변환 없음.
+
+**수금 SSOT:** `paid_amt = SUM(t_cash_ledger.pay_amt)` (`farm_cd`+`sales_no`). `unpaid_amt = MAX(0, tot_sales_amt - paid_amt)`. master `tot_paid_amt`/`tot_unpaid_amt`는 목록 계산에 사용하지 않음.
+
+**payment_status (응답 계산):** CONFIRMED만 — `UNPAID` / `PARTIAL` / `PAID`. DRAFT는 `null`(화면: 수금대기). 수금상태 필터 시 DRAFT 제외.
+
+**대표상품:** 판매 1행. `t_sales_detail` 다건이어도 `sale_detail_no ASC` 첫 행. cash는 선 aggregate 후 join(cash×detail 곱집계 방지).
+
+**응답:** `{ items[], total, page, page_size }` · item: `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`, `rep_*`.
+
+**미구현(Stage 5 범위 외):** GET/POST/PUT 상세·저장 · §8 payments HTTP.
+
 PUT: 자식 재INSERT 시 **`order_no` / `sales_status` / `sales_source` 보존**. 재고는 ship/confirm만.  
 DELETE 1차 비공개 (전표 역분개 전).
 
@@ -276,9 +294,11 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 ## 11. FastAPI 현황 (재확인)
 
-`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers, fruit-stock, fruit-stock/adjust, production, shipments**.
+`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, sales(GET 목록), customers, fruit-stock, fruit-stock/adjust, production, shipments**.
 
-**Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock. **sales HTTP 없음.** 운영 DDL 미적용.
+**Stage 5 (feature · main/운영 미반영):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록.
+
+**Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock.
 
 **Stage P (구현 완료 · 로컬):** GET harvest-records, GET raw-stock, POST production/confirm.  
 PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` 도라지배즙. 중분류 `FR010200` 거부. PACK은 해당 필드 무시. 응답 `prefill_lines[].item_nm`. 도라지 원료/BOM 없음.

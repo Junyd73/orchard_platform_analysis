@@ -1,0 +1,47 @@
+# -*- coding: utf-8 -*-
+"""판매 목록 Stage 5 라우터 — GET 목록 only."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query
+
+from app.api.dependencies import get_sales_api_service
+from app.schemas.sales import SalesListPage
+from app.services.sales_api_service import SalesApiService
+
+from core.sales_query_constants import (  # noqa: E402
+    SALES_LIST_PAGE_DEFAULT,
+    SALES_LIST_PAGE_SIZE_DEFAULT,
+    SALES_LIST_PAGE_SIZE_MAX,
+)
+
+router = APIRouter(
+    prefix="/farms/{farm_cd}/sales",
+    tags=["sales"],
+)
+
+
+@router.get("", response_model=SalesListPage)
+def list_sales(
+    farm_cd: str,
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+    sales_status: str | None = Query(None),
+    payment_status: str | None = Query(None),
+    keyword: str | None = Query(None),
+    page: int = Query(SALES_LIST_PAGE_DEFAULT, ge=1),
+    page_size: int = Query(
+        SALES_LIST_PAGE_SIZE_DEFAULT, ge=1, le=SALES_LIST_PAGE_SIZE_MAX
+    ),
+    service: SalesApiService = Depends(get_sales_api_service),
+) -> SalesListPage:
+    return service.list_sales(
+        farm_cd,
+        from_date=from_date,
+        to_date=to_date,
+        sales_status=sales_status,
+        payment_status=payment_status,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
+    )
