@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime
 import sqlite3
 from typing import Any
 
@@ -19,6 +20,7 @@ from core.order_ship_constants import SALES_STATUS_CONFIRMED
 from core.sales_payment_constants import SALES_STATUS_DRAFT
 from core.sales_query_constants import (
     MSG_PAYMENT_STATUS_INVALID,
+    MSG_SALES_DATE_INVALID,
     MSG_SALES_STATUS_INVALID,
     PAYMENT_STATUS_FILTER_VALUES,
     PAYMENT_STATUS_PAID,
@@ -71,6 +73,36 @@ def compute_unpaid_amt(tot_sales_amt: float, paid_amt: float) -> float:
     return max(0.0, _as_float(tot_sales_amt) - _as_float(paid_amt))
 
 
+def payment_status_filter_sql(
+    pay_filter: str,
+    *,
+    paid_expr: str = "COALESCE(cash.paid_amt, 0)",
+    total_expr: str = "COALESCE(m.tot_sales_amt, 0)",
+) -> str:
+    """compute_payment_status와 동일 의미의 SQL filter (상호배타)."""
+    if pay_filter == PAYMENT_STATUS_UNPAID:
+        return f"{paid_expr} <= 0"
+    if pay_filter == PAYMENT_STATUS_PARTIAL:
+        return f"{paid_expr} > 0 AND {paid_expr} < {total_expr}"
+    if pay_filter == PAYMENT_STATUS_PAID:
+        return f"{paid_expr} > 0 AND ({total_expr} - {paid_expr}) <= 0"
+    raise SalesQueryValidationError(MSG_PAYMENT_STATUS_INVALID)
+
+
+def _compact_ymd_or_raise(raw: str | None, *, default: str) -> str:
+    src = str(raw or "").strip() or default
+    try:
+        compact = to_compact_ymd(src)
+        datetime.date(
+            int(compact[:4]),
+            int(compact[4:6]),
+            int(compact[6:8]),
+        )
+    except (OrderValidationError, ValueError, TypeError) as exc:
+        raise SalesQueryValidationError(MSG_SALES_DATE_INVALID) from exc
+    return compact
+
+
 class SalesQueryService:
     """판매 목록 read-only 조회. cash SUM이 수금 SSOT."""
 
@@ -94,8 +126,8 @@ class SalesQueryService:
         payment_status: str | None,
         keyword: str | None,
     ) -> tuple[str, list[Any]]:
-        from_key = to_compact_ymd(from_date or year_start_iso())
-        to_key = to_compact_ymd(to_date or today_ops_iso())
+        from_key = _compact_ymd_or_raise(from_date, default=year_start_iso())
+        to_key = _compact_ymd_or_raise(to_date, default=today_ops_iso())
         if from_key > to_key:
             from_key, to_key = to_key, from_key
         dt_sql = _sales_dt_compact_sql("m")
@@ -121,14 +153,13 @@ class SalesQueryService:
             params.append(SALES_STATUS_CONFIRMED)
             paid_expr = "COALESCE(cash.paid_amt, 0)"
             total_expr = "COALESCE(m.tot_sales_amt, 0)"
-            if pay_filter == PAYMENT_STATUS_UNPAID:
-                clauses.append(f"{paid_expr} <= 0")
-            elif pay_filter == PAYMENT_STATUS_PARTIAL:
-                clauses.append(
-                    f"{paid_expr} > 0 AND {paid_expr} < {total_expr}"
+            clauses.append(
+                payment_status_filter_sql(
+                    pay_filter,
+                    paid_expr=paid_expr,
+                    total_expr=total_expr,
                 )
-            elif pay_filter == PAYMENT_STATUS_PAID:
-                clauses.append(f"({total_expr} - {paid_expr}) <= 0")
+            )
 
         kw = str(keyword or "").strip()
         if kw:

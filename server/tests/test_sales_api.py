@@ -92,6 +92,27 @@ class SalesApiStage5Test(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["total"], 1)
 
+    def test_invalid_from_date_returns_400(self) -> None:
+        res = self.client.get(
+            f"/api/v1/farms/{FARM}/sales",
+            params={"from_date": "abc"},
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_invalid_to_date_returns_400(self) -> None:
+        res = self.client.get(
+            f"/api/v1/farms/{FARM}/sales",
+            params={"to_date": "2026-99-99"},
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_valid_date_range_returns_200(self) -> None:
+        res = self.client.get(
+            f"/api/v1/farms/{FARM}/sales",
+            params={"from_date": "2026-08-01", "to_date": "2026-08-31"},
+        )
+        self.assertEqual(res.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

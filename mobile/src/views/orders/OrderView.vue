@@ -244,7 +244,7 @@ async function loadStatusOptions() {
       }))
     if (mapped.length) statusOptions.value = mapped
   } catch {
-    /* ST01 fallback 유지 */
+    /* ST01 fallback ?��? */
   }
 }
 
@@ -399,7 +399,7 @@ function onFab() {
     return
   }
   segment.value = TAB_STOCK
-  showToast('상품 재고에서 판매를 선택하세요.')
+  showToast('?�품 ?�고?�서 ?�매�??�택?�세??')
 }
 
 function openOrder(orderNo: string) {
@@ -520,7 +520,7 @@ onMounted(() => {
             </div>
             <div class="order-list__line2">
               <span class="order-list__meta">{{ orderListSecondaryText(row) }}</span>
-              <span class="order-list__amt">{{ formatOrderAmt(row.total_amt) }}원</span>
+              <span class="order-list__amt">{{ formatOrderAmt(row.total_amt) }}??/span>
             </div>
           </button>
         </li>
@@ -673,7 +673,7 @@ onMounted(() => {
   --order-col-ship: 3.5rem;
   --order-col-status: 4.25rem;
   list-style: none;
-  /* 페이지 padding 유지 — 재고 목록(ods-page-content 안쪽 폭)과 동일 */
+  /* ?�이지 padding ?��? ???�고 목록(ods-page-content ?�쪽 ??�??�일 */
   margin: 0;
   padding: 0;
   display: flex;
@@ -691,7 +691,7 @@ onMounted(() => {
     var(--order-col-status);
   align-items: center;
   column-gap: var(--ods-space-6);
-  /* 재고 row와 동일: 리스트 가장자리 + 16 → 텍스트 들여쓰기 */
+  /* ?�고 row?� ?�일: 리스??가?�자�?+ 16 ???�스???�여?�기 */
   padding: 0 var(--ods-space-16);
 }
 .order-list__head {

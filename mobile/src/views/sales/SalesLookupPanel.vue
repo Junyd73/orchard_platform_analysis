@@ -57,7 +57,7 @@ function onQuick(key: string) {
 </script>
 
 <template>
-  <OdsCard class="lookup" aria-label="판매 조회조건">
+  <OdsCard class="lookup" aria-label="?�매 조회조건">
     <div class="lookup-summary">
       <span class="lookup-summary__period">{{ appliedFrom }} ~ {{ appliedTo }}</span>
       <button
@@ -68,7 +68,7 @@ function onQuick(key: string) {
         @click="toggleExpanded"
       >
         {{ LABEL_DETAIL_LOOKUP }}
-        <span aria-hidden="true">{{ expanded ? '˄' : '˅' }}</span>
+        <span aria-hidden="true">{{ expanded ? '?' : '?' }}</span>
       </button>
     </div>
 

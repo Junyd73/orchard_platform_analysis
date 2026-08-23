@@ -225,6 +225,10 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 **payment_status (응답 계산):** CONFIRMED만 — `UNPAID` / `PARTIAL` / `PAID`. DRAFT는 `null`(화면: 수금대기). 수금상태 필터 시 DRAFT 제외.
 
+**payment_status filter (Core·SQL 동일 · 상호배타):** `UNPAID`=`paid<=0` · `PARTIAL`=`paid>0 AND paid<total` · `PAID`=`paid>0 AND (total-paid)<=0`. `total=0,paid=0`는 `UNPAID`만(0원 판매 PAID 승격 없음).
+
+**날짜 validation:** malformed `from_date`/`to_date` → `SalesQueryValidationError` → HTTP 400. ISO·legacy `YYYYMMDD` 호환 유지. `from>to` swap 기존 동작 유지.
+
 **대표상품:** 판매 1행. `t_sales_detail` 다건이어도 `sale_detail_no ASC` 첫 행. cash는 선 aggregate 후 join(cash×detail 곱집계 방지).
 
 **응답:** `{ items[], total, page, page_size }` · item: `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`, `rep_*`.

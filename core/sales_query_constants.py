@@ -29,3 +29,4 @@ SALES_STATUS_FILTER_VALUES = frozenset({SALES_STATUS_CONFIRMED, SALES_STATUS_DRA
 
 MSG_SALES_STATUS_INVALID = "판매상태 필터가 올바르지 않습니다."
 MSG_PAYMENT_STATUS_INVALID = "수금상태 필터가 올바르지 않습니다."
+MSG_SALES_DATE_INVALID = "조회기간의 날짜 형식이 올바르지 않습니다."

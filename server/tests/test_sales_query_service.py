@@ -16,6 +16,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from core.sales_query_constants import (  # noqa: E402
+    MSG_SALES_DATE_INVALID,
     PAYMENT_STATUS_PAID,
     PAYMENT_STATUS_PARTIAL,
     PAYMENT_STATUS_UNPAID,
@@ -361,6 +362,110 @@ class SalesQueryServiceTests(unittest.TestCase):
         self.assertIsNone(
             compute_payment_status(SALES_STATUS_DRAFT, 100000, 0)
         )
+
+    def test_zero_total_zero_paid_unpaid_filter_exclusive(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="Z-01", tot=0)
+        self.conn.commit()
+        row = self.svc.list_sales(FARM_A)["items"][0]
+        self.assertEqual(
+            compute_payment_status(SALES_STATUS_CONFIRMED, 0, 0),
+            PAYMENT_STATUS_UNPAID,
+        )
+        self.assertEqual(row["payment_status"], PAYMENT_STATUS_UNPAID)
+        unpaid = self.svc.list_sales(FARM_A, payment_status=PAYMENT_STATUS_UNPAID)
+        partial = self.svc.list_sales(FARM_A, payment_status=PAYMENT_STATUS_PARTIAL)
+        paid = self.svc.list_sales(FARM_A, payment_status=PAYMENT_STATUS_PAID)
+        self.assertEqual({r["sales_no"] for r in unpaid["items"]}, {"Z-01"})
+        self.assertEqual(partial["total"], 0)
+        self.assertEqual(paid["total"], 0)
+
+    def test_payment_filter_mutual_exclusive(self) -> None:
+        cur = self.conn.cursor()
+        cases = [
+            ("U-01", 100000, 0, PAYMENT_STATUS_UNPAID),
+            ("P-01", 100000, 40000, PAYMENT_STATUS_PARTIAL),
+            ("F-01", 100000, 100000, PAYMENT_STATUS_PAID),
+            ("O-01", 100000, 120000, PAYMENT_STATUS_PAID),
+        ]
+        for sales_no, tot, paid, expected in cases:
+            _insert_sale(cur, sales_no=sales_no, tot=tot)
+            if paid:
+                _insert_cash(
+                    cur,
+                    paid_detail_no=f"{sales_no}-P1",
+                    sales_no=sales_no,
+                    pay_amt=paid,
+                )
+            self.assertEqual(
+                compute_payment_status(SALES_STATUS_CONFIRMED, tot, paid),
+                expected,
+            )
+        self.conn.commit()
+        by_filter = {
+            PAYMENT_STATUS_UNPAID: self.svc.list_sales(
+                FARM_A, payment_status=PAYMENT_STATUS_UNPAID
+            ),
+            PAYMENT_STATUS_PARTIAL: self.svc.list_sales(
+                FARM_A, payment_status=PAYMENT_STATUS_PARTIAL
+            ),
+            PAYMENT_STATUS_PAID: self.svc.list_sales(
+                FARM_A, payment_status=PAYMENT_STATUS_PAID
+            ),
+        }
+        self.assertEqual(
+            {r["sales_no"] for r in by_filter[PAYMENT_STATUS_UNPAID]["items"]},
+            {"U-01"},
+        )
+        self.assertEqual(
+            {r["sales_no"] for r in by_filter[PAYMENT_STATUS_PARTIAL]["items"]},
+            {"P-01"},
+        )
+        self.assertEqual(
+            {r["sales_no"] for r in by_filter[PAYMENT_STATUS_PAID]["items"]},
+            {"F-01", "O-01"},
+        )
+        seen: set[str] = set()
+        for flt, res in by_filter.items():
+            for row in res["items"]:
+                sno = row["sales_no"]
+                self.assertNotIn(sno, seen, f"{sno} duplicated in {flt}")
+                seen.add(sno)
+
+    def test_draft_excluded_from_payment_filters(self) -> None:
+        cur = self.conn.cursor()
+        for idx, paid in enumerate((0, 50000, 100000), start=1):
+            _insert_sale(
+                cur,
+                sales_no=f"D-{idx}",
+                sales_status=SALES_STATUS_DRAFT,
+                tot=100000,
+            )
+            if paid:
+                _insert_cash(
+                    cur,
+                    paid_detail_no=f"D-{idx}-P1",
+                    sales_no=f"D-{idx}",
+                    pay_amt=paid,
+                )
+        self.conn.commit()
+        for flt in (
+            PAYMENT_STATUS_UNPAID,
+            PAYMENT_STATUS_PARTIAL,
+            PAYMENT_STATUS_PAID,
+        ):
+            res = self.svc.list_sales(FARM_A, payment_status=flt)
+            self.assertEqual(res["total"], 0)
+
+    def test_invalid_from_date_raises(self) -> None:
+        with self.assertRaises(SalesQueryValidationError) as ctx:
+            self.svc.list_sales(FARM_A, from_date="abc")
+        self.assertEqual(ctx.exception.message, MSG_SALES_DATE_INVALID)
+
+    def test_invalid_to_date_raises(self) -> None:
+        with self.assertRaises(SalesQueryValidationError) as ctx:
+            self.svc.list_sales(FARM_A, to_date="2026-99-99")
+        self.assertEqual(ctx.exception.message, MSG_SALES_DATE_INVALID)
 
     def test_invalid_filters(self) -> None:
         with self.assertRaises(SalesQueryValidationError):
