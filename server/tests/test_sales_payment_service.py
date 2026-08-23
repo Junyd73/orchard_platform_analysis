@@ -30,6 +30,9 @@ from core.sales_payment_constants import (  # noqa: E402
     MSG_SALES_DRAFT_PAYMENT_FORBIDDEN,
     MSG_SALES_NOT_FOUND,
     MSG_SOURCE_ORDER_MISMATCH,
+    PAYMENT_STATUS_PAID,
+    PAYMENT_STATUS_PARTIAL,
+    PAYMENT_STATUS_UNPAID,
     SALES_STATUS_DRAFT,
 )
 from core.sales_payment_service import (  # noqa: E402
@@ -215,6 +218,7 @@ class SalesPaymentServiceTests(unittest.TestCase):
         out = self._add(100000, "AS010101")
         self.assertEqual(out["tot_paid_amt"], 100000)
         self.assertEqual(out["tot_unpaid_amt"], 200000)
+        self.assertEqual(out["payment_status"], PAYMENT_STATUS_PARTIAL)
         self.assertEqual(out["collection_status"], COLLECTION_STATUS_PARTIAL)
 
     def test_04_zero_rejected(self):
@@ -279,6 +283,7 @@ class SalesPaymentServiceTests(unittest.TestCase):
         s3 = self._add(150000, "AS010101")
         self.assertEqual(s3["tot_paid_amt"], 300000)
         self.assertEqual(s3["tot_unpaid_amt"], 0)
+        self.assertEqual(s3["payment_status"], PAYMENT_STATUS_PAID)
         self.assertEqual(s3["collection_status"], COLLECTION_STATUS_PAID)
 
     def test_17_18_cash_ssot_repairs_stale_master(self):
@@ -484,6 +489,7 @@ class SalesPaymentServiceTests(unittest.TestCase):
         )
         self.assertEqual(out["tot_paid_amt"], 950000)
         self.assertEqual(out["tot_unpaid_amt"], 0)
+        self.assertEqual(out["payment_status"], PAYMENT_STATUS_PAID)
         self.assertEqual(out["collection_status"], COLLECTION_STATUS_PAID)
         # 기존 농협/현금 그룹은 dirty 아니면 slip 유지 가능; 국민만 신규
         cash = {r["paid_detail_no"]: r for r in self._cash_rows()}
@@ -494,8 +500,18 @@ class SalesPaymentServiceTests(unittest.TestCase):
         _insert_sales(self.conn.cursor())
         self.conn.commit()
         s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertEqual(s["payment_status"], PAYMENT_STATUS_UNPAID)
         self.assertEqual(s["collection_status"], COLLECTION_STATUS_UNPAID)
         self.assertEqual(s["payments"], [])
+
+    def test_draft_summary_payment_status_null(self):
+        _insert_sales(self.conn.cursor(), status=SALES_STATUS_DRAFT)
+        self.conn.commit()
+        s = self.svc.get_payment_summary(FARM, SALES_A)
+        self.assertIsNone(s["payment_status"])
+        self.assertIsNone(s["collection_status"])
+        self.assertEqual(s["tot_paid_amt"], 0)
+        self.assertEqual(s["tot_unpaid_amt"], 300000)
 
     def test_master_pay_method_slip_not_updated(self):
         cur = self.conn.cursor()

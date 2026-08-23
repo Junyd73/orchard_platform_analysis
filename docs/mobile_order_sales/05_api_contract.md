@@ -244,7 +244,8 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 ## 8. payment — 판매확정 기준 수금/회계
 
-> **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **feature 구현.** main/운영 반영은 별도 승인.  
+> **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **완료 · 운영** (Stage4와 함께).  
+> **Stage6-0:** `get_payment_summary`가 `payment_status` 영문 코드 + `collection_status`(UI label 호환) 반환.  
 > **HTTP GET/PUT:** 아직 **미구현** (개발순서 6 판매상세/수금등록).
 
 | method | path | 용도 | 상태 |
@@ -257,9 +258,11 @@ DELETE 1차 비공개 (전표 역분개 전).
 | 항목 | 규칙 |
 |------|------|
 | 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT 거부** |
-| 수금액 | `> 0`. 미수 = `tot_sales_amt − SUM(cash)`. 초과 금지 |
+| 수금액 | `> 0`. 미수 = `MAX(0, tot_sales_amt − SUM(cash))`. 초과 write 금지 |
 | 결제수단 | **필수**. `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권 금지 |
-| 수금상태 | 응답 계산값 — `미수` / `부분수금` / `수금완료` ([03 §4.1](./03_data_contract.md)) |
+| 수금상태 | 응답 `payment_status`: `UNPAID` / `PARTIAL` / `PAID` / `null`. UI label은 [03 §4.1](./03_data_contract.md) |
+
+**회계 날짜 (Stage6-0 불변):** `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt`.
 
 **단일 트랜잭션:** ledger sync → cash append(+동일 method slip 갱신) → master paid/unpaid. 실패 시 전체 rollback.  
 `add_payment_in_tx`는 caller-owned TX (4단계 OrderShip 재사용 예정).
