@@ -245,13 +245,13 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 **수금 SSOT:** 목록(§7.1)과 동일 — `SUM(t_cash_ledger.pay_amt)` · Stage6-0 `compute_payment_status` / `compute_unpaid_amt`. master `tot_paid_amt`/`tot_unpaid_amt`는 조회에 사용하지 않음.
 
-**Lines:** DB `t_sales_detail` 원본 행을 `sale_detail_no ASC`로 반환. optional schema 방어: `crop_nm`, `wh_cd`, `dlvry_tp`, `stock_seq`, `order_detail_id`, `weight` 부재 시에도 200. `item_amt`는 `tot_item_amt` → `item_amt` → `qty*unit_price` 순 fallback.
+**Lines:** DB `t_sales_detail` 원본 행을 `sale_detail_no ASC`로 반환. optional schema 방어: `crop_nm`, `wh_cd`, `dlvry_tp`, `stock_seq`, `order_detail_id`, `weight` 부재 시에도 200. `item_amt`는 **schema 기준**: `tot_item_amt` 컬럼 존재 시 사용 → 없으면 `item_amt` → 둘 다 없으면 `qty*unit_price`.
 
 **404:** `farm_cd`+`sales_no` 없음 → `SalesQueryNotFoundError` → `EntityNotFoundError` → HTTP 404. 타 farm 격리 필수.
 
 **Mobile UI grouping (API 아님):** FIFO로 분할된 raw N행은 화면에서 `order_detail_id`+`item_cd`+규격+`unit_price`가 같을 때만 qty·item_amt 합산. 첫 등장 위치 유지. `order_detail_id` NULL은 raw 유지.
 
-**미구현(6A 범위 외):** `t_sales_delivery` read-only 표시 · §8 payments GET/PUT · POST/PUT 저장.
+**미구현(6A 범위 외):** `t_sales_delivery` read-only 표시 · payments PUT · POST/PUT 저장.
 
 PUT: 자식 재INSERT 시 **`order_no` / `sales_status` / `sales_source` 보존**. 재고는 ship/confirm만.  
 DELETE 1차 비공개 (전표 역분개 전).
@@ -264,14 +264,36 @@ DELETE 1차 비공개 (전표 역분개 전).
 
 > **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **완료 · 운영** (Stage4와 함께).  
 > **Stage6-0:** `get_payment_summary`가 `payment_status` 영문 코드 + `collection_status`(UI label 호환) 반환.  
-> **HTTP GET/PUT:** payments GET/PUT **미구현** (개발순서 6B·6C). **판매상세 GET는 Stage6A read-only 구현** (private main · 운영 미배포).
+> **Stage6B:** payments **GET** read-only — `SalesPaymentService.get_payment_summary` 재사용 · feature · main 미반영. **PUT(6C) 미구현**.
 
 | method | path | 용도 | 상태 |
 |--------|------|------|------|
-| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 내역 + 판매금액/수금액/미수금/수금상태 | **미구현** |
-| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 등록/갱신 | **미구현** |
+| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 내역 + 판매금액/수금액/미수금/수금상태 | **Stage6B · feature · main 미반영** |
+| PUT | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 등록/갱신 | **미구현 (6C)** |
 
-**검증 (DEC-029 · Core 반영):**
+### 8.1 GET 수금내역 (Stage6B · read-only)
+
+**Core:** `SalesPaymentService.get_payment_summary(farm_cd, sales_no)` — SELECT only. 신규 Payment Query Service 금지.
+
+**SSOT:** `t_cash_ledger` **실제 행**. 동일 method/slip 합산 금지. `t_ledger` active 전표를 내역으로 표시 금지.
+
+**응답:** `{ sales_no, sales_status, tot_sales_amt, paid_amt, unpaid_amt, payment_status, payments[] }`  
+(`paid_amt`/`unpaid_amt` = Core `tot_paid_amt`/`tot_unpaid_amt`. HTTP에 `collection_status` 필수 아님.)
+
+**payment item:** `paid_detail_no`, `pay_dt`, `pay_method_cd`, `pay_method_nm`, `pay_amt`, `payment_source`, `source_order_no`.
+
+| 필드 | 규칙 |
+|------|------|
+| `payment_source` | `cash.order_no` 실값 있으면 `ORDER_PREPAY`, 없으면 `GENERAL` |
+| `source_order_no` | PREPAY면 `order_no`, GENERAL이면 `null` |
+| `pay_method_nm` | `m_account_code.acct_nm` · 없으면 `pay_method_cd` fallback |
+| `pay_dt` | 실제 cash 수금일 (ISO 표준화 · 파싱 불가 raw fallback) |
+
+**DRAFT:** GET 허용 · `payment_status=null` · legacy cash 행이 있으면 숨기지 않음.
+
+**404:** `PaymentNotFoundError` → `EntityNotFoundError` → HTTP 404.
+
+**검증 (DEC-029 · Core write · 6C):**
 
 | 항목 | 규칙 |
 |------|------|
@@ -325,6 +347,8 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 **Stage6A (완료 · private main · 운영 미배포):** `GET /farms/{farm_cd}/sales/{sales_no}` · `SalesQueryService.get_sale_detail` · Mobile `SalesDetailView` (`/orders/sales/:salesNo`).
 
+**Stage6B (feature · main 미반영):** `GET /farms/{farm_cd}/sales/{sales_no}/payments` · `SalesPaymentService.get_payment_summary` · Mobile 수금내역 section.
+
 판매목록 대표상품(`rep_*`) — optional schema 방어:
 
 | 필드 | 의미 | 비고 |
@@ -346,5 +370,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
 
-**미구현:** `sales/{sales_no}/payments` GET/PUT HTTP (§8 · Core는 개발순서 3 완료).  
+**미구현:** `sales/{sales_no}/payments` **PUT** HTTP (6C). GET는 Stage6B feature.  
 **완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028) · Stage4 선입금 자동배분 Core (§6 · `fb413a3`).

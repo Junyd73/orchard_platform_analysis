@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""판매 목록 REST 어댑터 — core.SalesQueryService 호출만."""
+"""판매 목록/상세/수금내역 REST 어댑터 — Core 호출만."""
 
 from __future__ import annotations
 
@@ -7,11 +7,23 @@ from pathlib import Path
 
 from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection
-from app.schemas.sales import SalesDetail, SalesDetailLine, SalesListItem, SalesListPage
+from app.schemas.sales import (
+    SalesDetail,
+    SalesListItem,
+    SalesListPage,
+    SalesPaymentHistory,
+    SalesPaymentItem,
+)
 from app.services._core_path import ensure_repo_root_on_path
 
 ensure_repo_root_on_path()
 
+from core.sales_payment_service import (  # noqa: E402
+    PaymentError,
+    PaymentNotFoundError,
+    PaymentValidationError,
+    SalesPaymentService,
+)
 from core.sales_query_constants import (  # noqa: E402
     SALES_LIST_PAGE_DEFAULT,
     SALES_LIST_PAGE_SIZE_DEFAULT,
@@ -69,3 +81,36 @@ class SalesApiService:
         except SalesQueryValidationError as exc:
             raise BusinessRuleError(exc.message, error_code=exc.code) from exc
         return SalesDetail.model_validate(data)
+
+    def get_sale_payments(self, farm_cd: str, sales_no: str) -> SalesPaymentHistory:
+        try:
+            with get_sqlite_connection(self._db_path) as conn:
+                data = SalesPaymentService(conn).get_payment_summary(farm_cd, sales_no)
+        except PaymentNotFoundError as exc:
+            raise EntityNotFoundError(str(exc)) from exc
+        except PaymentValidationError as exc:
+            raise BusinessRuleError(str(exc), error_code=exc.code) from exc
+        except PaymentError as exc:
+            raise BusinessRuleError(str(exc), error_code=exc.code) from exc
+
+        payments = [
+            SalesPaymentItem(
+                paid_detail_no=str(p.get("paid_detail_no") or ""),
+                pay_dt=str(p.get("pay_dt") or ""),
+                pay_method_cd=str(p.get("pay_method_cd") or ""),
+                pay_method_nm=str(p.get("pay_method_nm") or ""),
+                pay_amt=float(p.get("pay_amt") or 0),
+                payment_source=str(p.get("payment_source") or ""),
+                source_order_no=p.get("source_order_no"),
+            )
+            for p in (data.get("payments") or [])
+        ]
+        return SalesPaymentHistory(
+            sales_no=str(data.get("sales_no") or sales_no),
+            sales_status=str(data.get("sales_status") or ""),
+            tot_sales_amt=float(data.get("tot_sales_amt") or 0),
+            paid_amt=float(data.get("tot_paid_amt") or 0),
+            unpaid_amt=float(data.get("tot_unpaid_amt") or 0),
+            payment_status=data.get("payment_status"),
+            payments=payments,
+        )
