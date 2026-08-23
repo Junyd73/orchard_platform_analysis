@@ -191,7 +191,7 @@ confirm이 판매를 CONFIRMED로 만든 **같은 TX 안에서** 처리한다.
 
 예: 주문 30만 · 선입금 15만 → confirm①(판매 10만) 적용 10만·미수 0 → confirm②(판매 20만) 적용 5만·미수 15만.
 
-**현재 구현 (Stage4 feature):** `OrderShipService.confirm()`이 동일 TX에서 순차 배분·`SalesPaymentService.add_payment_in_tx`(source_order_no)·cash SUM 동기화를 수행한다. main/운영 미반영. HTTP 응답 필드(적용액·잔액)는 미추가.
+**현재 구현 (Stage4):** `OrderShipService.confirm()`이 동일 TX에서 순차 배분·`SalesPaymentService.add_payment_in_tx`(source_order_no)·cash SUM 동기화를 수행한다. **완료 · 운영** (backend/PC `fb413a3`). HTTP 응답 필드(적용액·잔액)는 미추가.
 
 부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017). Core·HTTP confirm **구현**. Mobile UI **후속**.
 
@@ -212,6 +212,28 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 | GET | `/farms/{farm_cd}/sales/{sales_no}` |
 | POST | `/farms/{farm_cd}/sales` |
 | PUT | `/farms/{farm_cd}/sales/{sales_no}` |
+
+### 7.1 GET 목록 (Stage 5 · main 반영 · 운영 미배포)
+
+**Core:** `SalesQueryService.list_sales` (`core/sales_query_service.py`) — read-only.
+
+**Query:** `from_date`, `to_date`, `sales_status` (`CONFIRMED` \| `DRAFT`), `payment_status` (`UNPAID` \| `PARTIAL` \| `PAID`), `keyword`, `page`(default 1), `page_size`(default 20, max 100).
+
+**날짜:** `t_sales_master.sales_dt` · ISO·`YYYYMMDD` 혼재 조회(주문 목록과 동일 compact 비교). 일괄 변환 없음.
+
+**수금 SSOT:** `paid_amt = SUM(t_cash_ledger.pay_amt)` (`farm_cd`+`sales_no`). `unpaid_amt = MAX(0, tot_sales_amt - paid_amt)`. master `tot_paid_amt`/`tot_unpaid_amt`는 목록 계산에 사용하지 않음.
+
+**payment_status (응답 계산):** CONFIRMED만 — `UNPAID` / `PARTIAL` / `PAID`. DRAFT는 `null`(화면: 수금대기). 수금상태 필터 시 DRAFT 제외.
+
+**payment_status filter (Core·SQL 동일 · 상호배타):** `UNPAID`=`paid<=0` · `PARTIAL`=`paid>0 AND paid<total` · `PAID`=`paid>0 AND (total-paid)<=0`. `total=0,paid=0`는 `UNPAID`만(0원 판매 PAID 승격 없음).
+
+**날짜 validation:** malformed `from_date`/`to_date` → `SalesQueryValidationError` → HTTP 400. ISO·legacy `YYYYMMDD` 호환 유지. `from>to` swap 기존 동작 유지.
+
+**대표상품:** 판매 1행. `t_sales_detail` 다건이어도 `sale_detail_no ASC` 첫 행. cash는 선 aggregate 후 join(cash×detail 곱집계 방지).
+
+**응답:** `{ items[], total, page, page_size }` · item: `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`, `rep_*`.
+
+**미구현(Stage 5 범위 외):** GET/POST/PUT 상세·저장 · §8 payments HTTP.
 
 PUT: 자식 재INSERT 시 **`order_no` / `sales_status` / `sales_source` 보존**. 재고는 ship/confirm만.  
 DELETE 1차 비공개 (전표 역분개 전).
@@ -243,7 +265,7 @@ DELETE 1차 비공개 (전표 역분개 전).
 `add_payment_in_tx`는 caller-owned TX (4단계 OrderShip 재사용 예정).
 
 `sales_status`는 수금으로 **변경되지 않는다** (DEC-029).  
-일반 추가수금 `t_cash_ledger.order_no = NULL`. 선입금 자동적용 `order_no = 원 주문번호` (Stage4 feature · main 미반영).
+일반 추가수금 `t_cash_ledger.order_no = NULL`. 선입금 자동적용 `order_no = 원 주문번호` (Stage4 **완료 · 운영**).
 
 ---
 
@@ -276,9 +298,11 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 ## 11. FastAPI 현황 (재확인)
 
-`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, customers, fruit-stock, fruit-stock/adjust, production, shipments**.
+`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, sales(GET 목록), customers, fruit-stock, fruit-stock/adjust, production, shipments**.
 
-**Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock. **sales HTTP 없음.** 운영 DDL 미적용.
+**Stage 5 (main 반영 · 운영 미배포):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록.
+
+**Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock.
 
 **Stage P (구현 완료 · 로컬):** GET harvest-records, GET raw-stock, POST production/confirm.  
 PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` 도라지배즙. 중분류 `FR010200` 거부. PACK은 해당 필드 무시. 응답 `prefill_lines[].item_nm`. 도라지 원료/BOM 없음.
@@ -287,5 +311,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
 
-**미구현:** `sales/{sales_no}/payments` GET/PUT HTTP (§8 · Core는 개발순서 3 완료) · 출고 confirm 선입금 배분은 Core feature 완료 · main/운영·HTTP 응답 확장 미반영.  
-**완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028).
+**미구현:** `sales/{sales_no}/payments` GET/PUT HTTP (§8 · Core는 개발순서 3 완료).  
+**완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028) · Stage4 선입금 자동배분 Core (§6 · `fb413a3`).
