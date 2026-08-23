@@ -305,8 +305,11 @@ AccountManager sync·DB TX 이전에 검증한다.
 PC `SalesPage`에서 full-save·삭제·수금 mutation **금지**. UI disable + write/delete DB backstop.
 일반 PC 직접판매(CONFIRMED·추적키 없음)는 기존 편집 유지. DRAFT는 대상 아님.
 
-**PC 수금 append-only (DEC-032 · Stage7B 예정):** 기존 수금 수정/삭제 금지 · 신규 일반수금 append-only · Core `SalesPaymentService` · DEC-030 동일. Stage7A는 protected 판매 수금 버튼 차단만.
-(판매일로 일괄 덮어쓰기 금지).
+**PC 수금 append-only (DEC-032 · Stage7B-1 구현):** 기존 수금 수정/삭제 금지 · `execute_full_save`에서 cash/ledger mutation **제거** · master `tot_paid_amt`/`tot_unpaid_amt`는 `SalesPaymentService.get_payment_summary` cash SSOT · 수금 UI read-only · add/edit/delete disable. **신규 append는 Stage7B-2.**
+
+**신규 판매 수금 (DEC-033 · IMPLEMENTED boundary):** 판매 저장 전 수금등록 금지 · CONFIRMED 저장 후 별도 수금등록(Stage7B-2).
+
+**판매금액 감액 (DEC-034 · IMPLEMENTED):** 일반 직접판매 수정 시 `new tot_sales_amt >= actual paid(cash SSOT)` — 미만이면 저장 전체 차단.
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 

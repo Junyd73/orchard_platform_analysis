@@ -113,9 +113,11 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 
 | | |
 |--|--|
-| 현재 | `ui/pages/sales_page.py`가 수금 바구니 구성 · `t_cash_ledger` INSERT SQL · `slip_map` 매핑 · 미수 표시 로직을 **페이지 안에** 갖고 있다. 확인된 INSERT 컬럼: `paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt, slip_no, rmk, reg_id` |
+| Stage7B-1 이전 | `SalesPage`가 `pay_basket` 구성 · `t_cash_ledger` INSERT SQL · `slip_map` 매핑 · `AccountManager.sync_ledger_by_basket` **직접 호출** |
+| Stage7B-1 (private main) | `execute_full_save` cash/ledger mutation **제거** · 기존 수금 **immutable** · DEC-034 backstop · cash 있는 판매 delete 차단 |
+| Stage7B-2 (예정) | 신규 일반수금 append UI → `SalesPaymentService.add_payment` |
+| 확정 설계 | PC/Mobile **공통 진입점 = `SalesPaymentService`**. 수금 저장·조회·append는 Core 한 곳. **`SalesPaymentService` 내부에서 `AccountManager.sync_ledger_by_basket('SALE', …)` 사용** |
 | 문제 | 모바일 수금이 생기면 같은 회계 로직이 두 벌이 된다. 규칙이 다시 갈라진다 (DEC-001 · DEC-007) |
-| 확정 설계 | PC와 모바일이 **동일한 AccountManager Core 경로**를 공유한다. 수금 저장은 Core 한 곳: 수금액+결제수단 → `t_cash_ledger` → `AccountManager.sync_ledger_by_basket('SALE', …)` → `t_ledger` → `tot_paid_amt`/`tot_unpaid_amt`. 한 TX |
 | 금지 | 화면·라우터별 회계 SQL 복제 · **모바일 전용 회계 엔진** · 모바일 전용 결제수단 코드 하드코딩 · DRAFT 판매 수금 (DEC-029) |
 | 계정코드 | 결제수단 = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`)은 결제수단 아님. 신규 코드 정의·모바일 하드코딩 없음 |
 | 수금상태 | 컬럼 신설 없음. `tot_paid_amt`/`tot_unpaid_amt`에서 미수/부분수금/수금완료 계산 (DEC-029) |
@@ -130,7 +132,9 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 | 문제 | `order_detail_id`/`stock_seq`/`order_no` 정합성 훼손 · 재고·주문 추적 불일치 |
 | 확정 | CONFIRMED + (`order_no` \| `order_detail_id` \| `stock_seq`) → read-only. UI disable + save/delete DB backstop |
 | helper | `core/pc_sales_provenance.py` — `is_shipment_confirmed_sale_locked` · `assert_sale_mutable` |
-| Stage7A | **완료 · private main · 운영 미배포** — protected 판매 수금 버튼 disable + 배송 edit 차단. DEC-032 본구현은 Stage7B |
+| Stage7A | **완료 · private main · 운영 미배포** — protected 판매 수금 버튼 disable + 배송 edit 차단 |
+| Stage7B-1 | **완료 · private main · 운영 미배포** — full-save cash/ledger 제거 · 수금 read-only · DEC-034 |
+| Stage7B-2 | 신규 append UI → `SalesPaymentService` (미착수) |
 | 금지 | `order_detail_id` 재INSERT 우회 · protected 판매 partial edit |
 
 ---
@@ -148,7 +152,7 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 | 판매생성 | 주문 루프 / `execute_full_save` | SalesService / OrderShip |
 | DRAFT 저장 | `save_realtime_auction_draft` | SalesService |
 | DRAFT 확정 | 없음 | SalesConfirmService |
-| 수금/전표 | `execute_full_save` + AccountManager | **AccountManager 그대로.** PC·모바일 공용 Core 경로 1곳 (A13) |
+| 수금/전표 | ~~`execute_full_save` + AccountManager~~ → Stage7B-1: full-save cash/ledger 제거 | **`SalesPaymentService`** (내부 `AccountManager`) — PC·Mobile 공용 Core |
 | 재고 매트릭스 | `StockMatrixPopup.get_stock_map` | StockQueryService |
 | 채번 | 이중 | DBManager |
 | 고객 | 팝업 | CustomerService |

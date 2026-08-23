@@ -14,18 +14,26 @@ from ui.styles import MainStyles
 from core.account_manager import AccountManager
 from core.pc_sales_provenance import (
     MSG_PREPAY_CASH_IMMUTABLE,
+    MSG_SALES_AMT_BELOW_PAID,
+    MSG_SALES_DELETE_HAS_PAYMENTS,
     MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED,
     MSG_SHIPMENT_CONFIRMED_SALE_SAVE_BLOCKED,
     PcPrepayImmutableError,
+    PcSalesAmtBelowPaidError,
+    PcSalesDeleteHasPaymentsError,
     PcShipmentConfirmedSaleLockedError,
+    apply_payment_immutable_ui_lock,
     apply_protected_confirmed_sale_ui_lock,
+    assert_no_cash_for_delete,
     assert_sale_mutable,
-    cash_order_no_on_resave,
+    assert_sales_total_not_below_paid,
+    compute_master_paid_unpaid,
+    fetch_actual_paid_amt,
     fetch_master_order_no,
     fetch_master_sales_dt,
     is_shipment_confirmed_sale_locked,
     is_protected_delivery_edit_blocked,
-    validate_pc_prepay_save,
+    validate_protected_prepay_sales_dt_from_db,
 )
 from ui.ops_qdate import qdate_today_ops
 
@@ -1572,12 +1580,14 @@ class SalesPage(QWidget):
         self.pay_table.setMouseTracking(False) 
 
         layout.addWidget(self.pay_table)
+        apply_payment_immutable_ui_lock(self)
 
         return tab
 
     def _apply_protected_confirmed_sale_ui(self, locked: bool) -> None:
         """DEC-031 — 출고확정 CONFIRMED 판매 UI read-only."""
         apply_protected_confirmed_sale_ui_lock(self, locked)
+        apply_payment_immutable_ui_lock(self)
 
     # 판매관리마스터 화면 초기화
     def clear_sales_form(self):
@@ -1621,6 +1631,7 @@ class SalesPage(QWidget):
         
         # 6. 사용자 편의를 위해 품목 빈 줄 하나 추가
         self.add_item_row()
+        apply_payment_immutable_ui_lock(self)
         
         print("화면 및 모든 데이터 리스트가 리셋되었습니다. (신규 모드)")
 
@@ -1842,6 +1853,16 @@ class SalesPage(QWidget):
             )
         except PcShipmentConfirmedSaleLockedError as e:
             QMessageBox.warning(self, "삭제 불가", str(e) or MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED)
+            return
+
+        try:
+            assert_no_cash_for_delete(
+                self.db.conn.cursor(),
+                self.farm_cd,
+                self.current_sales_no,
+            )
+        except PcSalesDeleteHasPaymentsError as e:
+            QMessageBox.warning(self, "삭제 불가", str(e) or MSG_SALES_DELETE_HAS_PAYMENTS)
             return
 
         # 2. 사용자 확인 (중요 비즈니스 로직)
@@ -2183,6 +2204,8 @@ class SalesPage(QWidget):
         else:
             # 기존 데이터(ORG)는 기본적으로 흰색으로 초기화
             self._set_pay_row_color(row_index, QColor("white"))
+
+        apply_payment_immutable_ui_lock(self)
 
     def _set_pay_row_color(self, row, color):
         """[보정] 위젯이 배경색을 가리지 않도록 스타일을 강제 적용"""
@@ -2693,8 +2716,6 @@ class SalesPage(QWidget):
             t_sales = get_amt(self.tot_sales_amt)
             t_ship = get_amt(self.tot_ship_fee)
             t_total = t_sales + t_ship
-            t_paid = get_amt(self.tot_pay_amt)
-            t_unpaid = get_amt(self.tot_unpaid_amt)
             
             # 위젯이 없을 경우를 대비한 기본값 설정
             ui_bill_yn = self.receipt_yn.currentText() if hasattr(self, 'receipt_yn') else 'N'
@@ -2713,76 +2734,30 @@ class SalesPage(QWidget):
                 if self.current_sales_source in (self.SALES_SOURCE_AUCTION_RT, self.SALES_SOURCE_ORDER)
                 else self.SALES_SOURCE_ORDER
             )
-            ledger_enabled = sales_status == self.SALES_STATUS_CONFIRMED
 
-            # -----------------------------------------------------------------
-            # [Step 1] 회계 전표 바구니 구성 및 쿼리 생성
-            # -----------------------------------------------------------------
-            pay_basket = []
-            for r in range(self.pay_table.rowCount()):
-                status_item = self.pay_table.item(r, 0)
-                method_w = self.pay_table.cellWidget(r, 2)
-                amt_w = self.pay_table.cellWidget(r, 3)
-                if not method_w or not amt_w: continue
-                
-                orig = (status_item.data(Qt.ItemDataRole.UserRole + 1) if status_item else {}) or {}
-                dt_w = self.pay_table.cellWidget(r, 1)
-                row_pay_dt = (
-                    dt_w.date().toString("yyyy-MM-dd")
-                    if dt_w is not None
-                    else sales_date_str
-                )
-                pay_basket.append({
-                    'status': status_item.text() if status_item else "INS",
-                    'orig_data': orig,
-                    'acct_cd': method_w.currentData(),
-                    'method': method_w.currentData(),
-                    'amt': get_amt(amt_w),
-                    'pay_dt': row_pay_dt,
-                    'pay_status': 'Y',
-                    'rmk': self.pay_table.cellWidget(r, 4).text() if self.pay_table.cellWidget(r, 4) else f"판매입금({s_no})"
-                })
-            for del_item in getattr(self, 'deleted_pay_items', []):
-                pay_basket.append({
-                    'status': 'DEL',
-                    'orig_data': del_item,
-                    'acct_cd': del_item.get('acct_cd'),
-                    'method': del_item.get('pay_method_cd'),
-                    'amt': 0, # 삭제이므로 현재 금액은 0
-                    'pay_dt': del_item.get('pay_dt'),
-                    'pay_status': 'N', # 삭제는 미지급과 같음
-                    'rmk': '' # 👈 적요 키를 명시적으로 추가
-                })
+            cur = self.db.conn.cursor()
+            actual_paid = fetch_actual_paid_amt(self.db.conn, self.farm_cd, s_no)
+            assert_sales_total_not_below_paid(t_total, actual_paid)
+            t_paid, t_unpaid = compute_master_paid_unpaid(t_total, actual_paid)
 
-            # Stage4-P2/P2b: 선입금 행·판매일 불변성 (AccountManager sync 이전)
-            existing_sales_dt = fetch_master_sales_dt(
-                self.db.conn.cursor(), self.farm_cd, s_no
-            )
-            validate_pc_prepay_save(
-                pay_basket,
+            existing_sales_dt = fetch_master_sales_dt(cur, self.farm_cd, s_no)
+            validate_protected_prepay_sales_dt_from_db(
+                cur,
+                self.farm_cd,
+                s_no,
                 original_sales_dt=existing_sales_dt,
                 current_sales_dt=sales_date_str,
             )
 
-            if ledger_enabled:
-                ledger_queries, slip_map = self.acct_mgr.sync_ledger_by_basket('SALE', s_no, sales_date_str, pay_basket, self.user_id)
-            else:
-                ledger_queries, slip_map = [], {}
-            
-            self.deleted_pay_items = []
             queries = []
-            queries.extend(ledger_queries) # 전표 90/80/10 쿼리 선삽입
 
             # Stage4-P1: DELETE 전 master.order_no 보존 (UI/역산 금지)
-            existing_master_order_no = fetch_master_order_no(
-                self.db.conn.cursor(), self.farm_cd, s_no
-            )
+            existing_master_order_no = fetch_master_order_no(cur, self.farm_cd, s_no)
 
             # -----------------------------------------------------------------
-            # [Step 2] 기존 내역 삭제 (FK 제약 조건 준수: 자식부터 삭제)
+            # [Step 2] 기존 내역 삭제 (cash/ledger 보존 — DEC-032 Stage7B-1)
             # -----------------------------------------------------------------
             queries.append(("DELETE FROM t_sales_delivery WHERE sales_no = ? AND farm_cd = ?", (s_no, self.farm_cd)))
-            queries.append(("DELETE FROM t_cash_ledger WHERE sales_no = ? AND farm_cd = ?", (s_no, self.farm_cd)))
             queries.append(("DELETE FROM t_sales_detail WHERE sales_no = ? AND farm_cd = ?", (s_no, self.farm_cd)))
             queries.append(("DELETE FROM t_sales_master WHERE sales_no = ? AND farm_cd = ?", (s_no, self.farm_cd)))
 
@@ -2854,38 +2829,7 @@ class SalesPage(QWidget):
                     all_delivery_info.append(d)
 
             # -----------------------------------------------------------------
-            # [Step 5] 수납 상세(t_cash_ledger) 등록
-            # -----------------------------------------------------------------
-            sql_pay = """
-                INSERT INTO t_cash_ledger (
-                    paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, 
-                    pay_amt, slip_no, rmk, reg_id, order_no
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            for i, item in enumerate(pay_basket):
-                if item.get('status') == 'DEL':
-                    continue
-                if not ledger_enabled:
-                    continue
-                pd_no = f"{s_no}-P{i+1:02d}"
-                s_key = f"{item['acct_cd']}_{item['method']}"
-                slip_no = slip_map.get(s_key)
-                # Stage4-P1: ORG/MOD는 행별 orig order_no, INS는 NULL (master 상속 금지)
-                preserved_cash_order_no = cash_order_no_on_resave(
-                    status=str(item.get("status") or ""),
-                    orig_data=item.get("orig_data"),
-                )
-                row_pay_dt = str(item.get("pay_dt") or "").strip()[:10] or sales_date_str
-                queries.append((sql_pay, (
-                    pd_no, s_no, self.farm_cd, row_pay_dt, item['method'], 
-                    item['amt'], slip_no, 
-                    item.get('rmk', ''), # 안전하게 get 사용
-                    self.user_id,
-                    preserved_cash_order_no,
-                )))
-
-            # -----------------------------------------------------------------
-            # [Step 6] 배송 상세(t_sales_delivery) 등록
+            # [Step 5] 배송 상세(t_sales_delivery) 등록
             # -----------------------------------------------------------------
             if all_delivery_info:
                 sql_deliv = """
@@ -2915,6 +2859,8 @@ class SalesPage(QWidget):
 
         except PcPrepayImmutableError as e:
             QMessageBox.warning(self, "선입금 변경 불가", str(e) or MSG_PREPAY_CASH_IMMUTABLE)
+        except PcSalesAmtBelowPaidError as e:
+            QMessageBox.warning(self, "저장 불가", str(e) or MSG_SALES_AMT_BELOW_PAID)
         except PcShipmentConfirmedSaleLockedError as e:
             QMessageBox.warning(
                 self,

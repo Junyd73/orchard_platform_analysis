@@ -24,6 +24,7 @@ from core.pc_sales_provenance import (  # noqa: E402
     MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED,
     MSG_SHIPMENT_CONFIRMED_SALE_SAVE_BLOCKED,
     PcShipmentConfirmedSaleLockedError,
+    apply_payment_immutable_ui_lock,
     apply_protected_confirmed_sale_ui_lock,
     assert_sale_mutable,
     fetch_sale_lock_from_db,
@@ -352,6 +353,7 @@ class Stage7aSaleLockUiTests(unittest.TestCase):
     def test_protected_payment_buttons_disabled(self) -> None:
         page = self._make_page_stub()
         apply_protected_confirmed_sale_ui_lock(page, True)
+        apply_payment_immutable_ui_lock(page)
         self.assertFalse(page.btn_pay_add.enabled)
         self.assertFalse(page.btn_pay_edit.enabled)
         self.assertFalse(page.btn_pay_del.enabled)
@@ -365,7 +367,6 @@ class Stage7aSaleLockUiTests(unittest.TestCase):
         self.assertFalse(page.is_protected_confirmed_sale)
         self.assertTrue(page.btn_save.enabled)
         self.assertTrue(page.btn_item_add.enabled)
-        self.assertTrue(page.btn_pay_add.enabled)
 
     def test_ordinary_unlocked_ui(self) -> None:
         page = self._make_page_stub()
