@@ -7,7 +7,7 @@ import {
   formatOrderAmt,
   joinDot,
   orderListDateText,
-} from '@/views/orders/ordersConstants'
+} from '@/features/orders/ordersConstants'
 import type { SalesListItem } from '@/types/sales'
 
 export const SALES_LIST_PAGE_SIZE = 20
@@ -84,14 +84,19 @@ export function salesRouteLabel(row: Pick<SalesListItem, 'sales_source' | 'order
   return '직접판매'
 }
 
-function salesRepProductText(row: Pick<SalesListItem, 'rep_item_cd' | 'rep_variety_nm' | 'rep_weight' | 'rep_grade_nm' | 'rep_size_nm'>): string {
+function salesRepProductText(
+  row: Pick<
+    SalesListItem,
+    'rep_item_cd' | 'rep_variety_nm' | 'rep_size_nm' | 'rep_grade_nm' | 'rep_crop_nm'
+  >,
+): string {
   const juice = JUICE_ITEM_LABEL[String(row.rep_item_cd || '').trim()]
   if (juice) return juice
   const variety = row.rep_variety_nm || ''
-  const weight = row.rep_weight ? `${formatOrderAmt(row.rep_weight)}kg` : ''
-  const grade = row.rep_grade_nm || ''
   const size = row.rep_size_nm || ''
-  return joinDot([variety, weight, grade, size].filter(Boolean))
+  const grade = row.rep_grade_nm || ''
+  const crop = row.rep_crop_nm || ''
+  return joinDot([variety, size, grade, crop].filter(Boolean))
 }
 
 export function salesListSecondaryText(row: SalesListItem): string {

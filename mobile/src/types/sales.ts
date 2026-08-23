@@ -20,6 +20,7 @@ export interface SalesListItem {
   rep_grade_nm: string
   rep_size_cd: string
   rep_size_nm: string
+  rep_crop_nm: string
 }
 
 export interface SalesListQuery {

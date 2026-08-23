@@ -2,7 +2,7 @@
 
 > **현재 기준 (2026-08-23):** private main **Stage5 반영** · 운영 backend **`fb413a3`**.  
 > **Stage4:** Core + P1 + P2 + P2b **완료 · 운영**.  
-> **Stage5:** Core/API + Mobile + P1 **main 반영 · 운영 미배포**.  
+> **Stage5:** Core/API + Mobile + P1 **main 반영** · P2 스키마 정합(feature/review) **진행** · **운영 미배포**.  
 > **다음:** Stage5 **운영배포 대기** → Stage6 판매상세/수금등록.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED**. DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).

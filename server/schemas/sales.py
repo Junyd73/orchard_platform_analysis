@@ -28,6 +28,7 @@ class SalesListItem(BaseModel):
     rep_grade_nm: str = ""
     rep_size_cd: str = ""
     rep_size_nm: str = ""
+    rep_crop_nm: str = ""
 
 
 class SalesListPage(BaseModel):

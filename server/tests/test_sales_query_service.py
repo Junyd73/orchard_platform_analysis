@@ -53,7 +53,7 @@ def _schema_sql() -> str:
         CREATE TABLE t_sales_detail (
             sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
             item_cd TEXT, variety_cd TEXT, grade_cd TEXT, size_cd TEXT,
-            weight REAL, qty REAL,
+            crop_nm TEXT, qty REAL,
             PRIMARY KEY (sale_detail_no, farm_cd)
         );
         CREATE TABLE t_cash_ledger (
@@ -69,7 +69,9 @@ def _schema_sql() -> str:
         INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
             ('OR001', 'FR010101', '신고', 'FR010100'),
             ('OR001', 'GR010100', '특', 'GR01'),
-            ('OR001', 'SZ010100', '20과', 'SZ01');
+            ('OR001', 'GR010401', '16 ~ 20과', 'GR010400'),
+            ('OR001', 'SZ010100', '15kg', 'SZ01'),
+            ('OR001', 'SZ010200', '7.5kg', 'SZ01');
     """
 
 
@@ -131,13 +133,13 @@ def _insert_detail(
     variety_cd: str = "FR010101",
     grade_cd: str = "GR010100",
     size_cd: str = "SZ010100",
-    weight: float = 15,
+    crop_nm: str | None = "GR010401",
 ) -> None:
     cur.execute(
         """
         INSERT INTO t_sales_detail(
             sale_detail_no, sales_no, farm_cd, item_cd,
-            variety_cd, grade_cd, size_cd, weight, qty
+            variety_cd, grade_cd, size_cd, crop_nm, qty
         ) VALUES (?,?,?,?,?,?,?,?,?)
         """,
         (
@@ -148,7 +150,7 @@ def _insert_detail(
             variety_cd,
             grade_cd,
             size_cd,
-            weight,
+            crop_nm,
             1,
         ),
     )
@@ -472,6 +474,95 @@ class SalesQueryServiceTests(unittest.TestCase):
             self.svc.list_sales(FARM_A, sales_status="PAID")
         with self.assertRaises(SalesQueryValidationError):
             self.svc.list_sales(FARM_A, payment_status="DRAFT")
+
+    def test_ops_schema_without_weight_column_ok(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="NOWEIGHT-01", tot=950000)
+        _insert_detail(cur, sale_detail_no="NOWEIGHT-01-S01", sales_no="NOWEIGHT-01")
+        self.conn.commit()
+        row = self.svc.list_sales(FARM_A)["items"][0]
+        self.assertEqual(row["sales_no"], "NOWEIGHT-01")
+        self.assertEqual(row["rep_weight"], 0.0)
+        self.assertEqual(row["rep_variety_nm"], "신고")
+
+    def test_rep_crop_nm_resolved_from_common_code(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="CROP-01")
+        _insert_detail(cur, sale_detail_no="CROP-01-S01", sales_no="CROP-01")
+        self.conn.commit()
+        row = self.svc.list_sales(FARM_A)["items"][0]
+        self.assertEqual(row["rep_crop_nm"], "16 ~ 20과")
+        self.assertEqual(row["rep_size_nm"], "15kg")
+
+    def test_sale_without_detail_rep_defaults(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="NODET-01")
+        self.conn.commit()
+        row = self.svc.list_sales(FARM_A)["items"][0]
+        self.assertEqual(row["rep_variety_nm"], "")
+        self.assertEqual(row["rep_crop_nm"], "")
+        self.assertEqual(row["rep_weight"], 0.0)
+
+    def test_legacy_schema_without_crop_nm_column(self) -> None:
+        fd, name = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        path = Path(name)
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE m_customer (
+                custm_id TEXT, farm_cd TEXT, custm_nm TEXT, mobile TEXT, use_yn TEXT
+            );
+            CREATE TABLE m_common_code (
+                farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT
+            );
+            CREATE TABLE t_sales_master (
+                sales_no TEXT NOT NULL, farm_cd TEXT NOT NULL,
+                sales_dt TEXT, sales_status TEXT, sales_source TEXT,
+                custm_id TEXT, order_no TEXT,
+                tot_sales_amt REAL DEFAULT 0,
+                tot_paid_amt REAL DEFAULT 0,
+                tot_unpaid_amt REAL DEFAULT 0,
+                PRIMARY KEY (sales_no, farm_cd)
+            );
+            CREATE TABLE t_sales_detail (
+                sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                item_cd TEXT, variety_cd TEXT, grade_cd TEXT, size_cd TEXT,
+                qty REAL,
+                PRIMARY KEY (sale_detail_no, farm_cd)
+            );
+            CREATE TABLE t_cash_ledger (
+                paid_detail_no TEXT PRIMARY KEY,
+                sales_no TEXT NOT NULL, farm_cd TEXT NOT NULL,
+                pay_dt TEXT NOT NULL, pay_method_cd TEXT NOT NULL,
+                pay_amt REAL DEFAULT 0, slip_no TEXT, order_no TEXT
+            );
+            INSERT INTO m_customer (custm_id, farm_cd, custm_nm, use_yn) VALUES
+                ('C001', 'OR001', '홍길동', 'Y');
+            INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
+                ('OR001', 'FR010101', '신고', 'FR010100');
+            """
+        )
+        cur = conn.cursor()
+        _insert_sale(cur, sales_no="LEG-01")
+        cur.execute(
+            """
+            INSERT INTO t_sales_detail(
+                sale_detail_no, sales_no, farm_cd, item_cd,
+                variety_cd, grade_cd, size_cd, qty
+            ) VALUES (?,?,?,?,?,?,?,?)
+            """,
+            ("LEG-01-S01", "LEG-01", FARM_A, "FR010100", "FR010101", "GR010100", "SZ010100", 1),
+        )
+        conn.commit()
+        try:
+            row = SalesQueryService(conn).list_sales(FARM_A)["items"][0]
+            self.assertEqual(row["rep_crop_nm"], "")
+            self.assertEqual(row["rep_variety_nm"], "신고")
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
