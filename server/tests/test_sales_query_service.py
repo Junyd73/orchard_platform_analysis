@@ -22,6 +22,7 @@ from core.sales_query_constants import (  # noqa: E402
     PAYMENT_STATUS_UNPAID,
 )
 from core.sales_query_service import (  # noqa: E402
+    SalesQueryNotFoundError,
     SalesQueryService,
     SalesQueryValidationError,
     compute_payment_status,
@@ -53,7 +54,8 @@ def _schema_sql() -> str:
         CREATE TABLE t_sales_detail (
             sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
             item_cd TEXT, variety_cd TEXT, grade_cd TEXT, size_cd TEXT,
-            crop_nm TEXT, qty REAL,
+            crop_nm TEXT, qty REAL, unit_price REAL, tot_item_amt REAL,
+            order_detail_id TEXT,
             PRIMARY KEY (sale_detail_no, farm_cd)
         );
         CREATE TABLE t_cash_ledger (
@@ -134,13 +136,19 @@ def _insert_detail(
     grade_cd: str = "GR010100",
     size_cd: str = "SZ010100",
     crop_nm: str | None = "GR010401",
+    qty: float = 1,
+    unit_price: float = 10000,
+    item_amt: float | None = None,
+    order_detail_id: str | None = None,
 ) -> None:
+    amt = item_amt if item_amt is not None else qty * unit_price
     cur.execute(
         """
         INSERT INTO t_sales_detail(
             sale_detail_no, sales_no, farm_cd, item_cd,
-            variety_cd, grade_cd, size_cd, crop_nm, qty
-        ) VALUES (?,?,?,?,?,?,?,?,?)
+            variety_cd, grade_cd, size_cd, crop_nm, qty,
+            unit_price, tot_item_amt, order_detail_id
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             sale_detail_no,
@@ -151,7 +159,10 @@ def _insert_detail(
             grade_cd,
             size_cd,
             crop_nm,
-            1,
+            qty,
+            unit_price,
+            amt,
+            order_detail_id,
         ),
     )
 
@@ -560,6 +571,165 @@ class SalesQueryServiceTests(unittest.TestCase):
             row = SalesQueryService(conn).list_sales(FARM_A)["items"][0]
             self.assertEqual(row["rep_crop_nm"], "")
             self.assertEqual(row["rep_variety_nm"], "신고")
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+
+class SalesQueryDetailTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.path, self.conn = _open_db()
+        self.svc = SalesQueryService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def test_confirmed_detail_fields(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-01", tot=50000)
+        _insert_detail(cur, sale_detail_no="D-01-S01", sales_no="D-01", qty=5, unit_price=10000)
+        _insert_cash(cur, paid_detail_no="P1", sales_no="D-01", pay_amt=20000)
+        self.conn.commit()
+        out = self.svc.get_sale_detail(FARM_A, "D-01")
+        self.assertEqual(out["sales_no"], "D-01")
+        self.assertEqual(out["customer"], "홍길동")
+        self.assertEqual(out["paid_amt"], 20000)
+        self.assertEqual(out["unpaid_amt"], 30000)
+        self.assertEqual(out["payment_status"], PAYMENT_STATUS_PARTIAL)
+        self.assertEqual(len(out["lines"]), 1)
+        self.assertEqual(out["lines"][0]["item_amt"], 50000)
+
+    def test_draft_payment_status_null(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-DRAFT", sales_status=SALES_STATUS_DRAFT)
+        self.conn.commit()
+        out = self.svc.get_sale_detail(FARM_A, "D-DRAFT")
+        self.assertIsNone(out["payment_status"])
+        self.assertEqual(out["paid_amt"], 0)
+
+    def test_not_found(self) -> None:
+        with self.assertRaises(SalesQueryNotFoundError):
+            self.svc.get_sale_detail(FARM_A, "NO-SUCH")
+
+    def test_farm_scope_and_isolation(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-SAME", farm_cd=FARM_A, tot=100000)
+        _insert_sale(cur, sales_no="D-SAME", farm_cd=FARM_B, tot=200000, custm_id="C001")
+        _insert_cash(cur, paid_detail_no="PA", sales_no="D-SAME", farm_cd=FARM_A, pay_amt=40000)
+        _insert_cash(cur, paid_detail_no="PB", sales_no="D-SAME", farm_cd=FARM_B, pay_amt=80000)
+        self.conn.commit()
+        a = self.svc.get_sale_detail(FARM_A, "D-SAME")
+        b = self.svc.get_sale_detail(FARM_B, "D-SAME")
+        self.assertEqual(a["paid_amt"], 40000)
+        self.assertEqual(b["paid_amt"], 80000)
+        self.assertEqual(a["customer"], "홍길동")
+        self.assertEqual(b["customer"], "다른농장")
+
+    def test_cash_ssot_ignores_stale_master(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-STALE", tot=100000, master_paid=999, master_unpaid=-899)
+        _insert_cash(cur, paid_detail_no="P1", sales_no="D-STALE", pay_amt=100000)
+        self.conn.commit()
+        out = self.svc.get_sale_detail(FARM_A, "D-STALE")
+        self.assertEqual(out["paid_amt"], 100000)
+        self.assertEqual(out["unpaid_amt"], 0)
+        self.assertEqual(out["payment_status"], PAYMENT_STATUS_PAID)
+
+    def test_zero_zero_unpaid(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-ZERO", tot=0)
+        self.conn.commit()
+        out = self.svc.get_sale_detail(FARM_A, "D-ZERO")
+        self.assertEqual(out["payment_status"], PAYMENT_STATUS_UNPAID)
+        self.assertEqual(out["unpaid_amt"], 0)
+
+    def test_overpay_legacy_paid(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-OVER", tot=100000)
+        _insert_cash(cur, paid_detail_no="P1", sales_no="D-OVER", pay_amt=120000)
+        self.conn.commit()
+        out = self.svc.get_sale_detail(FARM_A, "D-OVER")
+        self.assertEqual(out["payment_status"], PAYMENT_STATUS_PAID)
+        self.assertEqual(out["unpaid_amt"], 0)
+
+    def test_detail_order_and_zero_lines(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="D-EMPTY", tot=1000)
+        _insert_sale(cur, sales_no="D-LINES", tot=50000)
+        _insert_detail(cur, sale_detail_no="D-LINES-S02", sales_no="D-LINES", qty=2)
+        _insert_detail(cur, sale_detail_no="D-LINES-S01", sales_no="D-LINES", qty=3)
+        self.conn.commit()
+        empty = self.svc.get_sale_detail(FARM_A, "D-EMPTY")
+        lines = self.svc.get_sale_detail(FARM_A, "D-LINES")["lines"]
+        self.assertEqual(empty["lines"], [])
+        self.assertEqual([ln["sale_detail_no"] for ln in lines], ["D-LINES-S01", "D-LINES-S02"])
+
+    def test_optional_schema_without_crop_nm(self) -> None:
+        fd, name = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        path = Path(name)
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE m_customer (
+                custm_id TEXT, farm_cd TEXT, custm_nm TEXT, mobile TEXT, use_yn TEXT
+            );
+            CREATE TABLE m_common_code (
+                farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT
+            );
+            CREATE TABLE t_sales_master (
+                sales_no TEXT NOT NULL, farm_cd TEXT NOT NULL,
+                sales_dt TEXT, sales_status TEXT, sales_source TEXT,
+                custm_id TEXT, order_no TEXT,
+                tot_sales_amt REAL DEFAULT 0,
+                tot_paid_amt REAL DEFAULT 0,
+                tot_unpaid_amt REAL DEFAULT 0,
+                PRIMARY KEY (sales_no, farm_cd)
+            );
+            CREATE TABLE t_sales_detail (
+                sale_detail_no TEXT, sales_no TEXT, farm_cd TEXT,
+                item_cd TEXT, variety_cd TEXT, grade_cd TEXT, size_cd TEXT,
+                qty REAL, unit_price REAL,
+                PRIMARY KEY (sale_detail_no, farm_cd)
+            );
+            CREATE TABLE t_cash_ledger (
+                paid_detail_no TEXT PRIMARY KEY,
+                sales_no TEXT NOT NULL, farm_cd TEXT NOT NULL,
+                pay_dt TEXT NOT NULL, pay_method_cd TEXT NOT NULL,
+                pay_amt REAL DEFAULT 0, slip_no TEXT, order_no TEXT
+            );
+            INSERT INTO m_customer (custm_id, farm_cd, custm_nm, use_yn) VALUES
+                ('C001', 'OR001', '홍길동', 'Y');
+            INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
+                ('OR001', 'FR010101', '신고', 'FR010100');
+            """
+        )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO t_sales_master(
+                sales_no, farm_cd, sales_dt, sales_status, sales_source,
+                custm_id, order_no, tot_sales_amt, tot_paid_amt, tot_unpaid_amt
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            ("LEG-D", FARM_A, "2026-08-22", SALES_STATUS_CONFIRMED, "ORDER", "C001", None, 10000, 0, 10000),
+        )
+        cur.execute(
+            """
+            INSERT INTO t_sales_detail(
+                sale_detail_no, sales_no, farm_cd, item_cd,
+                variety_cd, grade_cd, size_cd, qty, unit_price
+            ) VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            ("LEG-D-S01", "LEG-D", FARM_A, "FR010100", "FR010101", "GR010100", "SZ010100", 2, 5000),
+        )
+        conn.commit()
+        try:
+            out = SalesQueryService(conn).get_sale_detail(FARM_A, "LEG-D")
+            self.assertEqual(out["lines"][0]["crop_nm"], "")
+            self.assertEqual(out["lines"][0]["item_amt"], 10000)
         finally:
             conn.close()
             path.unlink(missing_ok=True)

@@ -113,6 +113,18 @@ class SalesApiStage5Test(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 200)
 
+    def test_get_sale_detail(self) -> None:
+        res = self.client.get(f"/api/v1/farms/{FARM}/sales/20260822-01")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["sales_no"], "20260822-01")
+        self.assertEqual(body["paid_amt"], 800000)
+        self.assertEqual(body["payment_status"], "PARTIAL")
+
+    def test_get_sale_detail_not_found(self) -> None:
+        res = self.client.get(f"/api/v1/farms/{FARM}/sales/NO-SUCH")
+        self.assertEqual(res.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -406,6 +406,10 @@ function openOrder(orderNo: string) {
   void router.push({ name: 'order-detail', params: { orderNo } })
 }
 
+function openSale(salesNo: string) {
+  void router.push({ name: 'sales-detail', params: { salesNo } })
+}
+
 function isOrdersListPath(path: string): boolean {
   return path === '/orders' || path.startsWith('/orders?')
 }
@@ -574,7 +578,11 @@ onMounted(() => {
         />
         <ul v-else-if="showSalesList" class="sales-list">
           <li v-for="row in salesItems" :key="row.sales_no" class="sales-list__item">
-            <div class="sales-list__row">
+            <button
+              type="button"
+              class="sales-list__row"
+              @click="openSale(row.sales_no)"
+            >
               <div class="sales-list__line1">
                 <span class="sales-list__cust">{{ salesCustomerLabel(row) }}</span>
                 <span class="sales-list__amt">{{ salesListAmountLine(row) }}</span>
@@ -594,7 +602,7 @@ onMounted(() => {
                   {{ salesStatusLabelOf(row.sales_status) }}
                 </OdsBadge>
               </div>
-            </div>
+            </button>
           </li>
         </ul>
         <div v-if="showSalesPager" class="pager">
@@ -806,6 +814,14 @@ onMounted(() => {
   width: 100%;
   min-height: 60px;
   padding: var(--ods-space-8) 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.sales-list__row:active {
+  background: var(--ods-color-primary-subtle, #f0f7f4);
 }
 .sales-list__line1 {
   display: grid;

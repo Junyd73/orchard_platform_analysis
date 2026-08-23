@@ -8,7 +8,7 @@ import {
   joinDot,
   orderListDateText,
 } from '@/views/orders/ordersConstants'
-import type { SalesListItem } from '@/types/sales'
+import type { SalesDetailLine, SalesListItem } from '@/types/sales'
 
 export const SALES_LIST_PAGE_SIZE = 20
 
@@ -25,8 +25,20 @@ export const STATUS_FILTER_ALL = ''
 
 export const LABEL_SALES_STATUS = '판매상태'
 export const LABEL_PAYMENT_STATUS = '수금상태'
+export const LABEL_SALES_DETAIL = '판매상세'
+export const LABEL_SALES_SUMMARY = '판매요약'
+export const LABEL_SALES_PRODUCTS = '판매상품'
+export const LABEL_SALES_ROUTE = '판매경로'
+export const LABEL_SALES_AMOUNT = '판매금액'
+export const LABEL_PAID_AMOUNT = '수금액'
+export const LABEL_UNPAID_AMOUNT = '미수금'
+export const LABEL_QTY = '수량'
+export const LABEL_UNIT_PRICE = '단가'
+export const LABEL_LINE_AMOUNT = '금액'
+export const LABEL_ORDER_NO = '주문번호'
 export const LABEL_SALES_SEARCH_PLACEHOLDER = '고객명 / 판매번호 / 주문번호'
 export const MSG_SALES_LOAD_FAIL = '판매 목록을 불러오지 못했습니다.'
+export const MSG_SALES_DETAIL_LOAD_FAIL = '판매 상세를 불러오지 못했습니다.'
 export const MSG_SALES_EMPTY_FILTER = '조건에 맞는 판매가 없습니다.'
 export const MSG_SALES_EMPTY_FILTER_DESC =
   '조회기간·판매상태·수금상태·검색을 바꿔 다시 조회해 보세요.'
@@ -116,4 +128,63 @@ export function salesCustomerLabel(row: Pick<SalesListItem, 'customer' | 'custm_
   if (name && name !== '-') return name
   const id = String(row.custm_id || '').trim()
   return id || '-'
+}
+
+function salesProductSpecKey(line: Pick<
+  SalesDetailLine,
+  'variety_cd' | 'size_cd' | 'grade_cd' | 'crop_nm'
+>): string {
+  return [
+    line.variety_cd,
+    line.size_cd,
+    line.grade_cd,
+    line.crop_nm,
+  ].join('|')
+}
+
+export function salesDetailProductText(
+  line: Pick<
+    SalesDetailLine,
+    'item_cd' | 'variety_nm' | 'size_nm' | 'grade_nm' | 'crop_nm'
+  >,
+): string {
+  const juice = JUICE_ITEM_LABEL[String(line.item_cd || '').trim()]
+  if (juice) return juice
+  return joinDot(
+    [line.variety_nm, line.size_nm, line.grade_nm, line.crop_nm].filter(Boolean),
+  )
+}
+
+/** FIFO raw rows → 논리 표시 line (order_detail_id NULL은 합치지 않음). */
+export function groupSalesDetailLines(lines: SalesDetailLine[]): SalesDetailLine[] {
+  const out: SalesDetailLine[] = []
+  const grouped = new Map<string, SalesDetailLine>()
+  const groupedOrder: string[] = []
+
+  for (const line of lines) {
+    const orderDetailId = String(line.order_detail_id || '').trim()
+    if (!orderDetailId) {
+      out.push({ ...line })
+      continue
+    }
+    const key = [
+      orderDetailId,
+      salesProductSpecKey(line),
+      String(line.unit_price),
+    ].join('::')
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.qty += line.qty
+      existing.item_amt += line.item_amt
+      continue
+    }
+    grouped.set(key, { ...line })
+    groupedOrder.push(key)
+  }
+
+  for (const key of groupedOrder) {
+    const row = grouped.get(key)
+    if (row) out.push(row)
+  }
+  return out
 }

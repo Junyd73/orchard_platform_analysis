@@ -39,3 +39,37 @@ export interface SalesListPage {
   page: number
   page_size: number
 }
+
+export interface SalesDetailLine {
+  sale_detail_no: string
+  order_detail_id: string | null
+  item_cd: string
+  variety_cd: string
+  variety_nm: string
+  grade_cd: string
+  grade_nm: string
+  size_cd: string
+  size_nm: string
+  crop_nm: string
+  qty: number
+  unit_price: number
+  item_amt: number
+  wh_cd?: string | null
+  dlvry_tp?: string | null
+  stock_seq?: number | null
+}
+
+export interface SalesDetail {
+  sales_no: string
+  sales_dt: string
+  custm_id: string
+  customer: string
+  order_no: string | null
+  sales_status: string
+  sales_source: string
+  tot_sales_amt: number
+  paid_amt: number
+  unpaid_amt: number
+  payment_status: PaymentStatus
+  lines: SalesDetailLine[]
+}

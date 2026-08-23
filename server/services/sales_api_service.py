@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.exceptions import BusinessRuleError
+from app.core.exceptions import BusinessRuleError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_connection
-from app.schemas.sales import SalesListItem, SalesListPage
+from app.schemas.sales import SalesDetail, SalesDetailLine, SalesListItem, SalesListPage
 from app.services._core_path import ensure_repo_root_on_path
 
 ensure_repo_root_on_path()
@@ -17,6 +17,7 @@ from core.sales_query_constants import (  # noqa: E402
     SALES_LIST_PAGE_SIZE_DEFAULT,
 )
 from core.sales_query_service import (  # noqa: E402
+    SalesQueryNotFoundError,
     SalesQueryService,
     SalesQueryValidationError,
 )
@@ -58,3 +59,13 @@ class SalesApiService:
             page=int(data["page"]),
             page_size=int(data["page_size"]),
         )
+
+    def get_sale_detail(self, farm_cd: str, sales_no: str) -> SalesDetail:
+        try:
+            with get_sqlite_connection(self._db_path) as conn:
+                data = SalesQueryService(conn).get_sale_detail(farm_cd, sales_no)
+        except SalesQueryNotFoundError as exc:
+            raise EntityNotFoundError(exc.message) from exc
+        except SalesQueryValidationError as exc:
+            raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        return SalesDetail.model_validate(data)
