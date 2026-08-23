@@ -51,7 +51,7 @@ const displayLines = computed(() =>
 )
 
 function goBackToSalesTab() {
-  void router.push({ name: 'orders', query: { tab: TAB_SALES } })
+  void router.replace({ name: 'orders', query: { tab: TAB_SALES } })
 }
 
 async function load() {

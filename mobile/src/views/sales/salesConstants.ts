@@ -157,18 +157,21 @@ export function salesDetailProductText(
 
 /** FIFO raw rows → 논리 표시 line (order_detail_id NULL은 합치지 않음). */
 export function groupSalesDetailLines(lines: SalesDetailLine[]): SalesDetailLine[] {
-  const out: SalesDetailLine[] = []
   const grouped = new Map<string, SalesDetailLine>()
-  const groupedOrder: string[] = []
+  const slots: Array<
+    | { kind: 'raw'; line: SalesDetailLine }
+    | { kind: 'group'; key: string }
+  > = []
 
   for (const line of lines) {
     const orderDetailId = String(line.order_detail_id || '').trim()
     if (!orderDetailId) {
-      out.push({ ...line })
+      slots.push({ kind: 'raw', line: { ...line } })
       continue
     }
     const key = [
       orderDetailId,
+      String(line.item_cd || ''),
       salesProductSpecKey(line),
       String(line.unit_price),
     ].join('::')
@@ -179,12 +182,11 @@ export function groupSalesDetailLines(lines: SalesDetailLine[]): SalesDetailLine
       continue
     }
     grouped.set(key, { ...line })
-    groupedOrder.push(key)
+    slots.push({ kind: 'group', key })
   }
 
-  for (const key of groupedOrder) {
-    const row = grouped.get(key)
-    if (row) out.push(row)
-  }
-  return out
+  return slots.map((slot) => {
+    if (slot.kind === 'raw') return slot.line
+    return grouped.get(slot.key)!
+  })
 }

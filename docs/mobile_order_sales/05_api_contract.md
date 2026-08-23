@@ -247,9 +247,9 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 **Lines:** DB `t_sales_detail` 원본 행을 `sale_detail_no ASC`로 반환. optional schema 방어: `crop_nm`, `wh_cd`, `dlvry_tp`, `stock_seq`, `order_detail_id`, `weight` 부재 시에도 200. `item_amt`는 `tot_item_amt` → `item_amt` → `qty*unit_price` 순 fallback.
 
-**404:** `farm_cd`+`sales_no` 없음 → `BusinessRuleError` / HTTP 404. 타 farm 격리 필수.
+**404:** `farm_cd`+`sales_no` 없음 → `SalesQueryNotFoundError` → `EntityNotFoundError` → HTTP 404. 타 farm 격리 필수.
 
-**Mobile UI grouping (API 아님):** FIFO로 분할된 raw N행은 화면에서 `order_detail_id`+규격+`unit_price`가 같을 때만 qty·item_amt 합산. `order_detail_id` NULL은 raw 유지.
+**Mobile UI grouping (API 아님):** FIFO로 분할된 raw N행은 화면에서 `order_detail_id`+`item_cd`+규격+`unit_price`가 같을 때만 qty·item_amt 합산. 첫 등장 위치 유지. `order_detail_id` NULL은 raw 유지.
 
 **미구현(6A 범위 외):** `t_sales_delivery` read-only 표시 · §8 payments GET/PUT · POST/PUT 저장.
 

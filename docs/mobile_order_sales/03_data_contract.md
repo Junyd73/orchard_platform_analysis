@@ -176,7 +176,7 @@ migration 직전 운영 점검 필수 → §15.
 
 부분출고: 같은 `order_detail_id`가 **여러 `sales_no`** 및 **같은 판매의 여러 상세**에 나타날 수 있다 (DEC-017 · FIFO 분할). 기존 CONFIRMED 판매를 후속 출고로 수정하여 수량을 증가시키지 않는다.
 
-**Stage6A 상세 조회:** API는 FIFO 분할 **raw 행 그대로** 반환 (`sale_detail_no ASC`). Mobile 상세는 `order_detail_id`+규격+`unit_price`가 같을 때만 qty·item_amt 합산 표시. `order_detail_id` NULL(직접판매·경매)은 임의 spec grouping 금지.
+**Stage6A 상세 조회:** API는 FIFO 분할 **raw 행 그대로** 반환 (`sale_detail_no ASC`). Mobile 상세는 `order_detail_id`+`item_cd`+규격+`unit_price`가 같을 때만 qty·item_amt 합산 표시(첫 등장 위치 유지). `order_detail_id` NULL(직접판매·경매)은 임의 spec grouping 금지.
 
 ---
 
