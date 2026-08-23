@@ -300,7 +300,7 @@ TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수�
 
 `router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, sales(GET 목록), customers, fruit-stock, fruit-stock/adjust, production, shipments**.
 
-**Stage 5 (main 반영 · 운영 미배포):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록.
+**Stage 5 (완료 · 운영):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록 · 운영 backend `b48ca8b`.
 
 판매목록 대표상품(`rep_*`) — optional schema 방어:
 

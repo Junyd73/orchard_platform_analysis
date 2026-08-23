@@ -37,7 +37,7 @@
 → 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
 ```
 
-SHA 스냅샷: private main = `f47e26f` · 운영 backend = `b48ca8b` · Stage4 = **완료 · 운영** · Stage5 = **완료 · 운영**.
+SHA 스냅샷: private main = `53846d9` · 운영 backend = `b48ca8b` · Stage4 = **완료 · 운영** · Stage5 = **완료 · 운영**.
 
 ---
 
