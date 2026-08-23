@@ -113,11 +113,11 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 
 | | |
 |--|--|
-| 현재 | `ui/pages/sales_page.py`가 수금 바구니 구성 · `t_cash_ledger` INSERT SQL · `slip_map` 매핑 · 미수 표시 로직을 **페이지 안에** 갖고 있다. 확인된 INSERT 컬럼: `paid_detail_no, sales_no, farm_cd, pay_dt, pay_method_cd, pay_amt, slip_no, rmk, reg_id` |
+| Stage7B-1 이전 | `SalesPage`가 `pay_basket` 구성 · `t_cash_ledger` INSERT SQL · `slip_map` 매핑 · `AccountManager.sync_ledger_by_basket` **직접 호출** |
+| Stage7B-1 (feature) | `execute_full_save` cash/ledger mutation **제거** · 기존 수금 **immutable** · DEC-034 backstop · cash 있는 판매 delete 차단 |
+| Stage7B-2 (예정) | 신규 일반수금 append UI → `SalesPaymentService.add_payment` |
+| 확정 설계 | PC/Mobile **공통 진입점 = `SalesPaymentService`**. 수금 저장·조회·append는 Core 한 곳. **`SalesPaymentService` 내부에서 `AccountManager.sync_ledger_by_basket('SALE', …)` 사용** |
 | 문제 | 모바일 수금이 생기면 같은 회계 로직이 두 벌이 된다. 규칙이 다시 갈라진다 (DEC-001 · DEC-007) |
-| 확정 설계 | PC/Mobile **공통 진입점 = `SalesPaymentService`**. 수금 저장·조회·append는 Core 한 곳. **`SalesPaymentService` 내부에서 `AccountManager.sync_ledger_by_basket('SALE', …)` 사용** (PC가 AccountManager를 직접 공용 Core로 쓰는 구조 아님). |
-| Stage7B-1 | `execute_full_save` cash/ledger mutation **제거** · 기존 수금 read-only · DEC-034 backstop · cash 있는 판매 delete 차단 |
-| Stage7B-2 | 신규 일반수금 append UI → `SalesPaymentService.add_payment` |
 | 금지 | 화면·라우터별 회계 SQL 복제 · **모바일 전용 회계 엔진** · 모바일 전용 결제수단 코드 하드코딩 · DRAFT 판매 수금 (DEC-029) |
 | 계정코드 | 결제수단 = **현금성 자산 계정**(실제 운영 코드 재확인 후 범위 확정). 채권(`AS02…`)은 결제수단 아님. 신규 코드 정의·모바일 하드코딩 없음 |
 | 수금상태 | 컬럼 신설 없음. `tot_paid_amt`/`tot_unpaid_amt`에서 미수/부분수금/수금완료 계산 (DEC-029) |
