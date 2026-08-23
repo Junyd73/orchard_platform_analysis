@@ -387,5 +387,5 @@ PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` �
 
 **Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
 
-**미구현:** payments **PUT** · 수금 수정/삭제 HTTP. GET/POST는 Stage6B/6C feature(main: GET만).  
+**미구현:** payments **PUT** · 수금 수정/삭제 HTTP. GET/POST는 Stage6B/6C **private main 반영 · 운영 미배포**.  
 **완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028) · Stage4 선입금 자동배분 Core (§6 · `fb413a3`).
