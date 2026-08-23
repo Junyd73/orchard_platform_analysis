@@ -299,6 +299,13 @@ AccountManager sync·DB TX 이전에 검증한다.
 
 **PC 판매일 우회차단 (Stage4-P2b):** 자동 선입금 cash가 하나라도 있으면 기존 `sales_dt` 변경 **금지**
 (cash.pay_dt / ledger.trans_dt 불변). PC cash 재INSERT 시 `pay_dt`는 **각 수금행 `pay_dt`**를 사용한다
+
+**출고확정 CONFIRMED read-only (Stage7A · DEC-031):** `sales_status='CONFIRMED'` 이고
+(`t_sales_master.order_no` OR `t_sales_detail.order_detail_id` OR `t_sales_detail.stock_seq` 실값)이면
+PC `SalesPage`에서 full-save·삭제·수금 mutation **금지**. UI disable + write/delete DB backstop.
+일반 PC 직접판매(CONFIRMED·추적키 없음)는 기존 편집 유지. DRAFT는 대상 아님.
+
+**PC 수금 append-only (DEC-032 · Stage7B 예정):** 기존 수금 수정/삭제 금지 · 신규 일반수금 append-only · Core `SalesPaymentService` · DEC-030 동일. Stage7A는 protected 판매 수금 버튼 차단만.
 (판매일로 일괄 덮어쓰기 금지).
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
