@@ -213,7 +213,7 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 | POST | `/farms/{farm_cd}/sales` |
 | PUT | `/farms/{farm_cd}/sales/{sales_no}` |
 
-### 7.1 GET 목록 (Stage 5 · main 반영 · 운영 미배포)
+### 7.1 GET 목록 (Stage 5 · 완료 · 운영)
 
 **Core:** `SalesQueryService.list_sales` (`core/sales_query_service.py`) — read-only.
 

@@ -1,9 +1,9 @@
 # 06. Development progress
 
-> **현재 기준 (2026-08-23):** private main **Stage5 (P1+P2) 반영** · 운영 backend **`fb413a3`**.  
+> **현재 기준 (2026-08-23):** private main **Stage5 (P1+P2) 반영** · 운영 backend **`b48ca8b`**.  
 > **Stage4:** Core + P1 + P2 + P2b **완료 · 운영**.  
-> **Stage5:** Core/API + Mobile + P1 + P2 **private main 반영** · **운영 미배포**.  
-> **다음:** Stage5 **운영배포 대기** → Stage6 판매상세/수금등록.  
+> **Stage5:** Core/API + Mobile + P1 + P2 **완료 · 운영**.  
+> **다음:** Stage6 **판매상세/수금등록**.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED**. DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
@@ -22,7 +22,7 @@
 | 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료 · 운영** |
 | 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **완료 · 운영** |
 | 6 | 모바일 출고·배정·판매 UX + Order→Ship Step1~3 | **완료 · 운영** |
-| — | **다음:** Stage5 **운영배포 대기** → Stage6 판매상세/수금 | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
+| — | **다음:** Stage6 **판매상세/수금등록** | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
 | 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
 | 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
 
@@ -37,7 +37,7 @@
 → 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
 ```
 
-SHA 스냅샷: private main = `04b8c9c` · 운영 backend = `fb413a3` · Stage4 = **완료 · 운영**.
+SHA 스냅샷: private main = `f47e26f` · 운영 backend = `b48ca8b` · Stage4 = **완료 · 운영** · Stage5 = **완료 · 운영**.
 
 ---
 
@@ -402,7 +402,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 2  선입금 결제수단 기반  ← 완료 · 운영
 3  판매 수금 Core        ← 완료 · 운영
 4  출고 시 선입금 자동배분  ← 완료 · 운영
-5  판매목록  ← Core/API + Mobile + P1 · main 반영 · 운영 미배포
+5  판매목록  ← 완료 · 운영 (Core/API + Mobile + P1 + P2)
 6  판매상세/수금등록
 7  PC 정합성
 8  가락 DRAFT→CONFIRMED
@@ -414,7 +414,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | 2 | **선입금 결제수단 기반** | **완료 · 운영** | `pre_pay_method_cd` 저장·조회. `0`→NULL, `>0`→현금성 필수. parent `AS0101` / level4 / `use_yn=Y` 검증. legacy prepay>0·method NULL 조회 허용. ST010200/300 NULL→유효 method 최초 1회 보완 · 기존 method 변경 금지. 주문 단계 cash/ledger/sales **변화 없음**. 운영 ALTER `ADD COLUMN pre_pay_method_cd TEXT` + backend/frontend `a41b40e` | — |
 | 3 | **판매 수금 Core** | **완료 · 운영** | `SalesPaymentService` append 추가수금. cash SSOT · AccountManager SALE farm scope · DRAFT 금지 · `AS0101` 검증 · `add_payment_in_tx` caller-owned TX. HTTP/UI 없음. 운영 backend `f7d3187` 계열 → Stage4와 함께 `fb413a3` | — |
 | 4 | **출고 시 선입금 자동배분** | **완료 · 운영** | Core(DEC-019) + P1 PC `order_no` 보존 + P2 자동 선입금 cash 수정·삭제 가드 + P2b 판매일 우회변경 차단·행별 `pay_dt` INSERT. DDL 0. 운영 backend/PC `fb413a3` | — |
-| 5 | **판매목록** | **main 반영 · 운영 미배포** | `SalesQueryService` + `GET /sales` + Mobile 판매탭. P1: 수금 filter 상호배타·malformed date 400. cash SUM SSOT · DDL 0 | Stage4 운영 완료 |
+| 5 | **판매목록** | **완료 · 운영** | `SalesQueryService` + `GET /sales` + Mobile 판매탭. P1: 수금 filter 상호배타·malformed date 400. P2: `weight`/`crop_nm` optional schema · `rep_crop_nm`. cash SUM SSOT · DDL 0. 운영 backend `b48ca8b` | Stage4 운영 완료 |
 | 6 | **판매상세/수금등록** | **예정** | 수금 내역 + 수금등록(수금액 ≤ 미수금, 결제수단 필수) | 3 |
 | 7 | **PC 정합성** | **예정** | PC `SalesPage` 회계 호출부를 공용 Core로 위임 ([08 A13](./08_pc_change_scope.md)). 전면 재작성 아님. **OPEN P1:** `t_sales_detail.order_detail_id` 재저장 유실 | 3·4 |
 | 8 | **가락 DRAFT→CONFIRMED** | **예정** | confirm TX + 선택 수금 (DEC-010). DEC-016 OPEN 선결 | 3·7 |
