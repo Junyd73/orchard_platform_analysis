@@ -480,7 +480,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 |--|--|
 | 상태 | **APPROVED** |
 | 결정 | `sales_status`는 **`DRAFT` / `CONFIRMED` 두 값만**. `PAID` / `UNPAID` 같은 수금 의미를 `sales_status`에 넣지 **않는다**. |
-| 수금상태 | **금액에서 계산**한다. 신규 상태 컬럼 **없음**. `tot_paid_amt == 0` → **미수** · `0 < tot_paid_amt < tot_sales_amt` → **부분수금** · `tot_unpaid_amt == 0` → **수금완료** |
+| 수금상태 | **금액에서 계산**한다. 신규 상태 컬럼 **없음**. API `payment_status`: `UNPAID`/`PARTIAL`/`PAID`/`null`. UI label: 미수/부분수금/수금완료/수금대기. CONFIRMED · `paid<=0` → **UNPAID**(0원 0/0 포함) · `0<paid<total` → **PARTIAL** · `MAX(0,total−paid)<=0` → **PAID**. DRAFT → **null**. (Stage6-0: `core/sales_payment_constants.compute_payment_status`) |
 | 완료 개념 3종 | **판매확정** = 그 판매가 CONFIRMED · **주문완료** = `ST010400` + `stock_status='Y'`(전량 출고) · **수금완료** = 그 판매의 미수 0. 세 개념을 하나로 합치지 않는다. |
 | 추가수금 | **CONFIRMED 판매만** 가능. DRAFT 판매에 수금·전표를 붙이지 않는다. |
 | 이유 | 「판매완료 = 수금완료」로 섞으면 부분수금·미수 관리가 불가능하고 전표 시점이 흐려진다. |

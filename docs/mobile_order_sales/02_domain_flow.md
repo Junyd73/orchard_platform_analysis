@@ -326,15 +326,18 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 
 **금지:** 새 status 문자열(`SHIPPED` 등) 추가. `PAID` / `UNPAID` 등 **수금 의미를 `sales_status`에 넣기**.
 
-### 8.3 수금상태 — 금액 계산값 (컬럼 없음)
+### 8.3 수금상태 — 금액 계산값 (컬럼 없음 · Stage6-0)
 
-수금상태 전용 DB 컬럼을 만들지 않는다. 판매마스터 금액에서 계산한다.
+수금상태 전용 DB 컬럼을 만들지 않는다. **cash SUM** 기준으로 계산한다.
 
-| 수금상태 | 조건 |
-|----------|------|
-| **미수** | `tot_paid_amt == 0` |
-| **부분수금** | `0 < tot_paid_amt < tot_sales_amt` |
-| **수금완료** | `tot_unpaid_amt == 0` |
+| API `payment_status` | UI label | 조건 |
+|----------|----------|------|
+| `null` | 수금대기 | `sales_status != CONFIRMED` |
+| `UNPAID` | 미수 | CONFIRMED · `paid <= 0` |
+| `PARTIAL` | 부분수금 | CONFIRMED · `0 < paid < tot_sales_amt` |
+| `PAID` | 수금완료 | CONFIRMED · `MAX(0, tot_sales_amt − paid) <= 0` |
+
+공통 helper: `core/sales_payment_constants.compute_payment_status`.
 
 ### 8.4 완료 개념 3종 — 섞지 않는다
 

@@ -131,17 +131,23 @@ migration 직전 운영 점검 필수 → §15.
 
 채번: `generate_sales_no` vs 주문 `get_next_seq` 이중 → P0 공통화.
 
-### 4.1 수금상태는 계산값 (DEC-029 APPROVED)
+### 4.1 수금상태는 계산값 (DEC-029 APPROVED · Stage6-0 통일)
 
 **수금상태 컬럼을 만들지 않는다.** `sales_status`에 수금 의미를 넣지 않는다.
 
-| 수금상태 | 조건 (조회 시 **cash SUM 기준** paid / unpaid) |
-|----------|------|
-| 미수 | `paid == 0` |
-| 부분수금 | `0 < paid < tot_sales_amt` |
-| 수금완료 | `unpaid == 0` |
+**API/Core 코드 (`payment_status`):** `UNPAID` · `PARTIAL` · `PAID` · `null`  
+**UI label:** 미수 · 부분수금 · 수금완료 · 수금대기(DRAFT/`null`)
 
-`paid = SUM(t_cash_ledger.pay_amt WHERE farm_cd·sales_no)`. `unpaid = tot_sales_amt − paid`. master 컬럼은 동기화 값.
+| API 코드 | 조건 (조회 시 **cash SUM 기준** `paid` / `unpaid`) | UI label |
+|----------|------|----------|
+| `null` | `sales_status != CONFIRMED` (DRAFT 등) | 수금대기 |
+| `UNPAID` | CONFIRMED · `paid <= 0` (0원 판매 0/0 포함) | 미수 |
+| `PARTIAL` | CONFIRMED · `0 < paid < tot_sales_amt` | 부분수금 |
+| `PAID` | CONFIRMED · `unpaid <= 0` (`unpaid = MAX(0, total − paid)`) | 수금완료 |
+
+`paid = SUM(t_cash_ledger.pay_amt WHERE farm_cd·sales_no)`. master `tot_paid_amt`/`tot_unpaid_amt`는 동기화 값.
+
+**OPS 현재 회계 불변규칙 (Stage6-0):** 수금·지급 발생 여부가 전표 생성 조건이며, 전표 기준일(`t_ledger.trans_dt`)은 해당 업무의 업무일(`sales_dt`/`work_dt`)을 사용한다. `t_cash_ledger.pay_dt`는 실제 수금일 기록.
 
 완료 개념 3종은 서로 다른 값에서 나온다.
 
@@ -149,9 +155,10 @@ migration 직전 운영 점검 필수 → §15.
 |------|------|
 | 판매확정 | `t_sales_master.sales_status = 'CONFIRMED'` |
 | 주문완료 | `t_order_master.status_cd='ST010400'` AND `stock_status='Y'` |
-| 수금완료 | `t_sales_master.tot_unpaid_amt = 0` |
+| 수금완료 | CONFIRMED · `payment_status = PAID` (조회 시 cash SUM + clamp) |
 
-**현재 구현 (Stage4 feature):** 출고 TX에서 판매 INSERT 후 `SalesPaymentService.add_payment_in_tx`로 선입금 적용. `tot_paid_amt`/`tot_unpaid_amt`는 cash SUM 동기화 (DEC-019). main/운영 미반영.  
+**현재 구현:** 출고 TX에서 판매 INSERT 후 `SalesPaymentService.add_payment_in_tx`로 선입금 적용. `tot_paid_amt`/`tot_unpaid_amt`는 cash SUM 동기화 (DEC-019). **Stage4 · Stage3 Core 완료 · 운영.**  
+**Stage6-0:** `SalesQueryService` · `SalesPaymentService.get_payment_summary`가 동일 `compute_payment_status` helper 사용.  
 **적용액:** `min(remaining_prepay, 이번 판매 tot_sales_amt)`. 기존 CONFIRMED 판매는 수정하지 않는다.
 
 ---

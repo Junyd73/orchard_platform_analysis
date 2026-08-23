@@ -1,9 +1,10 @@
 # 06. Development progress
 
-> **현재 기준 (2026-08-23):** private main **Stage5 (P1+P2) 반영** · 운영 backend **`b48ca8b`**.  
+> **현재 기준 (2026-08-23):** private main **Stage5 (P1+P2) 반영** · **Stage6-0 진행 중** · 운영 backend **`b48ca8b`**.  
 > **Stage4:** Core + P1 + P2 + P2b **완료 · 운영**.  
 > **Stage5:** Core/API + Mobile + P1 + P2 **완료 · 운영**.  
-> **다음:** Stage6 **판매상세/수금등록**.  
+> **Stage6-0:** 수금상태 조회 계약 통일 (write/ledger 불변).  
+> **다음:** Stage6 **6A 판매상세 read-only**.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED**. DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
@@ -22,7 +23,7 @@
 | 5B | 재고관리 — 조회·상태·이력·생산/배정 정합성 | **완료 · 운영** |
 | 5C (=S) | 공통 출고·판매 Core — 실제 판매확정·상품 OUT | **완료 · 운영** |
 | 6 | 모바일 출고·배정·판매 UX + Order→Ship Step1~3 | **완료 · 운영** |
-| — | **다음:** Stage6 **판매상세/수금등록** | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
+| — | **다음:** Stage6 **6A 판매상세 read-only** (6-0 수금상태 계약 통일 후) | [§ 2026-08-21](#2026-08-21--선입금수금-정책-확정) |
 | 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
 | 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
 
@@ -33,11 +34,11 @@
 2 선입금 결제수단 기반  ← 완료 · 운영
 3 판매 수금 Core        ← 완료 · 운영
 4 출고 시 선입금 자동배분  ← 완료 · 운영
-→ 5 판매목록  →  6 판매상세/수금등록
+→ 5 판매목록  →  6-0 수금상태 계약  →  6A 상세  →  6B 수금내역  →  6C 수금등록
 → 7 PC 정합성  →  8 가락 DRAFT→CONFIRMED
 ```
 
-SHA 스냅샷: private main = `53846d9` · 운영 backend = `b48ca8b` · Stage4 = **완료 · 운영** · Stage5 = **완료 · 운영**.
+SHA 스냅샷: private main = `62d7d9a` (Stage5) · feature `cursor/stage6-0-payment-status-contract` · 운영 backend = `b48ca8b` · Stage4/5 = **완료 · 운영**.
 
 ---
 
