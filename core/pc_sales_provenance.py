@@ -37,6 +37,10 @@ MSG_SALES_DELETE_HAS_PAYMENTS = (
 MSG_SAVE_BEFORE_PAYMENT = (
     "판매 변경사항을 먼저 저장한 후 수금을 등록해 주세요."
 )
+MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED = (
+    "수금은 정상 등록되었습니다.\n"
+    "화면 갱신에 실패했으므로 판매내역을 다시 조회해 주세요."
+)
 
 SALES_STATUS_CONFIRMED = "CONFIRMED"
 _AMT_EPSILON = 1e-9
@@ -279,6 +283,23 @@ def assert_payment_screen_not_stale(
     db_dt = str(db_sales_dt or "").strip()[:10]
     if ui_dt != db_dt:
         raise PcPaymentStaleScreenError()
+
+
+def try_refresh_after_payment_commit(
+    apply_with_result: Any,
+    reload_and_apply: Any,
+) -> bool:
+    """COMMIT 이후 UI 갱신만. add_payment 호출 금지. True=화면 반영 성공."""
+    try:
+        apply_with_result()
+        return True
+    except Exception:
+        pass
+    try:
+        reload_and_apply()
+        return True
+    except Exception:
+        return False
 
 
 def fetch_actual_paid_amt(conn: sqlite3.Connection, farm_cd: str, sales_no: str) -> float:

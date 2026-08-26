@@ -13,6 +13,7 @@ from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
 from core.pc_sales_provenance import (
+    MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED,
     MSG_PREPAY_CASH_IMMUTABLE,
     MSG_SALES_AMT_BELOW_PAID,
     MSG_SALES_DELETE_HAS_PAYMENTS,
@@ -38,6 +39,7 @@ from core.pc_sales_provenance import (
     is_shipment_confirmed_sale_locked,
     is_protected_delivery_edit_blocked,
     set_payment_add_enabled,
+    try_refresh_after_payment_commit,
     validate_protected_prepay_sales_dt_from_db,
 )
 from core.sales_payment_service import (
@@ -1832,6 +1834,8 @@ class SalesPage(QWidget):
         self._payment_add_busy = True
         set_payment_add_enabled(self, False)
         dlg.set_saving(True)
+        payment_committed = False
+        ui_refreshed = False
         try:
             # stale 재확인 (dialog 동안 화면 변경 가능)
             summary = svc.get_payment_summary(self.farm_cd, sales_no)
@@ -1855,8 +1859,7 @@ class SalesPage(QWidget):
                     source_order_no=None,
                 )
             )
-            self._apply_payment_summary_to_ui(result)
-            QMessageBox.information(self, "수금 등록", "수금이 등록되었습니다.")
+            payment_committed = True
         except PcPaymentStaleScreenError as e:
             QMessageBox.warning(self, "저장 필요", str(e) or MSG_SAVE_BEFORE_PAYMENT)
         except PaymentValidationError as e:
@@ -1887,10 +1890,32 @@ class SalesPage(QWidget):
                 )
             except Exception:
                 self.refresh_payment_add_button_state()
+        else:
+            # COMMIT 성공 이후 — UI 실패를 write 실패로 표시하지 않음
+            ui_refreshed = try_refresh_after_payment_commit(
+                lambda: self._apply_payment_summary_to_ui(result),
+                lambda: self._apply_payment_summary_to_ui(
+                    svc.get_payment_summary(self.farm_cd, sales_no)
+                ),
+            )
+            if ui_refreshed:
+                QMessageBox.information(self, "수금 등록", "수금이 등록되었습니다.")
+            else:
+                set_payment_add_enabled(self, False)
+                QMessageBox.warning(
+                    self,
+                    "화면 갱신 실패",
+                    MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED,
+                )
         finally:
             self._payment_add_busy = False
             dlg.set_saving(False)
-            self.refresh_payment_add_button_state()
+            if payment_committed and not ui_refreshed:
+                # 상태 확인 불가 — 재조회 전까지 add disabled 유지 (재append 금지)
+                set_payment_add_enabled(self, False)
+            elif not payment_committed:
+                self.refresh_payment_add_button_state()
+            # payment_committed and ui_refreshed: _apply_payment_summary_to_ui가 이미 버튼 상태 반영
 
     # 판매관리마스터 화면 초기화
     def clear_sales_form(self):

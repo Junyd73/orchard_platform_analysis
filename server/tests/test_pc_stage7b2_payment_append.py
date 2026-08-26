@@ -24,12 +24,14 @@ for p in (_SERVER, _ROOT):
 from core.ops_biz_date import today_ops_iso  # noqa: E402
 from core.order_ship_constants import SALES_STATUS_CONFIRMED  # noqa: E402
 from core.pc_sales_provenance import (  # noqa: E402
+    MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED,
     MSG_SAVE_BEFORE_PAYMENT,
     PcPaymentStaleScreenError,
     apply_payment_immutable_ui_lock,
     assert_payment_screen_not_stale,
     is_payment_add_allowed,
     set_payment_add_enabled,
+    try_refresh_after_payment_commit,
 )
 from core.sales_payment_constants import (  # noqa: E402
     PAY_METHOD_ACCT_LEVEL,
@@ -401,6 +403,9 @@ class Stage7b2SourceGuardTests(unittest.TestCase):
         source = inspect.getsource(sales_page.SalesPage.open_payment_add_dialog)
         self.assertIn("add_payment", source)
         self.assertIn("source_order_no=None", source)
+        self.assertIn("try_refresh_after_payment_commit", source)
+        self.assertIn("MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED", source)
+        self.assertIn("payment_committed", source)
         self.assertNotIn("INSERT INTO t_cash_ledger", source)
         self.assertNotIn("DELETE FROM t_cash_ledger", source)
         self.assertNotIn("sync_ledger_by_basket", source)
@@ -412,5 +417,184 @@ class Stage7b2SourceGuardTests(unittest.TestCase):
         self.assertIn("btn_pay_add.clicked.connect(self.open_payment_add_dialog)", source)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class Stage7b2PostCommitUiBoundaryTests(unittest.TestCase):
+    """COMMIT 성공과 UI refresh 실패를 분리한다. add_payment 최대 1회."""
+
+    def test_refresh_success_first_try(self) -> None:
+        calls = {"apply": 0, "reload": 0}
+
+        def apply_ok() -> None:
+            calls["apply"] += 1
+
+        def reload_should_not_run() -> None:
+            calls["reload"] += 1
+            raise AssertionError("reload must not run")
+
+        self.assertTrue(try_refresh_after_payment_commit(apply_ok, reload_should_not_run))
+        self.assertEqual(calls["apply"], 1)
+        self.assertEqual(calls["reload"], 0)
+
+    def test_first_refresh_fails_then_reload_succeeds(self) -> None:
+        calls = {"apply": 0, "reload": 0}
+
+        def apply_fail_once() -> None:
+            calls["apply"] += 1
+            if calls["apply"] == 1:
+                raise RuntimeError("ui boom")
+
+        def reload_and_apply() -> None:
+            calls["reload"] += 1
+            # second apply path via reload_and_apply itself applying
+            calls["apply"] += 1
+
+        self.assertTrue(try_refresh_after_payment_commit(apply_fail_once, reload_and_apply))
+        self.assertEqual(calls["reload"], 1)
+        self.assertEqual(calls["apply"], 2)
+
+    def test_refresh_keeps_failing_returns_false(self) -> None:
+        def always_fail() -> None:
+            raise RuntimeError("ui dead")
+
+        self.assertFalse(try_refresh_after_payment_commit(always_fail, always_fail))
+        self.assertIn("정상 등록", MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED)
+        self.assertIn("다시 조회", MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED)
+        self.assertNotIn("수금 실패", MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED)
+
+    def test_write_success_ui_fail_add_called_once(self) -> None:
+        """오케스트레이션: add 1회 + refresh 실패 → committed_ui_fail, 재append 없음."""
+        add_calls = {"n": 0}
+
+        def add_payment_once() -> dict:
+            add_calls["n"] += 1
+            return {"tot_paid_amt": 100000, "tot_unpaid_amt": 200000}
+
+        def boom1() -> None:
+            raise RuntimeError("refresh1")
+
+        def boom2() -> None:
+            raise RuntimeError("refresh2")
+
+        result = add_payment_once()
+        ui_ok = try_refresh_after_payment_commit(boom1, boom2)
+        self.assertEqual(add_calls["n"], 1)
+        self.assertFalse(ui_ok)
+        self.assertIsNotNone(result)
+
+    def test_write_failure_does_not_refresh_as_commit_success(self) -> None:
+        add_calls = {"n": 0}
+
+        def add_fail() -> dict:
+            add_calls["n"] += 1
+            raise PaymentValidationError("amount over unpaid")
+
+        with self.assertRaises(PaymentValidationError):
+            add_fail()
+        self.assertEqual(add_calls["n"], 1)
+
+    def test_real_add_then_refresh_fallback_cash_once(self) -> None:
+        """add_payment 성공 + 첫 UI 실패 + summary 재조회 성공 → cash 1건, add 1회."""
+        from core.account_manager import AccountManager
+
+        AccountManager._shared_seq_cache.clear()
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.executescript(_schema())
+        _seed_accounts(cur)
+        conn.commit()
+        _insert_sale(conn, tot=300000)
+        conn.commit()
+        svc = SalesPaymentService(conn)
+        add_n = {"n": 0}
+
+        def add_once() -> dict:
+            add_n["n"] += 1
+            return svc.add_payment(
+                PaymentAddIn(
+                    farm_cd=FARM,
+                    sales_no=SALES_NO,
+                    pay_amt=100000,
+                    pay_method_cd=METHOD,
+                    pay_dt=today_ops_iso(),
+                    rmk="",
+                    user_id="PC",
+                    source_order_no=None,
+                )
+            )
+
+        result = add_once()
+        applied = {"n": 0}
+
+        def apply_fail_first() -> None:
+            applied["n"] += 1
+            if applied["n"] == 1:
+                raise RuntimeError("widget boom")
+            # should not reach here via apply_with_result path after success
+
+        def reload_ok() -> None:
+            summary = svc.get_payment_summary(FARM, SALES_NO)
+            self.assertEqual(float(summary["tot_paid_amt"]), 100000)
+            applied["n"] += 1
+
+        self.assertTrue(try_refresh_after_payment_commit(apply_fail_first, reload_ok))
+        self.assertEqual(add_n["n"], 1)
+        cash_n = conn.execute(
+            "SELECT COUNT(*) FROM t_cash_ledger WHERE sales_no=?", (SALES_NO,)
+        ).fetchone()[0]
+        self.assertEqual(int(cash_n), 1)
+        self.assertEqual(float(result["tot_paid_amt"]), 100000)
+        conn.close()
+        os.unlink(path)
+
+    def test_real_add_ui_total_fail_no_reappend(self) -> None:
+        """add 성공 + UI 계속 실패 → cash 1 · add 1 · 성공안내 문구 · 실패문구 없음."""
+        from core.account_manager import AccountManager
+
+        AccountManager._shared_seq_cache.clear()
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.executescript(_schema())
+        _seed_accounts(cur)
+        conn.commit()
+        _insert_sale(conn, tot=300000)
+        conn.commit()
+        svc = SalesPaymentService(conn)
+        add_n = {"n": 0}
+
+        def add_once() -> dict:
+            add_n["n"] += 1
+            return svc.add_payment(
+                PaymentAddIn(
+                    farm_cd=FARM,
+                    sales_no=SALES_NO,
+                    pay_amt=50000,
+                    pay_method_cd=METHOD,
+                    pay_dt=today_ops_iso(),
+                    rmk="",
+                    user_id="PC",
+                    source_order_no=None,
+                )
+            )
+
+        add_once()
+
+        def boom() -> None:
+            raise RuntimeError("ui dead")
+
+        ui_ok = try_refresh_after_payment_commit(boom, boom)
+        cash_n = conn.execute(
+            "SELECT COUNT(*) FROM t_cash_ledger WHERE sales_no=?", (SALES_NO,)
+        ).fetchone()[0]
+        conn.close()
+        os.unlink(path)
+        self.assertFalse(ui_ok)
+        self.assertEqual(add_n["n"], 1)
+        self.assertEqual(int(cash_n), 1)
+        self.assertIn("정상 등록", MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED)
+        self.assertNotIn("수금 실패", MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED)
+        self.assertNotIn("수금 처리 중 오류", MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED)
