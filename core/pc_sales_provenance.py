@@ -34,6 +34,9 @@ MSG_SALES_AMT_BELOW_PAID = (
 MSG_SALES_DELETE_HAS_PAYMENTS = (
     "수금 내역이 있는 판매는 삭제할 수 없습니다."
 )
+MSG_SAVE_BEFORE_PAYMENT = (
+    "판매 변경사항을 먼저 저장한 후 수금을 등록해 주세요."
+)
 
 SALES_STATUS_CONFIRMED = "CONFIRMED"
 _AMT_EPSILON = 1e-9
@@ -64,6 +67,13 @@ class PcSalesDeleteHasPaymentsError(Exception):
     """DEC-032 — 수금 존재 판매 삭제 차단."""
 
     def __init__(self, message: str = MSG_SALES_DELETE_HAS_PAYMENTS):
+        super().__init__(message)
+
+
+class PcPaymentStaleScreenError(Exception):
+    """DEC-033 — 미저장 판매금액/판매일 변경 시 수금등록 차단."""
+
+    def __init__(self, message: str = MSG_SAVE_BEFORE_PAYMENT):
         super().__init__(message)
 
 
@@ -221,8 +231,8 @@ def apply_protected_confirmed_sale_ui_lock(page: Any, locked: bool) -> None:
 
 
 def apply_payment_immutable_ui_lock(page: Any) -> None:
-    """DEC-032 Stage7B-1 — 기존 수금 read-only, add/edit/delete 버튼 항상 disable."""
-    for name in ("btn_pay_add", "btn_pay_edit", "btn_pay_del"):
+    """DEC-032 — 기존 수금 read-only · edit/delete 항상 disable. btn_pay_add는 별도 제어."""
+    for name in ("btn_pay_edit", "btn_pay_del"):
         widget = getattr(page, name, None)
         if widget is not None:
             widget.setEnabled(False)
@@ -233,6 +243,42 @@ def apply_payment_immutable_ui_lock(page: Any) -> None:
     for r in range(pay_table.rowCount()):
         for c in range(5):
             _apply_widget_lock(pay_table.cellWidget(r, c), True)
+
+
+def is_payment_add_allowed(sales_status: Any, unpaid_amt: float) -> bool:
+    """CONFIRMED + unpaid > 0 이면 신규수금 등록 허용 (Stage7A protected 포함)."""
+    if str(sales_status or "").strip().upper() != SALES_STATUS_CONFIRMED:
+        return False
+    try:
+        unpaid = float(unpaid_amt)
+    except (TypeError, ValueError):
+        unpaid = 0.0
+    return unpaid > _AMT_EPSILON
+
+
+def set_payment_add_enabled(page: Any, enabled: bool) -> None:
+    """btn_pay_add만 제어. immutable helper와 분리 (Stage7B-2)."""
+    widget = getattr(page, "btn_pay_add", None)
+    if widget is not None:
+        widget.setEnabled(bool(enabled))
+
+
+def assert_payment_screen_not_stale(
+    *,
+    ui_tot_sales_amt: float,
+    db_tot_sales_amt: float,
+    ui_sales_dt: Any,
+    db_sales_dt: Any,
+) -> None:
+    """미저장 판매금액/판매일 불일치 시 add_payment 호출 전 차단."""
+    ui_total = float(ui_tot_sales_amt)
+    db_total = float(db_tot_sales_amt)
+    if abs(ui_total - db_total) > _AMT_EPSILON:
+        raise PcPaymentStaleScreenError()
+    ui_dt = str(ui_sales_dt or "").strip()[:10]
+    db_dt = str(db_sales_dt or "").strip()[:10]
+    if ui_dt != db_dt:
+        raise PcPaymentStaleScreenError()
 
 
 def fetch_actual_paid_amt(conn: sqlite3.Connection, farm_cd: str, sales_no: str) -> float:

@@ -539,7 +539,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | 상태 | **APPROVED** |
 | 결정 | 기존 수금 **수정/삭제 금지** · 신규 일반수금만 append · Core = `SalesPaymentService` · DEC-030 동일 |
 | Stage7A | protected 판매 수금 등록/수정/삭제 버튼 disable (full-save 경유 차단) |
-| 구현 | **APPROVED · Stage7B-1 구현** — full-save cash/ledger mutation 제거 · 기존 수금 read-only · delete backstop. **신규 append UI는 Stage7B-2 예정** |
+| 구현 | **APPROVED · Stage7B-1 immutable + Stage7B-2 append** — full-save cash/ledger mutation 제거 · 기존 수금 read-only · 신규는 `SalesPaymentService.add_payment` · `slip_no`=내부 회계 linkage |
 | 영향 | [08 A13](./08_pc_change_scope.md) · PC `SalesPage` 수금 탭 |
 | 승인 | **2026-08-23 대표** |
 
@@ -551,9 +551,10 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | | |
 |--|--|
-| 상태 | **APPROVED · IMPLEMENTED (boundary)** |
-| 결정 | 신규 판매 저장 **전** 수금등록 금지 · 판매 먼저 저장 · CONFIRMED 저장 후 별도 수금 (Stage7B-2) |
+| 상태 | **APPROVED · IMPLEMENTED** |
+| 결정 | 신규 판매 저장 **전** 수금등록 금지 · 판매 먼저 저장 · CONFIRMED + unpaid>0 만 수금등록 |
 | Stage7B-1 | clear/new·조회 화면 수금 add/edit/delete **항상 disable** · private main merge |
+| Stage7B-2 | CONFIRMED unpaid → `open_payment_add_dialog` · stale 판매금액/판매일 차단 |
 | 영향 | PC `SalesPage` 수금 탭 · [03 §4](./03_data_contract.md) |
 | 승인 | **2026-08-23 대표** |
 
@@ -597,7 +598,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | **OPEN-PROD-01~03** | **CLOSED** (설계·Core 반영됨. 상세 현황은 [06 현재 운영 기준](./06_development_progress.md)) |
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.  
-2026-08-23 갱신: **Stage7B-1 private main merge** · DEC-032 **Stage7B-1 구현** · DEC-033/034 **IMPLEMENTED** · Stage7B-2 append **예정**.
+2026-08-26 갱신: **Stage7B-2 feature** — PC 신규수금 append · DEC-032 Stage7B-1+7B-2 · DEC-033 IMPLEMENTED · slip_no=내부 회계 linkage.
 
 ### 스키마 확인 (2026-08-22)
 

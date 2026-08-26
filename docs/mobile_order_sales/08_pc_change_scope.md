@@ -115,7 +115,7 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 |--|--|
 | Stage7B-1 이전 | `SalesPage`가 `pay_basket` 구성 · `t_cash_ledger` INSERT SQL · `slip_map` 매핑 · `AccountManager.sync_ledger_by_basket` **직접 호출** |
 | Stage7B-1 (private main) | `execute_full_save` cash/ledger mutation **제거** · 기존 수금 **immutable** · DEC-034 backstop · cash 있는 판매 delete 차단 |
-| Stage7B-2 (예정) | 신규 일반수금 append UI → `SalesPaymentService.add_payment` |
+| Stage7B-2 (feature) | 신규 일반수금 append UI → `SalesPaymentService.add_payment` · `list_payment_methods` SSOT · protected+unpaid add 허용 · edit/delete 계속 disable |
 | 확정 설계 | PC/Mobile **공통 진입점 = `SalesPaymentService`**. 수금 저장·조회·append는 Core 한 곳. **`SalesPaymentService` 내부에서 `AccountManager.sync_ledger_by_basket('SALE', …)` 사용** |
 | 문제 | 모바일 수금이 생기면 같은 회계 로직이 두 벌이 된다. 규칙이 다시 갈라진다 (DEC-001 · DEC-007) |
 | 금지 | 화면·라우터별 회계 SQL 복제 · **모바일 전용 회계 엔진** · 모바일 전용 결제수단 코드 하드코딩 · DRAFT 판매 수금 (DEC-029) |
@@ -134,7 +134,7 @@ UI ST01, 신규 INSERT `ST010100` (`OrderService`). `'10'`/`'20'` 저장 폐기.
 | helper | `core/pc_sales_provenance.py` — `is_shipment_confirmed_sale_locked` · `assert_sale_mutable` |
 | Stage7A | **완료 · private main · 운영 미배포** — protected 판매 수금 버튼 disable + 배송 edit 차단 |
 | Stage7B-1 | **완료 · private main · 운영 미배포** — full-save cash/ledger 제거 · 수금 read-only · DEC-034 |
-| Stage7B-2 | 신규 append UI → `SalesPaymentService` (미착수) |
+| Stage7B-2 | **진행 · feature · main 미반영** — 신규 append (`add_payment`) · protected 판매도 unpaid>0 이면 add 허용 |
 | 금지 | `order_detail_id` 재INSERT 우회 · protected 판매 partial edit |
 
 ---

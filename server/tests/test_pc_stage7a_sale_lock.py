@@ -354,11 +354,15 @@ class Stage7aSaleLockUiTests(unittest.TestCase):
         page = self._make_page_stub()
         apply_protected_confirmed_sale_ui_lock(page, True)
         apply_payment_immutable_ui_lock(page)
-        self.assertFalse(page.btn_pay_add.enabled)
+        # Stage7B-2: edit/delete immutable · add는 unpaid 시 별도 활성 가능
         self.assertFalse(page.btn_pay_edit.enabled)
         self.assertFalse(page.btn_pay_del.enabled)
         pay_amt = page.pay_table.cellWidget(0, 3)
         self.assertFalse(pay_amt.enabled)
+        from core.pc_sales_provenance import set_payment_add_enabled
+
+        set_payment_add_enabled(page, True)
+        self.assertTrue(page.btn_pay_add.enabled)
 
     def test_clear_unlocks_ui(self) -> None:
         page = self._make_page_stub()
