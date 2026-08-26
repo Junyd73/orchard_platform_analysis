@@ -42,6 +42,7 @@ from core.order_ship_service import (  # noqa: E402
     ShipLineIn,
     ShipValidationError,
 )
+from core.sales_class_schema import ensure_sales_class_schema  # noqa: E402
 from core.sales_payment_constants import MSG_PAY_METHOD_INVALID  # noqa: E402
 from core.sales_payment_service import PaymentAddIn, SalesPaymentService  # noqa: E402
 
@@ -185,6 +186,14 @@ def _open() -> tuple[Path, sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     conn.executescript(_schema_sql())
     ensure_order_alloc_schema(conn, skip_preflight=True)
+    for col in ("reg_id", "reg_dt", "mod_id", "mod_dt"):
+        try:
+            conn.execute(f"ALTER TABLE m_common_code ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass
+    stats = ensure_sales_class_schema(conn)
+    if not stats.get("ok"):
+        raise RuntimeError(f"ensure_sales_class_schema failed: {stats.get('reason')}")
     conn.commit()
     return path, conn
 

@@ -36,6 +36,7 @@ from core.order_service import (  # noqa: E402
     OrderService,
 )
 from core.ops_biz_date import today_ops_iso  # noqa: E402
+from core.sales_class_schema import ensure_sales_class_schema  # noqa: E402
 from core.sales_delivery_schema import ensure_sales_delivery_schema  # noqa: E402
 
 FARM = "OR001"
@@ -148,6 +149,14 @@ def _open() -> tuple[Path, sqlite3.Connection]:
     conn.executescript(_schema_sql())
     ensure_order_alloc_schema(conn, skip_preflight=True)
     ensure_sales_delivery_schema(conn)
+    for col in ("reg_id", "reg_dt", "mod_id", "mod_dt"):
+        try:
+            conn.execute(f"ALTER TABLE m_common_code ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass
+    stats = ensure_sales_class_schema(conn)
+    if not stats.get("ok"):
+        raise RuntimeError(f"ensure_sales_class_schema failed: {stats.get('reason')}")
     conn.commit()
     return path, conn
 

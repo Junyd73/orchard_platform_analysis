@@ -22,7 +22,21 @@ for p in (_SERVER, _ROOT):
 
 from core.ops_biz_date import today_ops_iso  # noqa: E402
 from core.order_alloc_migrate import ensure_order_alloc_schema  # noqa: E402
+from core.sales_class_schema import ensure_sales_class_schema  # noqa: E402
 from core.order_allocation_service import OrderAllocationService  # noqa: E402
+
+
+def _prepare_sales_class_schema(conn: sqlite3.Connection) -> None:
+    """ship 테스트용 m_common_code 최소 컬럼 보강 후 ensure_sales_class_schema."""
+    for col in ("reg_id", "reg_dt", "mod_id", "mod_dt"):
+        try:
+            conn.execute(f"ALTER TABLE m_common_code ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass
+    stats = ensure_sales_class_schema(conn)
+    if not stats.get("ok"):
+        raise RuntimeError(f"ensure_sales_class_schema failed: {stats.get('reason')}")
+
 from core.order_constants import (  # noqa: E402
     ORDER_STATUS_DELIVERED_CD,
     ORDER_STATUS_PREP_CD,
@@ -115,6 +129,7 @@ def _schema_sql() -> str:
             tot_paid_amt REAL, tot_unpaid_amt REAL, status_cd TEXT, rmk TEXT,
             reg_id TEXT, reg_dt TEXT, order_no TEXT,
             sales_status TEXT, sales_source TEXT,
+            mod_id TEXT, mod_dt TEXT,
             PRIMARY KEY (sales_no, farm_cd)
         );
         CREATE TABLE t_sales_detail (
@@ -181,6 +196,7 @@ def _open() -> tuple[Path, sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     conn.executescript(_schema_sql())
     ensure_order_alloc_schema(conn, skip_preflight=True)
+    _prepare_sales_class_schema(conn)
     conn.commit()
     return path, conn
 

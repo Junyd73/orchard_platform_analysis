@@ -171,6 +171,18 @@ include:
   - src: core/order_ship_qty.py
     dest: core/order_ship_qty.py
 
+  - src: core/order_ship_delivery.py
+    dest: core/order_ship_delivery.py
+
+  - src: core/order_ship_service.py
+    dest: core/order_ship_service.py
+
+  - src: core/order_alloc_constants.py
+    dest: core/order_alloc_constants.py
+
+  - src: core/sales_stock_trace_schema.py
+    dest: core/sales_stock_trace_schema.py
+
   - src: core/order_service.py
     dest: core/order_service.py
 

@@ -30,6 +30,7 @@ from core.order_ship_service import (  # noqa: E402
     ShipLineIn,
 )
 from core.sales_stock_trace_schema import REF_TYPE_SALE  # noqa: E402
+from core.sales_class_schema import ensure_sales_class_schema  # noqa: E402
 from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
 from test_local_mig_ship_schema import DIRECT_ONLY_SQL, FARM, GRADE, ITEM, SIZE, VARIETY, WEIGHT, WH, YEAR  # noqa: E402
 
@@ -91,11 +92,26 @@ class DirectE2EFileDbTest(unittest.TestCase):
             CREATE TABLE t_order_master (
                 order_no TEXT PRIMARY KEY, farm_cd TEXT, custm_id TEXT,
                 status_cd TEXT, stock_status TEXT, sales_no TEXT,
+                pre_pay_amt REAL DEFAULT 0,
+                sales_type_cd TEXT, season_type_cd TEXT,
                 mod_id TEXT, mod_dt TEXT
             );
             """
         )
         ensure_sales_stock_trace_schema(self.conn)
+        for col in ("reg_id", "reg_dt", "mod_id", "mod_dt"):
+            try:
+                self.conn.execute(f"ALTER TABLE m_common_code ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError:
+                pass
+        stats = ensure_sales_class_schema(self.conn)
+        if not stats.get("ok"):
+            # DIRECT_ONLY 스키마에 m_common_code가 없으면 컬럼만 직접 추가
+            for col in ("sales_type_cd", "sales_category_cd", "sales_route_cd"):
+                try:
+                    self.conn.execute(f"ALTER TABLE t_sales_master ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass
         self.conn.commit()
 
     def _insert_stock(self, *, in_qty: float, reserved: float = 0, storage_dt: str = "2026-08-01") -> int:
@@ -133,7 +149,7 @@ class DirectE2EFileDbTest(unittest.TestCase):
         self._insert_stock(in_qty=10)
         self.conn.execute(
             "INSERT INTO t_order_master (order_no, farm_cd, custm_id, status_cd, stock_status) "
-            "VALUES (?, ?, 'C1', 'ST010100', 'N')",
+            "VALUES (?, ?, 'C1', 'ST010200', 'N')",
             (ORDER_NO, FARM),
         )
         self.conn.execute(
