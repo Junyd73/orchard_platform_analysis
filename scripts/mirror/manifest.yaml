@@ -180,6 +180,12 @@ include:
   - src: core/order_alloc_constants.py
     dest: core/order_alloc_constants.py
 
+  - src: core/order_allocation_service.py
+    dest: core/order_allocation_service.py
+
+  - src: core/order_alloc_migrate.py
+    dest: core/order_alloc_migrate.py
+
   - src: core/sales_stock_trace_schema.py
     dest: core/sales_stock_trace_schema.py
 
