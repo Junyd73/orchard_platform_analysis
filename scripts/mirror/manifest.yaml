@@ -153,6 +153,12 @@ include:
   - src: core/sales_payment_constants.py
     dest: core/sales_payment_constants.py
 
+  - src: core/sales_class_constants.py
+    dest: core/sales_class_constants.py
+
+  - src: core/sales_class_schema.py
+    dest: core/sales_class_schema.py
+
   - src: core/account_manager.py
     dest: core/account_manager.py
 
