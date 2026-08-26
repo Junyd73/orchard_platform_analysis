@@ -174,6 +174,8 @@ export function buildOrderPayload(
   input: {
     custmId: string
     orderDt: string
+    salesTypeCd: string
+    seasonTypeCd: string
     prePay: number
     prePayMethodCd: string | null
     rmk: string
@@ -187,6 +189,8 @@ export function buildOrderPayload(
   return {
     custm_id: input.custmId,
     order_dt: input.orderDt,
+    sales_type_cd: input.salesTypeCd,
+    season_type_cd: input.seasonTypeCd,
     pre_pay_amt: prePay,
     pre_pay_method_cd: prePay > 0 ? input.prePayMethodCd || null : null,
     rmk: input.rmk,

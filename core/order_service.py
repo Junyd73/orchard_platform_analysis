@@ -38,6 +38,12 @@ from core.order_constants import (
     MSG_ORDER_PREPAY_METHOD_REQUIRED,
     MSG_ORDER_PREPAY_METHOD_SCHEMA,
     MSG_ORDER_QTY_LOCKED,
+    MSG_ORDER_SALES_CLASS_LOCKED,
+    MSG_ORDER_SALES_TYPE_INVALID,
+    MSG_ORDER_SALES_TYPE_REQUIRED,
+    MSG_ORDER_SALES_TYPE_SCHEMA,
+    MSG_ORDER_SEASON_TYPE_INVALID,
+    MSG_ORDER_SEASON_TYPE_REQUIRED,
     MSG_ORDER_SHIP_ONLY,
     MSG_PARCEL_DEST_INCOMPLETE,
     MSG_PARCEL_DEST_QTY,
@@ -63,6 +69,12 @@ from core.order_constants import (
     STOCK_STATUS_OPEN,
     VARIETY_CD_LEN,
     WAREHOUSE_CD_DEFAULT,
+)
+from core.sales_class_constants import (
+    SALES_TYPE_CODE_SET,
+    SALES_TYPE_PARENT_CD,
+    SEASON_TYPE_CODE_SET,
+    SEASON_TYPE_PARENT_CD,
 )
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -127,6 +139,7 @@ class OrderLineInput:
 class OrderSaveInput:
     custm_id: str
     order_dt: str | None = None
+    sales_type_cd: str = ""
     season_type_cd: str = ""
     pre_pay_amt: float = 0.0
     pre_pay_method_cd: str | None = None
@@ -624,6 +637,21 @@ class OrderService:
                 raw_method = _row_val(method_row, "pre_pay_method_cd", 0) if method_row else None
                 method_s = str(raw_method or "").strip()
                 pre_pay_method_cd = method_s or None
+            # 레거시 NULL/blank 보존 — 기본값으로 치환하지 않음.
+            sales_type_cd = ""
+            if _column_exists(cur, "t_order_master", "sales_type_cd"):
+                cur.execute(
+                    """
+                    SELECT sales_type_cd
+                    FROM t_order_master
+                    WHERE farm_cd = ? AND order_no = ?
+                    """,
+                    (farm, no),
+                )
+                st_row = cur.fetchone()
+                if st_row is not None:
+                    raw_st = _row_val(st_row, "sales_type_cd", 0)
+                    sales_type_cd = "" if raw_st is None else str(raw_st).strip()
             alloc_expr = (
                 "COALESCE(d.allocated_qty, 0) AS allocated_qty"
                 if _column_exists(cur, "t_order_detail", "allocated_qty")
@@ -763,6 +791,7 @@ class OrderService:
             "status_cd": str(_row_val(master, "status_cd", 5) or ""),
             "status_nm": str(_row_val(master, "status_nm", 6) or ""),
             "stock_status": str(_row_val(master, "stock_status", 7) or STOCK_STATUS_OPEN),
+            "sales_type_cd": sales_type_cd,
             "season_type_cd": str(_row_val(master, "season_type_cd", 8) or ""),
             "tot_order_amt": _as_float(_row_val(master, "tot_order_amt", 9)),
             "total_amt": _as_float(_row_val(master, "tot_order_amt", 9)),
@@ -835,7 +864,8 @@ class OrderService:
         no = str(order_no or "").strip()
         if not farm or not no:
             raise OrderValidationError("주문번호가 없습니다.")
-        self._validate_payload(farm, payload)
+        # 확정 이후 레거시 blank 보존을 위해 분류 검증은 상태 확인 후 수행.
+        self._validate_payload(farm, payload, require_sales_class=False)
         now_dt = now_ops_str()
         reg_id = str(user_id or "").strip() or "SYSTEM"
         tot_amt = self._total_item_amt(payload.lines)
@@ -844,7 +874,8 @@ class OrderService:
             cur.execute("BEGIN IMMEDIATE")
             cur.execute(
                 """
-                SELECT stock_status, sales_no, order_dt, status_cd, custm_id, pre_pay_amt, rmk
+                SELECT stock_status, sales_no, order_dt, status_cd, custm_id, pre_pay_amt, rmk,
+                       season_type_cd
                 FROM t_order_master
                 WHERE farm_cd = ? AND order_no = ?
                 """,
@@ -860,6 +891,21 @@ class OrderService:
             existing_cust = str(_row_val(row, "custm_id", 4) or "").strip()
             existing_pre_pay = _as_float(_row_val(row, "pre_pay_amt", 5))
             existing_rmk = str(_row_val(row, "rmk", 6) or "")
+            existing_season = str(_row_val(row, "season_type_cd", 7) or "").strip()
+            existing_sales_type = ""
+            if _column_exists(cur, "t_order_master", "sales_type_cd"):
+                cur.execute(
+                    """
+                    SELECT sales_type_cd
+                    FROM t_order_master
+                    WHERE farm_cd = ? AND order_no = ?
+                    """,
+                    (farm, no),
+                )
+                st_row = cur.fetchone()
+                if st_row is not None:
+                    raw_st = _row_val(st_row, "sales_type_cd", 0)
+                    existing_sales_type = "" if raw_st is None else str(raw_st).strip()
             existing_method: str | None = None
             if _column_exists(cur, "t_order_master", "pre_pay_method_cd"):
                 cur.execute(
@@ -881,6 +927,17 @@ class OrderService:
                 raise OrderHasSalesError()
             if status_cd in ORDER_STATUS_LOCKED:
                 raise OrderValidationError(_locked_edit_message(status_cd))
+            # 예약접수: 분류 필수 검증. 확정 이후: 기존값과 동일만 허용(blank 보존).
+            if status_cd == ORDER_STATUS_RESERVED_CD:
+                self._validate_order_sales_class(cur, farm, payload)
+            else:
+                incoming_season = str(payload.season_type_cd or "").strip()
+                incoming_sales_type = str(payload.sales_type_cd or "").strip()
+                if (
+                    incoming_season != existing_season
+                    or incoming_sales_type != existing_sales_type
+                ):
+                    raise OrderValidationError(MSG_ORDER_SALES_CLASS_LOCKED)
             alloc_snapshot = self._load_alloc_snapshot(cur, farm, no)
             self._validate_alloc_edit(payload, alloc_snapshot)
             if status_cd in ORDER_STATUS_QTY_LOCKED:
@@ -961,12 +1018,21 @@ class OrderService:
                     str(payload.rmk or ""),
                     reg_id,
                     now_dt,
-                    str(payload.season_type_cd or ""),
+                    str(payload.season_type_cd or "").strip(),
                     float(payload.pre_pay_amt or 0),
                     farm,
                     no,
                 ),
             )
+            if _column_exists(cur, "t_order_master", "sales_type_cd"):
+                cur.execute(
+                    """
+                    UPDATE t_order_master
+                    SET sales_type_cd = ?
+                    WHERE farm_cd = ? AND order_no = ?
+                    """,
+                    (str(payload.sales_type_cd or "").strip(), farm, no),
+                )
             if _column_exists(cur, "t_order_master", "pre_pay_method_cd"):
                 cur.execute(
                     """
@@ -1166,7 +1232,13 @@ class OrderService:
             if _as_float(ln.qty) + _QTY_EPS < allocated:
                 raise OrderValidationError(MSG_ORDER_ALLOC_QTY_BELOW)
 
-    def _validate_payload(self, farm_cd: str, payload: OrderSaveInput) -> None:
+    def _validate_payload(
+        self,
+        farm_cd: str,
+        payload: OrderSaveInput,
+        *,
+        require_sales_class: bool = True,
+    ) -> None:
         cust_id = str(payload.custm_id or "").strip()
         if not cust_id or cust_id == "GUEST":
             raise OrderValidationError("고객을 선택해 주십시오.")
@@ -1182,6 +1254,8 @@ class OrderService:
             )
             if cur.fetchone() is None:
                 raise OrderValidationError("등록된 고객이 아닙니다.")
+            if require_sales_class:
+                self._validate_order_sales_class(cur, farm_cd, payload)
             self._validate_prepay_method(cur, payload)
         finally:
             cur.close()
@@ -1258,6 +1332,55 @@ class OrderService:
                             f"{idx}행 택배 배송은 수령 연락처가 필요합니다."
                         )
 
+    def _validate_order_sales_class(
+        self, cur: sqlite3.Cursor, farm_cd: str, payload: OrderSaveInput
+    ) -> None:
+        """신규·수정 공통: SA01/SS01 활성 코드만 허용. 스키마 없으면 명시 실패."""
+        if not _column_exists(cur, "t_order_master", "sales_type_cd"):
+            raise OrderValidationError(MSG_ORDER_SALES_TYPE_SCHEMA)
+        sales_type = str(payload.sales_type_cd or "").strip()
+        season_type = str(payload.season_type_cd or "").strip()
+        payload.sales_type_cd = sales_type
+        payload.season_type_cd = season_type
+        if not sales_type:
+            raise OrderValidationError(MSG_ORDER_SALES_TYPE_REQUIRED)
+        if sales_type not in SALES_TYPE_CODE_SET:
+            raise OrderValidationError(MSG_ORDER_SALES_TYPE_INVALID)
+        if not self._is_active_common_child(
+            cur, farm_cd, parent_cd=SALES_TYPE_PARENT_CD, code_cd=sales_type
+        ):
+            raise OrderValidationError(MSG_ORDER_SALES_TYPE_INVALID)
+        if not season_type:
+            raise OrderValidationError(MSG_ORDER_SEASON_TYPE_REQUIRED)
+        if season_type not in SEASON_TYPE_CODE_SET:
+            raise OrderValidationError(MSG_ORDER_SEASON_TYPE_INVALID)
+        if not self._is_active_common_child(
+            cur, farm_cd, parent_cd=SEASON_TYPE_PARENT_CD, code_cd=season_type
+        ):
+            raise OrderValidationError(MSG_ORDER_SEASON_TYPE_INVALID)
+
+    @staticmethod
+    def _is_active_common_child(
+        cur: sqlite3.Cursor,
+        farm_cd: str,
+        *,
+        parent_cd: str,
+        code_cd: str,
+    ) -> bool:
+        cur.execute(
+            """
+            SELECT 1
+              FROM m_common_code
+             WHERE farm_cd = ?
+               AND code_cd = ?
+               AND parent_cd = ?
+               AND COALESCE(use_yn, 'N') = 'Y'
+             LIMIT 1
+            """,
+            (farm_cd, code_cd, parent_cd),
+        )
+        return cur.fetchone() is not None
+
     def _normalize_pre_pay_method(self, raw: str | None) -> str | None:
         s = str(raw or "").strip()
         return s or None
@@ -1320,6 +1443,8 @@ class OrderService:
         ship = float(payload.tot_ship_fee or 0)
         pre_pay = float(payload.pre_pay_amt or 0)
         method = self._normalize_pre_pay_method(payload.pre_pay_method_cd)
+        sales_type = str(payload.sales_type_cd or "").strip()
+        season_type = str(payload.season_type_cd or "").strip()
         has_method_col = _column_exists(cur, "t_order_master", "pre_pay_method_cd")
         if has_method_col:
             cur.execute(
@@ -1327,8 +1452,8 @@ class OrderService:
                 INSERT INTO t_order_master (
                     order_no, farm_cd, order_dt, custm_id, status_cd, stock_status,
                     tot_order_amt, tot_ship_fee, tot_pay_amt, rmk, reg_id, reg_dt,
-                    season_type_cd, pre_pay_amt, pre_pay_method_cd, sales_no
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sales_type_cd, season_type_cd, pre_pay_amt, pre_pay_method_cd, sales_no
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order_no,
@@ -1343,7 +1468,8 @@ class OrderService:
                     str(payload.rmk or ""),
                     user_id,
                     now_dt,
-                    str(payload.season_type_cd or ""),
+                    sales_type,
+                    season_type,
                     pre_pay,
                     method,
                     SALES_NO_EMPTY,
@@ -1355,8 +1481,8 @@ class OrderService:
             INSERT INTO t_order_master (
                 order_no, farm_cd, order_dt, custm_id, status_cd, stock_status,
                 tot_order_amt, tot_ship_fee, tot_pay_amt, rmk, reg_id, reg_dt,
-                season_type_cd, pre_pay_amt, sales_no
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sales_type_cd, season_type_cd, pre_pay_amt, sales_no
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_no,
@@ -1371,7 +1497,8 @@ class OrderService:
                 str(payload.rmk or ""),
                 user_id,
                 now_dt,
-                str(payload.season_type_cd or ""),
+                sales_type,
+                season_type,
                 pre_pay,
                 SALES_NO_EMPTY,
             ),

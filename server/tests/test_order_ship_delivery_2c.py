@@ -62,10 +62,17 @@ def _schema_sql() -> str:
         INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES
             ('OR001', 'LO010100', '방문수령', 'LO01'),
             ('OR001', 'LO010200', '택배', 'LO01'),
-            ('OR001', 'SS010100', '시즌', 'SS01');
+            ('OR001', 'SA01', '판매유형', NULL),
+            ('OR001', 'SA010100', '소매', 'SA01'),
+            ('OR001', 'SA010200', '도매', 'SA01'),
+            ('OR001', 'SA010300', '수출', 'SA01'),
+            ('OR001', 'SS01', '시즌가격', NULL),
+            ('OR001', 'SS010100', '설날', 'SS01'),
+            ('OR001', 'SS010200', '추석', 'SS01'),
+            ('OR001', 'SS010300', '일반', 'SS01');
         CREATE TABLE t_order_master (
             order_no TEXT, farm_cd TEXT, order_dt TEXT, custm_id TEXT,
-            season_type_cd TEXT, status_cd TEXT, stock_status TEXT,
+            sales_type_cd TEXT, season_type_cd TEXT, status_cd TEXT, stock_status TEXT,
             tot_order_amt REAL, tot_ship_fee REAL, tot_pay_amt REAL,
             pre_pay_amt REAL, rmk TEXT, reg_id TEXT, reg_dt TEXT,
             sales_no TEXT, mod_id TEXT, mod_dt TEXT,
@@ -569,6 +576,7 @@ class ShipDelivery2CTest(unittest.TestCase):
             OrderSaveInput(
                 custm_id=CUST,
                 order_dt=None,
+                sales_type_cd="SA010100",
                 season_type_cd="SS010100",
                 pre_pay_amt=0,
                 lines=[

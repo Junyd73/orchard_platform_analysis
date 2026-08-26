@@ -92,6 +92,7 @@ export type OrderLine = {
 export type OrderDetail = OrderListItem & {
   mobile: string
   stock_status: string
+  sales_type_cd: string
   season_type_cd: string
   tot_order_amt: number
   tot_ship_fee: number
@@ -132,6 +133,7 @@ export type OrderLinePayload = {
 export type OrderCreatePayload = {
   custm_id: string
   order_dt?: string | null
+  sales_type_cd?: string
   season_type_cd?: string
   pre_pay_amt?: number
   pre_pay_method_cd?: string | null

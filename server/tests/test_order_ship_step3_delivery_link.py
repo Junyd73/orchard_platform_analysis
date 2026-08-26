@@ -149,6 +149,7 @@ class Step3DeliveryLinkTest(unittest.TestCase):
             OrderSaveInput(
                 custm_id=CUST,
                 order_dt=None,
+                sales_type_cd="SA010100",
                 season_type_cd="SS010100",
                 pre_pay_amt=0,
                 lines=[
@@ -471,6 +472,7 @@ class Step3OrderDeliveryLinkGateTest(unittest.TestCase):
             OrderSaveInput(
                 custm_id=CUST,
                 order_dt=None,
+                sales_type_cd="SA010100",
                 season_type_cd="SS010100",
                 pre_pay_amt=0,
                 lines=[
@@ -514,6 +516,7 @@ class Step3OrderDeliveryLinkGateTest(unittest.TestCase):
             OrderSaveInput(
                 custm_id=CUST,
                 order_dt=None,
+                sales_type_cd="SA010100",
                 season_type_cd="SS010100",
                 pre_pay_amt=0,
                 lines=[

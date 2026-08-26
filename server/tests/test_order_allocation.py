@@ -396,6 +396,9 @@ class OrderAllocConcurrencyTest(unittest.TestCase):
         conn = sqlite3.connect(str(path), timeout=15, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.executescript(_schema_sql())
+        from core.order_prepay_method_schema import ensure_order_prepay_method_schema
+
+        ensure_order_prepay_method_schema(conn)
         ensure_order_alloc_schema(conn, skip_preflight=True)
         conn.commit()
         try:

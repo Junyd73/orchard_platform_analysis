@@ -42,6 +42,7 @@ class OrderCreateRequest(BaseModel):
 
     custm_id: str = Field(..., min_length=1)
     order_dt: str | None = None
+    sales_type_cd: str = ""
     season_type_cd: str = ""
     pre_pay_amt: float = 0
     pre_pay_method_cd: str | None = None
@@ -139,6 +140,7 @@ class OrderListPage(BaseModel):
 class OrderDetail(OrderListItem):
     mobile: str = ""
     stock_status: str = "N"
+    sales_type_cd: str = ""
     season_type_cd: str = ""
     tot_order_amt: float = 0
     tot_ship_fee: float = 0

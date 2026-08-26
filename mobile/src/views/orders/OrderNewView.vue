@@ -20,8 +20,12 @@ import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
   CODE_PARENT_DELIVERY,
   CODE_PARENT_GRADE,
+  CODE_PARENT_SALES_TYPE,
+  CODE_PARENT_SEASON,
   CODE_PARENT_SIZE,
   CODE_PARENT_SPEC,
+  DEFAULT_SALES_TYPE_CD,
+  DEFAULT_SEASON_TYPE_CD,
   DELIVERY_TP_VISIT,
   LABEL_ADD_LINE,
   LABEL_AMT,
@@ -58,7 +62,9 @@ import {
   LABEL_RCV_NAME,
   LABEL_RCV_TEL,
   LABEL_RMK,
+  LABEL_SALES_TYPE,
   LABEL_SAVE_ORDER,
+  LABEL_SEASON_TYPE,
   LABEL_SIZE,
   LABEL_TOTAL_LINES,
   LABEL_TOTAL_QTY,
@@ -143,6 +149,8 @@ const saving = ref(false)
 const errorMsg = ref('')
 const orderDt = ref(todayBizIso())
 const custmId = ref('')
+const salesTypeCd = ref(DEFAULT_SALES_TYPE_CD)
+const seasonTypeCd = ref(DEFAULT_SEASON_TYPE_CD)
 const prePay = ref('0')
 const prePayMethodCd = ref('')
 /** hydrate 시점의 저장된 결제수단. 레거시 NULL 보완 판정용. */
@@ -155,6 +163,8 @@ const expandedShipIndex = ref<number | null>(null)
 const destSheetLineIdx = ref<number | null>(null)
 const destSheetOpenFormIndex = ref<number | null>(null)
 const customers = ref<CustomerListItem[]>([])
+const salesTypes = ref<CommonCodeItem[]>([])
+const seasonTypes = ref<CommonCodeItem[]>([])
 const varieties = ref<CommonCodeItem[]>([])
 const grades = ref<CommonCodeItem[]>([])
 const specs = ref<CommonCodeItem[]>([])
@@ -453,7 +463,8 @@ function setVariety(line: EditLine, varietyCd: string) {
 async function loadMasters() {
   errorMsg.value = ''
   try {
-    const [cust, pearKids, grade, spec, size, dlv, payMethods] = await Promise.all([
+    const [cust, pearKids, grade, spec, size, dlv, payMethods, salesTypeCodes, seasonCodes] =
+      await Promise.all([
       fetchCustomers(farmCd.value),
       fetchCommonCodes(farmCd.value, PEAR_ITEM_CD),
       fetchCommonCodes(farmCd.value, CODE_PARENT_GRADE),
@@ -465,6 +476,8 @@ async function loadMasters() {
         PREPAY_METHOD_ACCT_PREFIX,
         PREPAY_METHOD_ACCT_LEVEL,
       ),
+      fetchCommonCodes(farmCd.value, CODE_PARENT_SALES_TYPE),
+      fetchCommonCodes(farmCd.value, CODE_PARENT_SEASON),
     ])
     customers.value = cust
     // FR01 직계는 중분류(배/배즙/원물). 품종은 FR010100 하위 소분류만.
@@ -474,6 +487,8 @@ async function loadMasters() {
     pearSizes.value = size
     deliveries.value = dlv
     payMethodOptions.value = payMethods
+    salesTypes.value = salesTypeCodes
+    seasonTypes.value = seasonCodes
     if (!isEdit.value) {
       lines.value.forEach(applyLineDefaults)
     }
@@ -492,6 +507,9 @@ async function hydrateOrder() {
   }
   orderDt.value = detail.order_dt
   custmId.value = detail.custm_id
+  // 레거시 blank/NULL → 강제 소매/일반 치환 금지
+  salesTypeCd.value = detail.sales_type_cd || ''
+  seasonTypeCd.value = detail.season_type_cd || ''
   prePay.value = String(detail.pre_pay_amt ?? 0)
   originalPrePayMethodCd.value = String(detail.pre_pay_method_cd || '')
   prePayMethodCd.value = originalPrePayMethodCd.value
@@ -589,6 +607,8 @@ async function onSave() {
   const payload = buildOrderPayload({
     custmId: custmId.value,
     orderDt: orderDt.value,
+    salesTypeCd: salesTypeCd.value,
+    seasonTypeCd: seasonTypeCd.value,
     prePay: num(prePay.value),
     prePayMethodCd: prePayMethodCd.value || null,
     rmk: rmk.value,
@@ -685,6 +705,34 @@ watch(
                 {{ LABEL_NEW_CUSTOMER_PLUS }}
               </button>
             </div>
+          </OdsFormField>
+          <OdsFormField :label="LABEL_SALES_TYPE" required>
+            <OdsSelect
+              v-model="salesTypeCd"
+              variant="form"
+              required
+              data-testid="order-sales-type"
+              :disabled="lockHeaderCore"
+            >
+              <option value="">선택</option>
+              <option v-for="c in salesTypes" :key="c.code_cd" :value="c.code_cd">
+                {{ c.code_nm }}
+              </option>
+            </OdsSelect>
+          </OdsFormField>
+          <OdsFormField :label="LABEL_SEASON_TYPE" required>
+            <OdsSelect
+              v-model="seasonTypeCd"
+              variant="form"
+              required
+              data-testid="order-season-type"
+              :disabled="lockHeaderCore"
+            >
+              <option value="">선택</option>
+              <option v-for="c in seasonTypes" :key="c.code_cd" :value="c.code_cd">
+                {{ c.code_nm }}
+              </option>
+            </OdsSelect>
           </OdsFormField>
           <OdsFormField :label="LABEL_PREPAY" optional>
             <OdsInput v-model="prePay" type="number" variant="form" bare :disabled="lockHeaderCore" />

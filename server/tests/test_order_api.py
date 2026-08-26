@@ -75,6 +75,8 @@ class OrderApiStage2Test(unittest.TestCase):
     def _body(self, qty: float = 100) -> dict:
         return {
             "custm_id": "C001",
+            "sales_type_cd": "SA010100",
+            "season_type_cd": "SS010300",
             "pre_pay_amt": 10000,
             "pre_pay_method_cd": "AS010101",
             "rmk": "api",

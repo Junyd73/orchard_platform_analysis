@@ -64,9 +64,27 @@ SALES_ROUTE_ROWS: tuple[tuple[str, str], ...] = (
 )
 
 # --- 주문 시즌 SS01 (기존 유지 · 여기선 매핑 키만) ---
+SEASON_TYPE_PARENT_CD = "SS01"
 SEASON_TYPE_SEOLLAL = "SS010100"
 SEASON_TYPE_CHUSEOK = "SS010200"
 SEASON_TYPE_NORMAL = "SS010300"
+
+LABEL_SEASON_TYPE_SEOLLAL = "설날"
+LABEL_SEASON_TYPE_CHUSEOK = "추석"
+LABEL_SEASON_TYPE_NORMAL = "일반"
+
+SEASON_TYPE_ROWS: tuple[tuple[str, str], ...] = (
+    (SEASON_TYPE_SEOLLAL, LABEL_SEASON_TYPE_SEOLLAL),
+    (SEASON_TYPE_CHUSEOK, LABEL_SEASON_TYPE_CHUSEOK),
+    (SEASON_TYPE_NORMAL, LABEL_SEASON_TYPE_NORMAL),
+)
+
+# 신규 주문 기본값 (레거시 백필에 쓰지 말 것)
+DEFAULT_ORDER_SALES_TYPE_CD = SALES_TYPE_RETAIL
+DEFAULT_ORDER_SEASON_TYPE_CD = SEASON_TYPE_NORMAL
+
+SALES_TYPE_CODE_SET: frozenset[str] = frozenset(cd for cd, _ in SALES_TYPE_ROWS)
+SEASON_TYPE_CODE_SET: frozenset[str] = frozenset(cd for cd, _ in SEASON_TYPE_ROWS)
 
 # SS01 → SA02 (S2C 승계용). blank/unknown은 None — 일반판매로 추정 금지.
 _SEASON_TO_CATEGORY: dict[str, str] = {

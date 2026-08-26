@@ -42,6 +42,14 @@ MSG_ORDER_PREPAY_METHOD_FORBIDDEN_WHEN_ZERO = "선입금이 0원이면 결제수
 MSG_ORDER_PREPAY_METHOD_INVALID = "선입금 결제수단이 올바르지 않습니다."
 MSG_ORDER_PREPAY_METHOD_SCHEMA = "선입금 결제수단 저장을 위해 DB 스키마 적용이 필요합니다."
 
+# 판매유형(SA01) · 시즌(SS01) — S2B 주문 원천정보
+MSG_ORDER_SALES_TYPE_REQUIRED = "판매유형을 선택해 주십시오."
+MSG_ORDER_SALES_TYPE_INVALID = "판매유형 코드가 올바르지 않습니다."
+MSG_ORDER_SEASON_TYPE_REQUIRED = "시즌구분을 선택해 주십시오."
+MSG_ORDER_SEASON_TYPE_INVALID = "시즌구분 코드가 올바르지 않습니다."
+MSG_ORDER_SALES_TYPE_SCHEMA = "판매유형 저장을 위해 DB 스키마 적용이 필요합니다."
+MSG_ORDER_SALES_CLASS_LOCKED = "주문확정 이후에는 판매유형·시즌구분을 수정할 수 없습니다."
+
 ORDER_NO_PREFIX = "ORD"
 ORDER_NO_SEQ_LEN = 3
 

@@ -84,6 +84,7 @@ def _to_save_input(body: OrderCreateRequest) -> OrderSaveInput:
     return OrderSaveInput(
         custm_id=body.custm_id,
         order_dt=body.order_dt,
+        sales_type_cd=body.sales_type_cd or "",
         season_type_cd=body.season_type_cd or "",
         pre_pay_amt=body.pre_pay_amt,
         pre_pay_method_cd=body.pre_pay_method_cd,

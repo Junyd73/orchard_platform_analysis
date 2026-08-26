@@ -74,7 +74,7 @@ def _schema_sql() -> str:
             status_cd TEXT, stock_status TEXT,
             tot_order_amt REAL, tot_ship_fee REAL, tot_pay_amt REAL,
             rmk TEXT, reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT,
-            season_type_cd TEXT, pre_pay_amt REAL, sales_no TEXT
+            sales_type_cd TEXT, season_type_cd TEXT, pre_pay_amt REAL, sales_no TEXT
         );
         CREATE TABLE m_account_code (
             acct_cd TEXT PRIMARY KEY, acct_nm TEXT, acct_level INTEGER,
@@ -128,6 +128,14 @@ def _schema_sql() -> str:
             ('OR001', 'ST010300', '배송준비', 'ST01'),
             ('OR001', 'ST010400', '배송완료', 'ST01'),
             ('OR001', 'ST010500', '취소', 'ST01'),
+            ('OR001', 'SA01', '판매유형', NULL),
+            ('OR001', 'SA010100', '소매', 'SA01'),
+            ('OR001', 'SA010200', '도매', 'SA01'),
+            ('OR001', 'SA010300', '수출', 'SA01'),
+            ('OR001', 'SS01', '시즌가격', NULL),
+            ('OR001', 'SS010100', '설날', 'SS01'),
+            ('OR001', 'SS010200', '추석', 'SS01'),
+            ('OR001', 'SS010300', '일반', 'SS01'),
             ('OR001', 'FR010101', '신고배', 'FR010100'),
             ('OR001', 'FR010102', '원황배', 'FR010100'),
             ('OR001', 'GR010100', '특', 'GR01'),
@@ -165,6 +173,8 @@ def _sample_payload(
     qty: float = 100,
     pre_pay: float = 30000,
     pre_pay_method_cd: str | None | object = ...,
+    sales_type_cd: str = "SA010100",
+    season_type_cd: str = "SS010300",
 ) -> OrderSaveInput:
     if pre_pay_method_cd is ...:
         method: str | None = "AS010101" if pre_pay > 0 else None
@@ -173,7 +183,8 @@ def _sample_payload(
     return OrderSaveInput(
         custm_id=CUST,
         order_dt=None,
-        season_type_cd="SS010100",
+        sales_type_cd=sales_type_cd,
+        season_type_cd=season_type_cd,
         pre_pay_amt=pre_pay,
         pre_pay_method_cd=method,
         rmk="재고0 선주문",
@@ -1156,7 +1167,12 @@ class OrderPrepayMethodStage2Test(unittest.TestCase):
         before = _counts(self.conn)
         no = "ORD20260821-201"
         self._seed_legacy_null_method(no, status_cd=ORDER_STATUS_CONFIRMED_CD)
-        payload = _sample_payload(pre_pay=5000, pre_pay_method_cd="AS010102")
+        payload = _sample_payload(
+            pre_pay=5000,
+            pre_pay_method_cd="AS010102",
+            sales_type_cd="",
+            season_type_cd="",
+        )
         payload.rmk = "legacy"
         self.svc.replace_order(FARM, no, payload, user_id="t")
         detail = self.svc.get_order(FARM, no)
@@ -1168,7 +1184,12 @@ class OrderPrepayMethodStage2Test(unittest.TestCase):
         before = _counts(self.conn)
         no = "ORD20260821-301"
         self._seed_legacy_null_method(no, status_cd=ORDER_STATUS_PREP_CD)
-        payload = _sample_payload(pre_pay=5000, pre_pay_method_cd="AS010101")
+        payload = _sample_payload(
+            pre_pay=5000,
+            pre_pay_method_cd="AS010101",
+            sales_type_cd="",
+            season_type_cd="",
+        )
         payload.rmk = "legacy"
         self.svc.replace_order(FARM, no, payload, user_id="t")
         detail = self.svc.get_order(FARM, no)
@@ -1217,6 +1238,142 @@ class OrderPrepayMethodStage2Test(unittest.TestCase):
         self.assertEqual(after["pre_pay_method_cd"], "AS010101")
         self.assertEqual(after["rmk"], payload.rmk)
         self._assert_no_accounting(before)
+
+
+class OrderSalesClassS2BTest(unittest.TestCase):
+    """S2B 주문 판매유형·시즌 저장/잠금."""
+
+    def setUp(self) -> None:
+        self.path, self.conn = _open_tmp()
+        self.svc = OrderService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _set_status(self, order_no: str, status_cd: str) -> None:
+        self.conn.execute(
+            "UPDATE t_order_master SET status_cd=? WHERE farm_cd=? AND order_no=?",
+            (status_cd, FARM, order_no),
+        )
+        self.conn.commit()
+
+    def test_t1_create_retail_normal(self) -> None:
+        no = self.svc.create_order(
+            FARM, _sample_payload(sales_type_cd="SA010100", season_type_cd="SS010300"), user_id="t"
+        )
+        d = self.svc.get_order(FARM, no)
+        self.assertEqual(d["sales_type_cd"], "SA010100")
+        self.assertEqual(d["season_type_cd"], "SS010300")
+
+    def test_t2_wholesale_normal(self) -> None:
+        no = self.svc.create_order(
+            FARM, _sample_payload(sales_type_cd="SA010200", season_type_cd="SS010300"), user_id="t"
+        )
+        d = self.svc.get_order(FARM, no)
+        self.assertEqual(d["sales_type_cd"], "SA010200")
+
+    def test_t3_retail_chuseok(self) -> None:
+        no = self.svc.create_order(
+            FARM, _sample_payload(sales_type_cd="SA010100", season_type_cd="SS010200"), user_id="t"
+        )
+        self.assertEqual(self.svc.get_order(FARM, no)["season_type_cd"], "SS010200")
+
+    def test_t4_retail_seollal(self) -> None:
+        no = self.svc.create_order(
+            FARM, _sample_payload(sales_type_cd="SA010100", season_type_cd="SS010100"), user_id="t"
+        )
+        self.assertEqual(self.svc.get_order(FARM, no)["season_type_cd"], "SS010100")
+
+    def test_t5_export_normal(self) -> None:
+        no = self.svc.create_order(
+            FARM, _sample_payload(sales_type_cd="SA010300", season_type_cd="SS010300"), user_id="t"
+        )
+        self.assertEqual(self.svc.get_order(FARM, no)["sales_type_cd"], "SA010300")
+
+    def test_t6_invalid_sales_type(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(
+                FARM, _sample_payload(sales_type_cd="SA019999"), user_id="t"
+            )
+
+    def test_t7_blank_sales_type(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(FARM, _sample_payload(sales_type_cd=""), user_id="t")
+
+    def test_t8_invalid_season(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(
+                FARM, _sample_payload(season_type_cd="SS019999"), user_id="t"
+            )
+
+    def test_t9_blank_season(self) -> None:
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(FARM, _sample_payload(season_type_cd=""), user_id="t")
+
+    def test_t10_use_yn_n_blocked(self) -> None:
+        self.conn.execute(
+            "UPDATE m_common_code SET use_yn='N' WHERE farm_cd=? AND code_cd='SA010200'",
+            (FARM,),
+        )
+        self.conn.commit()
+        with self.assertRaises(OrderValidationError):
+            self.svc.create_order(
+                FARM, _sample_payload(sales_type_cd="SA010200"), user_id="t"
+            )
+
+    def test_t11_get_order_returns_codes(self) -> None:
+        no = self.svc.create_order(
+            FARM, _sample_payload(sales_type_cd="SA010200", season_type_cd="SS010200"), user_id="t"
+        )
+        d = self.svc.get_order(FARM, no)
+        self.assertEqual(d["sales_type_cd"], "SA010200")
+        self.assertEqual(d["season_type_cd"], "SS010200")
+
+    def test_t12_reserved_can_change(self) -> None:
+        no = self.svc.create_order(FARM, _sample_payload(), user_id="t")
+        payload = _sample_payload(sales_type_cd="SA010200", season_type_cd="SS010100")
+        self.svc.replace_order(FARM, no, payload, user_id="t")
+        d = self.svc.get_order(FARM, no)
+        self.assertEqual(d["sales_type_cd"], "SA010200")
+        self.assertEqual(d["season_type_cd"], "SS010100")
+
+    def test_t13_t14_confirmed_class_locked(self) -> None:
+        from core.order_constants import MSG_ORDER_SALES_CLASS_LOCKED
+
+        no = self.svc.create_order(FARM, _sample_payload(), user_id="t")
+        self._set_status(no, ORDER_STATUS_CONFIRMED_CD)
+        with self.assertRaises(OrderValidationError) as ctx:
+            self.svc.replace_order(
+                FARM,
+                no,
+                _sample_payload(sales_type_cd="SA010200", season_type_cd="SS010300"),
+                user_id="t",
+            )
+        self.assertEqual(str(ctx.exception.message), MSG_ORDER_SALES_CLASS_LOCKED)
+        with self.assertRaises(OrderValidationError) as ctx2:
+            self.svc.replace_order(
+                FARM,
+                no,
+                _sample_payload(sales_type_cd="SA010100", season_type_cd="SS010200"),
+                user_id="t",
+            )
+        self.assertEqual(str(ctx2.exception.message), MSG_ORDER_SALES_CLASS_LOCKED)
+
+    def test_t15_legacy_blank_no_backfill_on_get(self) -> None:
+        no = self.svc.create_order(FARM, _sample_payload(), user_id="t")
+        self.conn.execute(
+            """
+            UPDATE t_order_master
+               SET sales_type_cd=NULL, season_type_cd=''
+             WHERE farm_cd=? AND order_no=?
+            """,
+            (FARM, no),
+        )
+        self.conn.commit()
+        d = self.svc.get_order(FARM, no)
+        self.assertEqual(d["sales_type_cd"], "")
+        self.assertEqual(d["season_type_cd"], "")
 
 
 if __name__ == "__main__":

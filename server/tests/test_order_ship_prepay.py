@@ -74,6 +74,14 @@ def _schema_sql() -> str:
             ('{FARM}', 'ST010200', '주문확정', 'ST01'),
             ('{FARM}', 'ST010300', '배송준비', 'ST01'),
             ('{FARM}', 'ST010400', '배송완료', 'ST01'),
+            ('{FARM}', 'SA01', '판매유형', NULL),
+            ('{FARM}', 'SA010100', '소매', 'SA01'),
+            ('{FARM}', 'SA010200', '도매', 'SA01'),
+            ('{FARM}', 'SA010300', '수출', 'SA01'),
+            ('{FARM}', 'SS01', '시즌가격', NULL),
+            ('{FARM}', 'SS010100', '설날', 'SS01'),
+            ('{FARM}', 'SS010200', '추석', 'SS01'),
+            ('{FARM}', 'SS010300', '일반', 'SS01'),
             ('{FARM}', 'FR010101', '신고', 'FR010100'),
             ('{FARM}', '{GRADE}', '특', 'GR01'),
             ('{FARM}', '{SIZE}', '15kg', 'FR020100'),
@@ -92,7 +100,7 @@ def _schema_sql() -> str:
             status_cd TEXT, stock_status TEXT,
             tot_order_amt REAL, tot_ship_fee REAL, tot_pay_amt REAL,
             rmk TEXT, reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT,
-            season_type_cd TEXT, pre_pay_amt REAL, pre_pay_method_cd TEXT, sales_no TEXT
+            sales_type_cd TEXT, season_type_cd TEXT, pre_pay_amt REAL, pre_pay_method_cd TEXT, sales_no TEXT
         );
         CREATE TABLE t_order_detail (
             order_detail_id TEXT PRIMARY KEY, order_no TEXT, farm_cd TEXT,
@@ -196,6 +204,7 @@ def _order(
         OrderSaveInput(
             custm_id=CUST,
             order_dt=None,
+            sales_type_cd="SA010100",
             season_type_cd="SS010100",
             pre_pay_amt=pre_pay_amt,
             pre_pay_method_cd=pre_pay_method_cd,
