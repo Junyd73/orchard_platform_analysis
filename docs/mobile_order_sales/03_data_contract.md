@@ -305,11 +305,11 @@ AccountManager sync·DB TX 이전에 검증한다.
 PC `SalesPage`에서 full-save·삭제·수금 mutation **금지**. UI disable + write/delete DB backstop.
 일반 PC 직접판매(CONFIRMED·추적키 없음)는 기존 편집 유지. DRAFT는 대상 아님.
 
-**PC 수금 append-only (DEC-032 · Stage7B-1 구현):** 기존 수금 수정/삭제 금지 · `execute_full_save`에서 cash/ledger mutation **제거** · master `tot_paid_amt`/`tot_unpaid_amt`는 `SalesPaymentService.get_payment_summary` cash SSOT · 수금 UI read-only · add/edit/delete disable. **신규 append는 Stage7B-2.**
+**PC 수금 append-only (DEC-032 · IMPLEMENTED · Stage7B-1+7B-2):** 기존 수금 수정/삭제 금지 · `execute_full_save` cash/ledger mutation **제거** · 신규 일반수금은 `SalesPaymentService.add_payment`만 · `source_order_no=None` → `cash.order_no` NULL. **`slip_no`는 내부 파생 회계 linkage** — 동일 결제수단 append 시 AccountManager 누적 그룹 정책으로 기존 cash의 slip이 재연결될 수 있으나, 사용자 수금값(날짜·수단·금액·order_no) 수정으로 취급하지 않는다. **P1:** COMMIT 성공 후 UI 갱신 실패는 수금 write 실패로 표시하지 않음.
 
-**신규 판매 수금 (DEC-033 · IMPLEMENTED boundary):** 판매 저장 전 수금등록 금지 · CONFIRMED 저장 후 별도 수금등록(Stage7B-2).
+**신규 판매 수금 (DEC-033 · IMPLEMENTED):** 판매 저장 전 수금등록 금지 · CONFIRMED + unpaid>0 만 수금등록 · 미저장 판매금액/판매일 변경 시 차단.
 
-**판매금액 감액 (DEC-034 · IMPLEMENTED):** 일반 직접판매 수정 시 `new tot_sales_amt >= actual paid(cash SSOT)` — 미만이면 저장 전체 차단.
+**판매금액 감액 (DEC-034 · IMPLEMENTED):** 일반 직접판매 수정 시 `new tot_sales_amt >= actual paid(cash SSOT)` — Stage7B-1 backstop 유지.
 
 ### 9.1 선입금 잔액 (컬럼 없음 · DEC-019)
 

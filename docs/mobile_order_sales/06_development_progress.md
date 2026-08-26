@@ -10,8 +10,10 @@
 > **DEC-030:** **APPROVED · IMPLEMENTED** (Core `add_payment` · blank/future/before-sales validation).  
 > **Stage7A:** PC 출고확정 CONFIRMED read-only — **완료 · private main 반영 · 운영 미배포**.  
 > **Stage7B-1:** PC 수금 immutable + full-save cash/ledger 제거 — **완료 · private main 반영 · 운영 미배포**.  
-> **DEC-031:** **APPROVED · IMPLEMENTED**. **DEC-032:** **APPROVED · Stage7B-1 구현** (append Stage7B-2). **DEC-033/034:** **APPROVED · IMPLEMENTED**.  
-> **다음:** Stage7B-2 **신규수금 append** (`SalesPaymentService`).  
+> **Stage7B-2:** PC 신규수금 append (`SalesPaymentService.add_payment`) — **완료 · private main 반영 · 운영 미배포**.  
+> **Stage7B:** PC 수금 공용화 — **완료 · private main · 운영 미배포**.  
+> **DEC-031:** **APPROVED · IMPLEMENTED**. **DEC-032/033/034:** **APPROVED · IMPLEMENTED**.  
+> **다음:** Stage7B-2 main cross-review.  
 > OPEN-PROD-01~03 **CLOSED**. DEC-019 provenance **CLOSED**. DEC-028/029 **APPROVED**.  
 > 생산/재고 SSOT: [09](./09_production_inventory_flow.md).
 
@@ -36,7 +38,9 @@
 | — | Stage6C 수금등록 POST | **완료 · private main · 운영 미배포** |
 | — | Stage7A PC 출고확정 판매 보호 | **완료 · private main · 운영 미배포** |
 | — | Stage7B-1 PC 수금 immutable | **완료 · private main · 운영 미배포** |
-| — | **다음:** Stage7B-2 신규수금 append | [08 A13](./08_pc_change_scope.md) · [07 DEC-032](./07_decisions.md#dec-032) |
+| — | Stage7B-2 PC 신규수금 append | **완료 · private main · 운영 미배포** |
+| — | Stage7B PC 수금 공용화 | **완료 · private main · 운영 미배포** |
+| — | **다음:** Stage7B-2 main cross-review | [08 A13](./08_pc_change_scope.md) · [07 DEC-032](./07_decisions.md#dec-032) |
 | 7* | 가락시장 경매→판매확정·정산 | **예정** (DEC-016 OPEN · 개발순서 8) |
 | 8* | 통합 회귀·PC/PWA 정합 | **예정** (개발순서 7과 연계) |
 
@@ -423,7 +427,8 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 6C 수금등록 POST  ← 완료 · private main · 운영 미배포
 7A PC 출고확정 판매 보호  ← 완료 · private main · 운영 미배포
 7B-1 PC 수금 immutable  ← 완료 · private main · 운영 미배포
-7B-2 PC 신규수금 append  ← 다음 (미착수)
+7B-2 PC 신규수금 append  ← 완료 · private main · 운영 미배포
+7B PC 수금 공용화  ← 완료 · private main · 운영 미배포
 8  가락 DRAFT→CONFIRMED
 ```
 
@@ -440,7 +445,7 @@ P/4    생산/변환 확장                [구현 완료 · merge 대기]
 | 6C | **수금등록** | **완료 · private main · 운영 미배포** | `POST /sales/{sales_no}/payments` · `SalesPaymentService.add_payment` · Mobile inline form · DEC-030 Core validation · PUT/수정/삭제 없음 | 6B |
 | 7A | **PC 출고확정 판매 보호** | **완료 · private main · 운영 미배포** | DEC-031: CONFIRMED + (`order_no` \| `order_detail_id` \| `stock_seq`) → PC read-only · UI disable + save/delete backstop + 배송 edit 차단 | 6C |
 | 7B-1 | **PC 수금 immutable** | **완료 · private main · 운영 미배포** | DEC-032/033/034: full-save cash/ledger mutation 제거 · 기존 수금 read-only · DEC-034 감액 backstop · cash 있는 판매 delete 차단 | 7A |
-| 7B-2 | **PC 신규수금 append** | **예정 · 미착수** | `SalesPaymentService.add_payment` UI 연결 · DEC-030 | 7B-1 |
+| 7B-2 | **PC 신규수금 append** | **완료 · private main · 운영 미배포** | `SalesPaymentService.add_payment` · DEC-030 · `list_payment_methods` SSOT · protected CONFIRMED도 unpaid>0 이면 add 허용 · P1 COMMIT/UI 경계 | 7B-1 |
 | 7 | **PC 정합성 잔여** | **별도 범위 확정 예정** | `order_detail_id` 재저장 보존 등 — Stage7B-1/7B-2(수금 공용화)와 **별도** | 7B-2 |
 | 8 | **가락 DRAFT→CONFIRMED** | **예정** | confirm TX + 선택 수금 (DEC-010). DEC-016 OPEN 선결 | 3·7 |
 

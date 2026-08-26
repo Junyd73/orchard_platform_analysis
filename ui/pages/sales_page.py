@@ -13,11 +13,14 @@ from core.ops_biz_date import now_ops_str, today_ops
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
 from core.pc_sales_provenance import (
+    MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED,
     MSG_PREPAY_CASH_IMMUTABLE,
     MSG_SALES_AMT_BELOW_PAID,
     MSG_SALES_DELETE_HAS_PAYMENTS,
+    MSG_SAVE_BEFORE_PAYMENT,
     MSG_SHIPMENT_CONFIRMED_SALE_DELETE_BLOCKED,
     MSG_SHIPMENT_CONFIRMED_SALE_SAVE_BLOCKED,
+    PcPaymentStaleScreenError,
     PcPrepayImmutableError,
     PcSalesAmtBelowPaidError,
     PcSalesDeleteHasPaymentsError,
@@ -25,15 +28,26 @@ from core.pc_sales_provenance import (
     apply_payment_immutable_ui_lock,
     apply_protected_confirmed_sale_ui_lock,
     assert_no_cash_for_delete,
+    assert_payment_screen_not_stale,
     assert_sale_mutable,
     assert_sales_total_not_below_paid,
     compute_master_paid_unpaid,
     fetch_actual_paid_amt,
     fetch_master_order_no,
     fetch_master_sales_dt,
+    is_payment_add_allowed,
     is_shipment_confirmed_sale_locked,
     is_protected_delivery_edit_blocked,
+    set_payment_add_enabled,
+    try_refresh_after_payment_commit,
     validate_protected_prepay_sales_dt_from_db,
+)
+from core.sales_payment_service import (
+    PaymentAddIn,
+    PaymentError,
+    PaymentNotFoundError,
+    PaymentValidationError,
+    SalesPaymentService,
 )
 from ui.ops_qdate import qdate_today_ops
 
@@ -998,6 +1012,111 @@ class SalesSearchDialog(QDialog):
         else:
             QMessageBox.warning(self, "선택 확인", "가져올 전표를 먼저 선택하세요.")
 
+
+class PaymentAddDialog(QDialog):
+    """Stage7B-2 — 신규 일반수금 등록 (수금일 · 수금액 · 결제수단)."""
+
+    def __init__(
+        self,
+        *,
+        sales_dt: str,
+        unpaid_amt: float,
+        methods: list,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.sales_dt = str(sales_dt or "").strip()[:10]
+        self.unpaid_amt = float(unpaid_amt or 0)
+        self.methods = methods or []
+        self.result: dict | None = None
+        self._saving = False
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("수금 등록")
+        self.resize(420, 220)
+        self.setStyleSheet(MainStyles.MAIN_BG)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        self.pay_dt = QDateEdit(calendarPopup=True)
+        self.pay_dt.setStyleSheet(MainStyles.DATE_EDIT)
+        today = qdate_today_ops()
+        min_dt = QDate.fromString(self.sales_dt, "yyyy-MM-dd")
+        if not min_dt.isValid():
+            min_dt = today
+        self.pay_dt.setMinimumDate(min_dt)
+        self.pay_dt.setMaximumDate(today)
+        self.pay_dt.setDate(today)
+
+        self.pay_amt = QLineEdit(f"{self.unpaid_amt:,.0f}")
+        self.pay_amt.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.pay_amt.setStyleSheet(MainStyles.INPUT_RIGHT)
+        self.pay_amt.textChanged.connect(lambda: self._format_amt(self.pay_amt))
+
+        self.pay_method = QComboBox()
+        self.pay_method.setStyleSheet(MainStyles.COMBO)
+        self.pay_method.addItem("결제수단 선택", "")
+        for m in self.methods:
+            self.pay_method.addItem(str(m.get("acct_nm") or m.get("acct_cd")), m.get("acct_cd"))
+
+        form.addRow("수금일:", self.pay_dt)
+        form.addRow("수금액:", self.pay_amt)
+        form.addRow("결제수단:", self.pay_method)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self.btn_cancel = QPushButton("취소")
+        self.btn_cancel.setStyleSheet(MainStyles.BTN_SECONDARY)
+        self.btn_ok = QPushButton("등록")
+        self.btn_ok.setStyleSheet(MainStyles.BTN_PRIMARY)
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_ok.clicked.connect(self._on_accept)
+        btn_row.addWidget(self.btn_cancel)
+        btn_row.addWidget(self.btn_ok)
+        layout.addLayout(btn_row)
+
+    @staticmethod
+    def _format_amt(edit: QLineEdit) -> None:
+        edit.blockSignals(True)
+        raw = edit.text().replace(",", "")
+        if raw.isdigit():
+            edit.setText(f"{int(raw):,}")
+        elif raw == "":
+            edit.setText("0")
+        edit.blockSignals(False)
+
+    def _on_accept(self) -> None:
+        if self._saving:
+            return
+        method = self.pay_method.currentData()
+        if not method:
+            QMessageBox.warning(self, "입력 확인", "결제수단을 선택해 주세요.")
+            return
+        try:
+            amt = float(self.pay_amt.text().replace(",", "") or 0)
+        except ValueError:
+            amt = 0.0
+        if amt <= 0:
+            QMessageBox.warning(self, "입력 확인", "수금액은 0보다 커야 합니다.")
+            return
+        self.result = {
+            "pay_dt": self.pay_dt.date().toString("yyyy-MM-dd"),
+            "pay_amt": amt,
+            "pay_method_cd": method,
+        }
+        self.accept()
+
+    def set_saving(self, busy: bool) -> None:
+        self._saving = bool(busy)
+        self.btn_ok.setEnabled(not busy)
+
+
 # 판매관리 메인페이지
 class SalesPage(QWidget):
     SALES_STATUS_DRAFT = "DRAFT"
@@ -1031,6 +1150,7 @@ class SalesPage(QWidget):
         self.current_sales_source = self.SALES_SOURCE_ORDER
         self.custm_id = None          # 선택된 거래처 코드 (상태 관리용)
         self.is_protected_confirmed_sale = False
+        self._payment_add_busy = False
         
         # 디자인 가이드 적용 및 UI 초기화
 
@@ -1523,7 +1643,7 @@ class SalesPage(QWidget):
         self.btn_pay_del = QPushButton("🗑️ 삭제"); self.btn_pay_del.setStyleSheet(MainStyles.BTN_SECONDARY)
 
         # 버튼 연결
-        self.btn_pay_add.clicked.connect(self.add_pay_row)
+        self.btn_pay_add.clicked.connect(self.open_payment_add_dialog)
         self.btn_pay_edit.clicked.connect(self.focus_pay_row)
         self.btn_pay_del.clicked.connect(self.delete_pay_row)
 
@@ -1581,6 +1701,7 @@ class SalesPage(QWidget):
 
         layout.addWidget(self.pay_table)
         apply_payment_immutable_ui_lock(self)
+        set_payment_add_enabled(self, False)
 
         return tab
 
@@ -1588,6 +1709,213 @@ class SalesPage(QWidget):
         """DEC-031 — 출고확정 CONFIRMED 판매 UI read-only."""
         apply_protected_confirmed_sale_ui_lock(self, locked)
         apply_payment_immutable_ui_lock(self)
+        self.refresh_payment_add_button_state()
+
+    def _ui_final_sales_total(self) -> float:
+        def get_amt(w):
+            return float(w.text().replace(",", "") or 0)
+
+        return get_amt(self.tot_sales_amt) + get_amt(self.tot_ship_fee)
+
+    def refresh_payment_add_button_state(self, summary: dict | None = None) -> None:
+        """CONFIRMED + unpaid > 0 이면 add 활성 (protected 포함)."""
+        if self._payment_add_busy:
+            set_payment_add_enabled(self, False)
+            return
+        sales_no = (self.current_sales_no or "").strip()
+        if not sales_no:
+            set_payment_add_enabled(self, False)
+            return
+        try:
+            if summary is None:
+                summary = SalesPaymentService(self.db.conn).get_payment_summary(
+                    self.farm_cd, sales_no
+                )
+            status = summary.get("sales_status") or self.current_sales_status
+            unpaid = float(summary.get("tot_unpaid_amt") or 0)
+            set_payment_add_enabled(self, is_payment_add_allowed(status, unpaid))
+        except PaymentNotFoundError:
+            set_payment_add_enabled(self, False)
+        except Exception:
+            set_payment_add_enabled(self, False)
+
+    def _apply_payment_summary_to_ui(self, summary: dict) -> None:
+        """수금 영역만 갱신 — full-save / load_sales_data 팝업 없음."""
+        self.pay_table.setRowCount(0)
+        for pay in summary.get("payments") or []:
+            self.add_pay_row(
+                {
+                    "paid_detail_no": pay.get("paid_detail_no"),
+                    "pay_dt": pay.get("pay_dt"),
+                    "pay_method_cd": pay.get("pay_method_cd"),
+                    "pay_amt": pay.get("pay_amt"),
+                    "rmk": pay.get("rmk"),
+                    "slip_no": pay.get("slip_no"),
+                    "order_no": pay.get("order_no") or pay.get("source_order_no"),
+                }
+            )
+        paid = float(summary.get("tot_paid_amt") or 0)
+        unpaid = float(summary.get("tot_unpaid_amt") or 0)
+        tot_sales = float(summary.get("tot_sales_amt") or 0)
+        self.tot_pay_amt.setText(f"{paid:,.0f}")
+        self.tot_unpaid_amt.setText(f"{unpaid:,.0f}")
+        if hasattr(self, "lbl_pay_summary"):
+            self.lbl_pay_summary.setText(
+                f"총 매출액: {tot_sales:,.0f} | 수금 합계: {paid:,.0f} | "
+                f"{'잔액' if unpaid >= 0 else '초과'}: {abs(unpaid):,.0f}"
+            )
+        base_style = MainStyles.TXT_SUMMARY_VALUE_EMPH
+        if unpaid > 0:
+            self.tot_unpaid_amt.setStyleSheet(f"{base_style} color: #D32F2F;")
+        elif unpaid < 0:
+            self.tot_unpaid_amt.setStyleSheet(f"{base_style} color: #7B1FA2;")
+        else:
+            self.tot_unpaid_amt.setStyleSheet(f"{base_style} color: #1976D2;")
+        apply_payment_immutable_ui_lock(self)
+        self.refresh_payment_add_button_state(summary)
+
+    def open_payment_add_dialog(self) -> None:
+        """Stage7B-2 — SalesPaymentService.add_payment 신규 일반수금."""
+        if self._payment_add_busy:
+            return
+        sales_no = (self.current_sales_no or "").strip()
+        if not sales_no:
+            QMessageBox.warning(self, "알림", "저장된 판매를 먼저 조회해 주세요.")
+            return
+
+        svc = SalesPaymentService(self.db.conn)
+        try:
+            summary = svc.get_payment_summary(self.farm_cd, sales_no)
+        except PaymentNotFoundError:
+            QMessageBox.warning(self, "수금 불가", "판매 내역을 찾을 수 없습니다.")
+            set_payment_add_enabled(self, False)
+            return
+        except PaymentError as e:
+            QMessageBox.warning(self, "수금 불가", str(e))
+            return
+
+        status = summary.get("sales_status")
+        unpaid = float(summary.get("tot_unpaid_amt") or 0)
+        if not is_payment_add_allowed(status, unpaid):
+            QMessageBox.warning(self, "수금 불가", "수금 등록이 가능한 판매가 아닙니다.")
+            self.refresh_payment_add_button_state(summary)
+            return
+
+        try:
+            assert_payment_screen_not_stale(
+                ui_tot_sales_amt=self._ui_final_sales_total(),
+                db_tot_sales_amt=float(summary.get("tot_sales_amt") or 0),
+                ui_sales_dt=self.sales_dt.date().toString("yyyy-MM-dd"),
+                db_sales_dt=fetch_master_sales_dt(
+                    self.db.conn.cursor(), self.farm_cd, sales_no
+                ),
+            )
+        except PcPaymentStaleScreenError as e:
+            QMessageBox.warning(self, "저장 필요", str(e) or MSG_SAVE_BEFORE_PAYMENT)
+            return
+
+        methods = svc.list_payment_methods()
+        if not methods:
+            QMessageBox.warning(self, "수금 불가", "등록 가능한 결제수단이 없습니다.")
+            return
+
+        dlg = PaymentAddDialog(
+            sales_dt=str(
+                fetch_master_sales_dt(self.db.conn.cursor(), self.farm_cd, sales_no)
+                or ""
+            ),
+            unpaid_amt=unpaid,
+            methods=methods,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.result:
+            return
+
+        self._payment_add_busy = True
+        set_payment_add_enabled(self, False)
+        dlg.set_saving(True)
+        payment_committed = False
+        ui_refreshed = False
+        try:
+            # stale 재확인 (dialog 동안 화면 변경 가능)
+            summary = svc.get_payment_summary(self.farm_cd, sales_no)
+            assert_payment_screen_not_stale(
+                ui_tot_sales_amt=self._ui_final_sales_total(),
+                db_tot_sales_amt=float(summary.get("tot_sales_amt") or 0),
+                ui_sales_dt=self.sales_dt.date().toString("yyyy-MM-dd"),
+                db_sales_dt=fetch_master_sales_dt(
+                    self.db.conn.cursor(), self.farm_cd, sales_no
+                ),
+            )
+            result = svc.add_payment(
+                PaymentAddIn(
+                    farm_cd=self.farm_cd,
+                    sales_no=sales_no,
+                    pay_amt=dlg.result["pay_amt"],
+                    pay_method_cd=dlg.result["pay_method_cd"],
+                    pay_dt=dlg.result["pay_dt"],
+                    rmk="",
+                    user_id=self.user_id or "PC",
+                    source_order_no=None,
+                )
+            )
+            payment_committed = True
+        except PcPaymentStaleScreenError as e:
+            QMessageBox.warning(self, "저장 필요", str(e) or MSG_SAVE_BEFORE_PAYMENT)
+        except PaymentValidationError as e:
+            QMessageBox.warning(self, "수금 불가", str(e))
+            try:
+                self._apply_payment_summary_to_ui(
+                    svc.get_payment_summary(self.farm_cd, sales_no)
+                )
+            except Exception:
+                self.refresh_payment_add_button_state()
+        except PaymentNotFoundError as e:
+            QMessageBox.warning(self, "수금 불가", str(e))
+            set_payment_add_enabled(self, False)
+        except PaymentError as e:
+            QMessageBox.warning(self, "수금 실패", str(e))
+            try:
+                self._apply_payment_summary_to_ui(
+                    svc.get_payment_summary(self.farm_cd, sales_no)
+                )
+            except Exception:
+                self.refresh_payment_add_button_state()
+        except Exception as e:
+            QMessageBox.critical(self, "치명적 오류", f"수금 처리 중 오류: {e}")
+            traceback.print_exc()
+            try:
+                self._apply_payment_summary_to_ui(
+                    svc.get_payment_summary(self.farm_cd, sales_no)
+                )
+            except Exception:
+                self.refresh_payment_add_button_state()
+        else:
+            # COMMIT 성공 이후 — UI 실패를 write 실패로 표시하지 않음
+            ui_refreshed = try_refresh_after_payment_commit(
+                lambda: self._apply_payment_summary_to_ui(result),
+                lambda: self._apply_payment_summary_to_ui(
+                    svc.get_payment_summary(self.farm_cd, sales_no)
+                ),
+            )
+            if ui_refreshed:
+                QMessageBox.information(self, "수금 등록", "수금이 등록되었습니다.")
+            else:
+                set_payment_add_enabled(self, False)
+                QMessageBox.warning(
+                    self,
+                    "화면 갱신 실패",
+                    MSG_PAYMENT_COMMITTED_UI_REFRESH_FAILED,
+                )
+        finally:
+            self._payment_add_busy = False
+            dlg.set_saving(False)
+            if payment_committed and not ui_refreshed:
+                # 상태 확인 불가 — 재조회 전까지 add disabled 유지 (재append 금지)
+                set_payment_add_enabled(self, False)
+            elif not payment_committed:
+                self.refresh_payment_add_button_state()
+            # payment_committed and ui_refreshed: _apply_payment_summary_to_ui가 이미 버튼 상태 반영
 
     # 판매관리마스터 화면 초기화
     def clear_sales_form(self):
@@ -1632,6 +1960,7 @@ class SalesPage(QWidget):
         # 6. 사용자 편의를 위해 품목 빈 줄 하나 추가
         self.add_item_row()
         apply_payment_immutable_ui_lock(self)
+        set_payment_add_enabled(self, False)
         
         print("화면 및 모든 데이터 리스트가 리셋되었습니다. (신규 모드)")
 

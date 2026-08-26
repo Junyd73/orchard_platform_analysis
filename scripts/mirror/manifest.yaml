@@ -153,6 +153,21 @@ include:
   - src: core/sales_payment_constants.py
     dest: core/sales_payment_constants.py
 
+  - src: core/account_manager.py
+    dest: core/account_manager.py
+
+  - src: core/order_constants.py
+    dest: core/order_constants.py
+
+  - src: core/order_ship_constants.py
+    dest: core/order_ship_constants.py
+
+  - src: core/order_ship_qty.py
+    dest: core/order_ship_qty.py
+
+  - src: core/order_service.py
+    dest: core/order_service.py
+
   - src: ui/pages/sales_page.py
     dest: ui/pages/sales_page.py
 

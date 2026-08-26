@@ -400,8 +400,10 @@ class Stage7b1UiLockTests(unittest.TestCase):
 
     def test_payment_buttons_always_disabled(self) -> None:
         page = self._page()
+        page.btn_pay_add.enabled = True
         apply_payment_immutable_ui_lock(page)
-        self.assertFalse(page.btn_pay_add.enabled)
+        # Stage7B-2: immutable은 edit/delete만 — add는 별도 helper
+        self.assertTrue(page.btn_pay_add.enabled)
         self.assertFalse(page.btn_pay_edit.enabled)
         self.assertFalse(page.btn_pay_del.enabled)
 
@@ -412,13 +414,14 @@ class Stage7b1UiLockTests(unittest.TestCase):
         self.assertFalse(amt.enabled)
         self.assertTrue(amt.read_only)
 
-    def test_ordinary_sale_save_enabled_but_pay_disabled(self) -> None:
+    def test_ordinary_sale_save_enabled_edit_del_disabled(self) -> None:
         page = self._page()
         page.btn_save = Toggle()
         apply_protected_confirmed_sale_ui_lock(page, False)
         apply_payment_immutable_ui_lock(page)
         self.assertTrue(page.btn_save.enabled)
-        self.assertFalse(page.btn_pay_add.enabled)
+        self.assertFalse(page.btn_pay_edit.enabled)
+        self.assertFalse(page.btn_pay_del.enabled)
 
 
 if __name__ == "__main__":

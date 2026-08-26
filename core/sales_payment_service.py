@@ -151,6 +151,39 @@ class SalesPaymentService:
         finally:
             cur.close()
 
+    def list_payment_methods(self) -> list[dict[str, str]]:
+        """활성 현금성 결제수단 목록 — `_require_cash_method`와 동일 필터 (read-only)."""
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT acct_cd, acct_nm
+                  FROM m_account_code
+                 WHERE parent_cd = ?
+                   AND CAST(acct_level AS TEXT) = ?
+                   AND use_yn = ?
+                 ORDER BY acct_cd
+                """,
+                (
+                    PAY_METHOD_PARENT_CD,
+                    str(PAY_METHOD_ACCT_LEVEL),
+                    PAY_METHOD_USE_YN_Y,
+                ),
+            )
+            out: list[dict[str, str]] = []
+            for row in cur.fetchall():
+                if isinstance(row, sqlite3.Row):
+                    cd = _norm_text(row["acct_cd"])
+                    nm = _norm_text(row["acct_nm"]) or cd
+                else:
+                    cd = _norm_text(row[0])
+                    nm = _norm_text(row[1]) or cd
+                if cd:
+                    out.append({"acct_cd": cd, "acct_nm": nm})
+            return out
+        finally:
+            cur.close()
+
     def add_payment(self, payload: PaymentAddIn) -> dict[str, Any]:
         cur = self.conn.cursor()
         try:
