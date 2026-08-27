@@ -83,8 +83,21 @@ SEASON_TYPE_ROWS: tuple[tuple[str, str], ...] = (
 DEFAULT_ORDER_SALES_TYPE_CD = SALES_TYPE_RETAIL
 DEFAULT_ORDER_SEASON_TYPE_CD = SEASON_TYPE_NORMAL
 
+# 신규 직접판매(무주문) 기본값 — 주문 기본값과 혼동 금지
+DEFAULT_DIRECT_SALES_TYPE_CD = SALES_TYPE_RETAIL
+DEFAULT_DIRECT_SALES_CATEGORY_CD = SALES_CATEGORY_NORMAL
+
 SALES_TYPE_CODE_SET: frozenset[str] = frozenset(cd for cd, _ in SALES_TYPE_ROWS)
 SEASON_TYPE_CODE_SET: frozenset[str] = frozenset(cd for cd, _ in SEASON_TYPE_ROWS)
+SALES_CATEGORY_CODE_SET: frozenset[str] = frozenset(cd for cd, _ in SALES_CATEGORY_ROWS)
+# 직접판매 허용 SA02 (경매 SA020400 제외)
+DIRECT_SALES_CATEGORY_CODE_SET: frozenset[str] = frozenset(
+    {
+        SALES_CATEGORY_NORMAL,
+        SALES_CATEGORY_CHUSEOK,
+        SALES_CATEGORY_SEOLLAL,
+    }
+)
 
 # SS01 → SA02 (S2C 승계용). blank/unknown은 None — 일반판매로 추정 금지.
 _SEASON_TO_CATEGORY: dict[str, str] = {

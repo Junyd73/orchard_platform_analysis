@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 
 import { confirmShipment } from '@/api/shipments'
 import { fetchCustomers } from '@/api/orders'
+import { fetchCommonCodes } from '@/api/commonCodes'
 import ParcelDestinationSheet from '@/components/sales/ParcelDestinationSheet.vue'
 import ParcelSenderSheet from '@/components/sales/ParcelSenderSheet.vue'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
@@ -27,21 +28,29 @@ import {
   saleUnitLabel,
 } from '@/views/orders/ordersConstants'
 import {
+  CODE_PARENT_SALES_CATEGORY,
+  CODE_PARENT_SALES_TYPE,
   LABEL_CONFIRM_SHIP,
   LABEL_MODE,
   LABEL_MODE_DIRECT,
   LABEL_MODE_STOCK,
   LABEL_ORDER,
   LABEL_REMAINING,
+  LABEL_SALES_CATEGORY,
+  LABEL_SALES_CLASS,
+  LABEL_SALES_TYPE,
   LABEL_SHIP_LINE,
   LABEL_SHIP_PAGE,
   HINT_SHIP_ORDER,
   HINT_SHIP_PRODUCTION,
   HINT_SHIP_STOCK,
   MSG_CONFIRM_OK,
+  MSG_DIRECT_SALES_CATEGORY_REQUIRED,
+  MSG_DIRECT_SALES_TYPE_REQUIRED,
   MSG_NO_PREFILL,
   MSG_STOCK_MODE_NEED_ALLOC,
   MSG_STOCK_MODE_PARTIAL_ALLOC,
+  SALES_CATEGORY_AUCTION_CD,
   SHIP_MODE_DIRECT,
   SHIP_MODE_STOCK,
   buildShipConfirmRequest,
@@ -64,6 +73,7 @@ import {
 import { todayBizIso } from '@/shared/bizDate'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
+import type { CommonCodeItem } from '@/types/commonCode'
 import type { CustomerListItem } from '@/types/order'
 import type { ShipConfirmResponse, ShipMode } from '@/types/shipment'
 
@@ -83,9 +93,24 @@ const busy = ref(false)
 const errorMsg = ref('')
 const done = ref<ShipConfirmResponse | null>(null)
 const customers = ref<CustomerListItem[]>([])
+const salesTypes = ref<CommonCodeItem[]>([])
+const salesCategories = ref<CommonCodeItem[]>([])
 const lines = ref<ShipDraftLine[]>([])
 const shipMode = ref<ShipMode>(SHIP_MODE_DIRECT)
 const custmId = ref('')
+
+const salesTypeCd = computed({
+  get: () => prefill.salesTypeCd || '',
+  set: (v: string) => {
+    prefill.salesTypeCd = v
+  },
+})
+const salesCategoryCd = computed({
+  get: () => prefill.salesCategoryCd || '',
+  set: (v: string) => {
+    prefill.salesCategoryCd = v
+  },
+})
 
 const source = computed(() => prefill.source)
 const hasOrder = computed(() => Boolean(prefill.orderNo))
@@ -252,6 +277,16 @@ async function onConfirm() {
     errorMsg.value = senderIssue.value || parcelIssue.value
     if (errorMsg.value) return
   }
+  if (!hasOrder.value) {
+    if (!String(prefill.salesTypeCd || '').trim()) {
+      errorMsg.value = MSG_DIRECT_SALES_TYPE_REQUIRED
+      return
+    }
+    if (!String(prefill.salesCategoryCd || '').trim()) {
+      errorMsg.value = MSG_DIRECT_SALES_CATEGORY_REQUIRED
+      return
+    }
+  }
   busy.value = true
   errorMsg.value = ''
   try {
@@ -273,6 +308,8 @@ async function onConfirm() {
       sndTel: parcel ? prefill.senderTel : '',
       sndAddr: parcel ? prefill.senderAddr : '',
       includeDeliveryAllocations: parcel,
+      salesTypeCd: hasOrder.value ? null : prefill.salesTypeCd,
+      salesCategoryCd: hasOrder.value ? null : prefill.salesCategoryCd,
     })
     const res = await confirmShipment(farmCd.value, payload)
     prefill.rememberResult(res)
@@ -295,6 +332,20 @@ onMounted(() => {
       })
       .catch(() => {
         customers.value = []
+      })
+    void Promise.all([
+      fetchCommonCodes(farmCd.value, CODE_PARENT_SALES_TYPE),
+      fetchCommonCodes(farmCd.value, CODE_PARENT_SALES_CATEGORY),
+    ])
+      .then(([salesTypeCodes, salesCategoryCodes]) => {
+        salesTypes.value = salesTypeCodes
+        salesCategories.value = salesCategoryCodes.filter(
+          (c) => c.code_cd !== SALES_CATEGORY_AUCTION_CD,
+        )
+      })
+      .catch(() => {
+        salesTypes.value = []
+        salesCategories.value = []
       })
   }
 })
@@ -339,6 +390,39 @@ onMounted(() => {
           {{ untrackedHint }}
         </p>
         <p class="meta">{{ LABEL_SHIP_FEE }} {{ formatOrderAmt(parcelShipFee) }}원</p>
+      </OdsCard>
+
+      <OdsCard
+        v-if="!hasOrder && !done"
+        :title="LABEL_SALES_CLASS"
+        data-testid="ship-confirm-sales-class"
+      >
+        <OdsFormField :label="LABEL_SALES_TYPE" required>
+          <OdsSelect
+            v-model="salesTypeCd"
+            variant="form"
+            required
+            data-testid="ship-confirm-sales-type"
+          >
+            <option value="">선택</option>
+            <option v-for="c in salesTypes" :key="c.code_cd" :value="c.code_cd">
+              {{ c.code_nm }}
+            </option>
+          </OdsSelect>
+        </OdsFormField>
+        <OdsFormField :label="LABEL_SALES_CATEGORY" required>
+          <OdsSelect
+            v-model="salesCategoryCd"
+            variant="form"
+            required
+            data-testid="ship-confirm-sales-category"
+          >
+            <option value="">선택</option>
+            <option v-for="c in salesCategories" :key="c.code_cd" :value="c.code_cd">
+              {{ c.code_nm }}
+            </option>
+          </OdsSelect>
+        </OdsFormField>
       </OdsCard>
 
       <OdsCard v-if="!hasOrder && !done" :title="LABEL_CUSTOMER">

@@ -317,35 +317,38 @@ class OrderShipSalesClassS2CTest(unittest.TestCase):
             route=SALES_ROUTE_ORDER_SHIP,
         )
 
-    def test_t9_direct_no_order_null_class(self) -> None:
-        out = OrderShipService(self.conn).confirm(
-            ShipConfirmIn(
-                farm_cd=FARM,
-                ship_mode=SHIP_MODE_DIRECT,
-                order_no=None,
-                custm_id=CUST,
-                sales_dt="2026-08-26",
-                user_id="T",
-                lines=[
-                    ShipLineIn(
-                        qty=2,
-                        item_cd=ITEM,
-                        variety_cd=VARIETY,
-                        grade_cd=GRADE,
-                        size_cd=SIZE,
-                        weight=WEIGHT,
-                        harvest_year=YEAR,
-                        wh_cd=WH,
-                        unit_price=1000,
-                    )
-                ],
+    def test_t9_direct_no_order_requires_sales_class(self) -> None:
+        """S4A: 무주문 DIRECT는 분류 필수. blank면 실패·변화 0 (S2C t9 갱신)."""
+        from core.order_ship_constants import CODE_DIRECT_SALES_TYPE_REQUIRED
+        from core.order_ship_service import ShipValidationError
+
+        before = _snapshot(self.conn)
+        with self.assertRaises(ShipValidationError) as ctx:
+            OrderShipService(self.conn).confirm(
+                ShipConfirmIn(
+                    farm_cd=FARM,
+                    ship_mode=SHIP_MODE_DIRECT,
+                    order_no=None,
+                    custm_id=CUST,
+                    sales_dt="2026-08-26",
+                    user_id="T",
+                    lines=[
+                        ShipLineIn(
+                            qty=2,
+                            item_cd=ITEM,
+                            variety_cd=VARIETY,
+                            grade_cd=GRADE,
+                            size_cd=SIZE,
+                            weight=WEIGHT,
+                            harvest_year=YEAR,
+                            wh_cd=WH,
+                            unit_price=1000,
+                        )
+                    ],
+                )
             )
-        )
-        self._assert_class(
-            out["sales_no"], sales_type=None, category=None, route=None
-        )
-        row = _sale_class(self.conn, out["sales_no"])
-        self.assertIsNone(row["order_no"])
+        self.assertEqual(ctx.exception.code, CODE_DIRECT_SALES_TYPE_REQUIRED)
+        self.assertEqual(before, _snapshot(self.conn))
 
     def test_t10_legacy_null_sales_type(self) -> None:
         no = _create_classified_order(

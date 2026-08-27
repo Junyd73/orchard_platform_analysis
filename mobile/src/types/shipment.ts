@@ -45,6 +45,9 @@ export type ShipConfirmRequest = {
   snd_tel?: string
   snd_addr?: string
   lines: ShipConfirmLine[]
+  /** S4A: 무주문 직접판매만. 주문 출고는 Core가 무시. */
+  sales_type_cd?: string | null
+  sales_category_cd?: string | null
 }
 
 export type ShipConfirmDetail = {

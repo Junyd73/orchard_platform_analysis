@@ -212,6 +212,11 @@ def _confirm_direct(
     ship_fee: float | None = None,
     unit_price: float = 1000,
 ) -> dict:
+    from core.sales_class_constants import (
+        DEFAULT_DIRECT_SALES_CATEGORY_CD,
+        DEFAULT_DIRECT_SALES_TYPE_CD,
+    )
+
     fee = ship_fee if ship_fee is not None else (
         sum(float(a.ship_fee or 0) for a in (allocs or []))
     )
@@ -227,6 +232,8 @@ def _confirm_direct(
             snd_name="삼육농원",
             snd_tel="010-0000-0000",
             snd_addr="과수원주소",
+            sales_type_cd=DEFAULT_DIRECT_SALES_TYPE_CD,
+            sales_category_cd=DEFAULT_DIRECT_SALES_CATEGORY_CD,
             lines=[
                 ShipLineIn(
                     qty=qty,
@@ -292,6 +299,8 @@ class ShipDelivery2CTest(unittest.TestCase):
                     sales_dt="2026-08-20",
                     custm_id=CUST,
                     user_id="T",
+                    sales_type_cd="SA010100",
+                    sales_category_cd="SA020100",
                     dlvry_tp="LO010200",
                     ship_fee=0,
                     snd_name="",
@@ -324,6 +333,8 @@ class ShipDelivery2CTest(unittest.TestCase):
                     sales_dt="2026-08-20",
                     custm_id=CUST,
                     user_id="T",
+                    sales_type_cd="SA010100",
+                    sales_category_cd="SA020100",
                     dlvry_tp="LO010200",
                     ship_fee=0,
                     snd_name="삼육농원",
@@ -509,6 +520,8 @@ class ShipDelivery2CTest(unittest.TestCase):
                 sales_dt="2026-08-20",
                 custm_id=CUST,
                 user_id="T",
+                sales_type_cd="SA010100",
+                sales_category_cd="SA020100",
                 dlvry_tp="LO010200",
                 ship_fee=4000,
                 rcv_name="홍길동",
@@ -556,6 +569,8 @@ class ShipDelivery2CTest(unittest.TestCase):
                 sales_dt="2026-08-20",
                 custm_id=CUST,
                 user_id="T",
+                sales_type_cd="SA010100",
+                sales_category_cd="SA020100",
                 dlvry_tp="LO010100",
                 ship_fee=0,
                 lines=[
@@ -758,6 +773,8 @@ class ShipDelivery2CTest(unittest.TestCase):
                 sales_dt="2026-08-20",
                 custm_id=CUST,
                 user_id="T",
+                sales_type_cd="SA010100",
+                sales_category_cd="SA020100",
                 dlvry_tp="LO010200",
                 ship_fee=1000,
                 rcv_name="홍길동",

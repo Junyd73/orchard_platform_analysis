@@ -36,6 +36,21 @@ export const MSG_STOCK_MODE_PARTIAL_ALLOC = '선택한 상품 중 배정재고�
 export const MSG_STOCK_MODE_NEED_ORDER = '배정재고 출고는 주문이 필요합니다.'
 export const QTY_EPS = 1e-9
 
+/** S4A 직접판매 분류 */
+export const LABEL_SALES_CLASS = '판매 분류'
+export const LABEL_SALES_TYPE = '판매유형'
+export const LABEL_SALES_CATEGORY = '판매구분'
+export const CODE_PARENT_SALES_TYPE = 'SA01'
+export const CODE_PARENT_SALES_CATEGORY = 'SA02'
+export const DEFAULT_DIRECT_SALES_TYPE_CD = 'SA010100'
+export const DEFAULT_DIRECT_SALES_CATEGORY_CD = 'SA020100'
+/** SA02 경매판매 — 직접판매 Select에서 제외 */
+export const SALES_CATEGORY_AUCTION_CD = 'SA020400'
+export const MSG_DIRECT_SALES_TYPE_REQUIRED = '판매유형을 선택해 주세요.'
+export const MSG_DIRECT_SALES_CATEGORY_REQUIRED = '판매구분을 선택해 주세요.'
+export const MSG_DIRECT_SALES_TYPE_INVALID = '올바른 판매유형이 아닙니다.'
+export const MSG_DIRECT_SALES_CATEGORY_INVALID = '직접판매에서 사용할 수 없는 판매구분입니다.'
+
 export { ORDER_STATUS_PREP, ORDER_STATUS_DELIVERED } from '@/views/orders/ordersConstants'
 
 export type ShipEntrySource = 'PRODUCTION' | 'ORDER' | 'STOCK'
@@ -172,6 +187,8 @@ export function buildShipConfirmRequest(input: {
   sndAddr?: string
   /** true면 각 line에 delivery_allocations 배열 포함 (STOCK 택배 2C) */
   includeDeliveryAllocations?: boolean
+  salesTypeCd?: string | null
+  salesCategoryCd?: string | null
 }): ShipConfirmRequest {
   const includeAlloc = Boolean(input.includeDeliveryAllocations)
   const lines: ShipConfirmLine[] = input.lines.map((ln) => {
@@ -207,6 +224,8 @@ export function buildShipConfirmRequest(input: {
     snd_name: input.sndName || '',
     snd_tel: input.sndTel || '',
     snd_addr: input.sndAddr || '',
+    sales_type_cd: input.salesTypeCd ?? null,
+    sales_category_cd: input.salesCategoryCd ?? null,
     lines,
   }
 }
@@ -240,6 +259,10 @@ export function mapShipApiError(err: unknown): string {
   }
   if (code === 'SHIP_STOCK_REQUIRES_ORDER') return MSG_STOCK_MODE_NEED_ORDER
   if (code === 'DATA_INTEGRITY') return '재고 정보가 맞지 않습니다. 다시 조회해 주세요.'
+  if (code === 'DIRECT_SALES_TYPE_REQUIRED') return MSG_DIRECT_SALES_TYPE_REQUIRED
+  if (code === 'DIRECT_SALES_TYPE_INVALID') return MSG_DIRECT_SALES_TYPE_INVALID
+  if (code === 'DIRECT_SALES_CATEGORY_REQUIRED') return MSG_DIRECT_SALES_CATEGORY_REQUIRED
+  if (code === 'DIRECT_SALES_CATEGORY_INVALID') return MSG_DIRECT_SALES_CATEGORY_INVALID
   return err.message || '판매를 확정하지 못했습니다.'
 }
 

@@ -12,6 +12,7 @@ import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBottomNav from '@/components/ods/OdsBottomNav.vue'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
+import OdsFormField from '@/components/ods/OdsFormField.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
 import {
@@ -30,13 +31,22 @@ import {
   saleUnitLabel,
 } from '@/views/orders/ordersConstants'
 import {
+  CODE_PARENT_SALES_CATEGORY,
+  CODE_PARENT_SALES_TYPE,
+  LABEL_SALES_CATEGORY,
+  LABEL_SALES_CLASS,
+  LABEL_SALES_TYPE,
+  MSG_DIRECT_SALES_CATEGORY_REQUIRED,
+  MSG_DIRECT_SALES_TYPE_REQUIRED,
   MSG_NO_PREFILL,
+  SALES_CATEGORY_AUCTION_CD,
   buildShipConfirmRequest,
   findShipQtyIssue,
   mapShipApiError,
   stockSaleSpecKey,
   type ShipDeliveryDraft,
 } from '@/views/sales/shipConfirmModel'
+import type { CommonCodeItem } from '@/types/commonCode'
 import {
   allocQtySum,
   deliveryStatusText,
@@ -85,8 +95,23 @@ const deliveryOptions = ref<{ value: string; label: string }[]>([
   { value: DELIVERY_TP_PARCEL, label: '택배' },
   { value: DELIVERY_TP_DIRECT, label: '직접배송' },
 ])
+const salesTypes = ref<CommonCodeItem[]>([])
+const salesCategories = ref<CommonCodeItem[]>([])
 
 const destEditIdx = ref<number | null>(null)
+
+const salesTypeCd = computed({
+  get: () => prefill.salesTypeCd || '',
+  set: (v: string) => {
+    prefill.salesTypeCd = v
+  },
+})
+const salesCategoryCd = computed({
+  get: () => prefill.salesCategoryCd || '',
+  set: (v: string) => {
+    prefill.salesCategoryCd = v
+  },
+})
 
 const lines = computed(() => prefill.shipLines)
 const isParcel = computed(() => isParcelDelivery(prefill.dlvryTp))
@@ -149,6 +174,8 @@ const canSubmit = computed(() => {
   if (busy.value || successMsg.value) return false
   if (!lines.value.length) return false
   if (!String(prefill.custmId || '').trim()) return false
+  if (!String(prefill.salesTypeCd || '').trim()) return false
+  if (!String(prefill.salesCategoryCd || '').trim()) return false
   if (qtyIssue.value) return false
   if (lines.value.some((ln) => Number(ln.unit_price) < 0)) return false
   if (isParcel.value) {
@@ -301,6 +328,10 @@ function validateBeforeConfirm(): string {
   if (!lines.value.length) return MSG_NO_PREFILL
   if (qtyIssue.value) return qtyIssue.value
   if (!String(prefill.custmId || '').trim()) return MSG_NEED_CUSTOMER
+  if (!String(prefill.salesTypeCd || '').trim()) return MSG_DIRECT_SALES_TYPE_REQUIRED
+  if (!String(prefill.salesCategoryCd || '').trim()) {
+    return MSG_DIRECT_SALES_CATEGORY_REQUIRED
+  }
   if (isParcel.value) {
     if (senderIssue.value) return senderIssue.value
     if (parcelIssue.value) return parcelIssue.value
@@ -349,6 +380,8 @@ async function onSubmit() {
         sndTel: parcel ? prefill.senderTel : '',
         sndAddr: parcel ? prefill.senderAddr : '',
         includeDeliveryAllocations: parcel,
+        salesTypeCd: prefill.salesTypeCd,
+        salesCategoryCd: prefill.salesCategoryCd,
       }),
     )
     successMsg.value =
@@ -377,14 +410,22 @@ onMounted(async () => {
     customers.value = []
   }
   try {
-    const codes = await fetchCommonCodes(farmCd.value, CODE_PARENT_DELIVERY)
+    const [dlv, salesTypeCodes, salesCategoryCodes] = await Promise.all([
+      fetchCommonCodes(farmCd.value, CODE_PARENT_DELIVERY),
+      fetchCommonCodes(farmCd.value, CODE_PARENT_SALES_TYPE),
+      fetchCommonCodes(farmCd.value, CODE_PARENT_SALES_CATEGORY),
+    ])
     const allowed = new Set([DELIVERY_TP_VISIT, DELIVERY_TP_PARCEL, DELIVERY_TP_DIRECT])
-    const mapped = codes
+    const mapped = dlv
       .filter((c) => allowed.has(c.code_cd))
       .map((c) => ({ value: c.code_cd, label: c.code_nm || c.code_cd }))
     if (mapped.length) deliveryOptions.value = mapped
+    salesTypes.value = salesTypeCodes
+    salesCategories.value = salesCategoryCodes.filter(
+      (c) => c.code_cd !== SALES_CATEGORY_AUCTION_CD,
+    )
   } catch {
-    /* 로컬 기본 유지 */
+    /* S2B OrderNewView와 동일 — 로컬 기본 유지, Core가 최종 검증 */
   }
 })
 </script>
@@ -400,6 +441,39 @@ onMounted(async () => {
       <p v-if="errorMsg" class="err" role="alert">{{ errorMsg }}</p>
 
       <template v-if="!successMsg">
+        <OdsCard
+          class="preview-card preview-card--compact"
+          :title="LABEL_SALES_CLASS"
+          data-testid="sales-preview-sales-class"
+        >
+          <OdsFormField :label="LABEL_SALES_TYPE" required>
+            <OdsSelect
+              v-model="salesTypeCd"
+              variant="form"
+              required
+              data-testid="sales-preview-sales-type"
+            >
+              <option value="">선택</option>
+              <option v-for="c in salesTypes" :key="c.code_cd" :value="c.code_cd">
+                {{ c.code_nm }}
+              </option>
+            </OdsSelect>
+          </OdsFormField>
+          <OdsFormField :label="LABEL_SALES_CATEGORY" required>
+            <OdsSelect
+              v-model="salesCategoryCd"
+              variant="form"
+              required
+              data-testid="sales-preview-sales-category"
+            >
+              <option value="">선택</option>
+              <option v-for="c in salesCategories" :key="c.code_cd" :value="c.code_cd">
+                {{ c.code_nm }}
+              </option>
+            </OdsSelect>
+          </OdsFormField>
+        </OdsCard>
+
         <!-- A. 상단 정보 — 포장/생산 compact card 계열 -->
         <OdsCard
           class="preview-card preview-card--compact"

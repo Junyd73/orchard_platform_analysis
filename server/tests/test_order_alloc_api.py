@@ -74,6 +74,8 @@ class OrderAllocApiTest(unittest.TestCase):
     def _create(self) -> str:
         body = {
             "custm_id": "C001",
+            "sales_type_cd": "SA010100",
+            "season_type_cd": "SS010300",
             "lines": [
                 {
                     "variety_cd": "FR010101",

@@ -331,6 +331,14 @@ def _ship(
     }
     if custm_id:
         kwargs["custm_id"] = custm_id
+    if not order_no:
+        from core.sales_class_constants import (
+            DEFAULT_DIRECT_SALES_CATEGORY_CD,
+            DEFAULT_DIRECT_SALES_TYPE_CD,
+        )
+
+        kwargs.setdefault("sales_type_cd", DEFAULT_DIRECT_SALES_TYPE_CD)
+        kwargs.setdefault("sales_category_cd", DEFAULT_DIRECT_SALES_CATEGORY_CD)
     return OrderShipService(conn).confirm(ShipConfirmIn(**kwargs))
 
 

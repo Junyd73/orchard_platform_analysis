@@ -136,6 +136,8 @@ class OrderShipApiTests(unittest.TestCase):
             {
                 "ship_mode": SHIP_MODE_DIRECT,
                 "sales_dt": "2026-08-19",
+                "sales_type_cd": "SA010100",
+                "sales_category_cd": "SA020100",
                 "lines": [_line(qty=3)],
             }
         )
@@ -176,6 +178,8 @@ class OrderShipApiTests(unittest.TestCase):
         res = self._post(
             {
                 "ship_mode": SHIP_MODE_DIRECT,
+                "sales_type_cd": "SA010100",
+                "sales_category_cd": "SA020100",
                 "lines": [_line(qty=4)],
             }
         )
@@ -237,6 +241,8 @@ class OrderShipApiTests(unittest.TestCase):
         res = self._post(
             {
                 "ship_mode": SHIP_MODE_DIRECT,
+                "sales_type_cd": "SA010100",
+                "sales_category_cd": "SA020100",
                 "lines": [_line(qty=4)],
             }
         )
@@ -256,6 +262,8 @@ class OrderShipApiTests(unittest.TestCase):
         _insert_stock(self.conn, storage_dt="2026-01-01", in_qty=10)
         body = {
             "ship_mode": SHIP_MODE_DIRECT,
+            "sales_type_cd": "SA010100",
+            "sales_category_cd": "SA020100",
             "lines": [{**_line(qty=1), "stock_seq": 99}],
         }
         res = self._post(body)

@@ -29,6 +29,10 @@ from core.order_ship_service import (  # noqa: E402
     ShipConflictError,
     ShipLineIn,
 )
+from core.sales_class_constants import (  # noqa: E402
+    DEFAULT_DIRECT_SALES_CATEGORY_CD,
+    DEFAULT_DIRECT_SALES_TYPE_CD,
+)
 from core.sales_stock_trace_schema import REF_TYPE_SALE  # noqa: E402
 from core.sales_class_schema import ensure_sales_class_schema  # noqa: E402
 from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
@@ -39,29 +43,31 @@ DET_ID = "ORD20260819-E2E-01"
 
 
 def _ship(conn: sqlite3.Connection, *, qty: float, order_no: str | None = None, det: str | None = None):
-    return OrderShipService(conn).confirm(
-        ShipConfirmIn(
-            farm_cd=FARM,
-            ship_mode=SHIP_MODE_DIRECT,
-            order_no=order_no,
-            sales_dt="2026-08-19",
-            user_id="T",
-            lines=[
-                ShipLineIn(
-                    qty=qty,
-                    order_detail_id=det,
-                    item_cd=ITEM,
-                    variety_cd=VARIETY,
-                    grade_cd=GRADE,
-                    size_cd=SIZE,
-                    weight=WEIGHT,
-                    harvest_year=YEAR,
-                    wh_cd=WH,
-                    unit_price=1000,
-                )
-            ],
-        )
-    )
+    kwargs: dict = {
+        "farm_cd": FARM,
+        "ship_mode": SHIP_MODE_DIRECT,
+        "order_no": order_no,
+        "sales_dt": "2026-08-19",
+        "user_id": "T",
+        "lines": [
+            ShipLineIn(
+                qty=qty,
+                order_detail_id=det,
+                item_cd=ITEM,
+                variety_cd=VARIETY,
+                grade_cd=GRADE,
+                size_cd=SIZE,
+                weight=WEIGHT,
+                harvest_year=YEAR,
+                wh_cd=WH,
+                unit_price=1000,
+            )
+        ],
+    }
+    if not order_no:
+        kwargs["sales_type_cd"] = DEFAULT_DIRECT_SALES_TYPE_CD
+        kwargs["sales_category_cd"] = DEFAULT_DIRECT_SALES_CATEGORY_CD
+    return OrderShipService(conn).confirm(ShipConfirmIn(**kwargs))
 
 
 class DirectE2EFileDbTest(unittest.TestCase):
@@ -99,6 +105,15 @@ class DirectE2EFileDbTest(unittest.TestCase):
             """
         )
         ensure_sales_stock_trace_schema(self.conn)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS m_common_code (
+                farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT,
+                use_yn TEXT DEFAULT 'Y',
+                reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT
+            )
+            """
+        )
         for col in ("reg_id", "reg_dt", "mod_id", "mod_dt"):
             try:
                 self.conn.execute(f"ALTER TABLE m_common_code ADD COLUMN {col} TEXT")
@@ -106,12 +121,7 @@ class DirectE2EFileDbTest(unittest.TestCase):
                 pass
         stats = ensure_sales_class_schema(self.conn)
         if not stats.get("ok"):
-            # DIRECT_ONLY 스키마에 m_common_code가 없으면 컬럼만 직접 추가
-            for col in ("sales_type_cd", "sales_category_cd", "sales_route_cd"):
-                try:
-                    self.conn.execute(f"ALTER TABLE t_sales_master ADD COLUMN {col} TEXT")
-                except sqlite3.OperationalError:
-                    pass
+            raise RuntimeError(f"ensure_sales_class_schema failed: {stats.get('reason')}")
         self.conn.commit()
 
     def _insert_stock(self, *, in_qty: float, reserved: float = 0, storage_dt: str = "2026-08-01") -> int:

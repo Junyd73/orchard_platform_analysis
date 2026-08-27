@@ -25,6 +25,11 @@ from core.order_ship_service import (  # noqa: E402
     ShipError,
     ShipLineIn,
 )
+from core.sales_class_constants import (  # noqa: E402
+    DEFAULT_DIRECT_SALES_CATEGORY_CD,
+    DEFAULT_DIRECT_SALES_TYPE_CD,
+)
+from core.sales_class_schema import ensure_sales_class_schema  # noqa: E402
 from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
 
 FARM = "OR001"
@@ -175,6 +180,17 @@ class LocalMigShipSchemaTest(unittest.TestCase):
         )
         self.assertNotIn("allocated_qty", _cols(self.conn, "t_order_detail"))
         ensure_sales_stock_trace_schema(self.conn)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS m_common_code (
+                farm_cd TEXT, code_cd TEXT, code_nm TEXT, parent_cd TEXT,
+                use_yn TEXT DEFAULT 'Y',
+                reg_id TEXT, reg_dt TEXT, mod_id TEXT, mod_dt TEXT
+            )
+            """
+        )
+        stats = ensure_sales_class_schema(self.conn)
+        self.assertTrue(stats.get("ok"), stats.get("reason"))
         out = OrderShipService(self.conn).confirm(
             ShipConfirmIn(
                 farm_cd=FARM,
@@ -182,6 +198,8 @@ class LocalMigShipSchemaTest(unittest.TestCase):
                 order_no=None,
                 sales_dt="2026-08-19",
                 user_id="T",
+                sales_type_cd=DEFAULT_DIRECT_SALES_TYPE_CD,
+                sales_category_cd=DEFAULT_DIRECT_SALES_CATEGORY_CD,
                 lines=[
                     ShipLineIn(
                         qty=2,

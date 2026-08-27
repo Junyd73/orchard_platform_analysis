@@ -19,6 +19,10 @@ from core.order_constants import (
 )
 from core.order_service import OrderNotFoundError, OrderSaveError
 from core.order_ship_constants import (
+    CODE_DIRECT_SALES_CATEGORY_INVALID,
+    CODE_DIRECT_SALES_CATEGORY_REQUIRED,
+    CODE_DIRECT_SALES_TYPE_INVALID,
+    CODE_DIRECT_SALES_TYPE_REQUIRED,
     CODE_ORDER_DELIVERY_LINK_INVALID,
     CODE_ORDER_DELIVERY_OVER_SHIP,
     CODE_SHIP_ORDER_NOT_CONFIRMED,
@@ -27,6 +31,10 @@ from core.order_ship_constants import (
     MSG_DATA_INTEGRITY,
     MSG_DELIVERY_SCHEMA,
     MSG_DETAIL_REQUIRED,
+    MSG_DIRECT_SALES_CATEGORY_INVALID,
+    MSG_DIRECT_SALES_CATEGORY_REQUIRED,
+    MSG_DIRECT_SALES_TYPE_INVALID,
+    MSG_DIRECT_SALES_TYPE_REQUIRED,
     MSG_ORDER_DELIVERY_LINK_INVALID,
     MSG_ORDER_DELIVERY_OVER_SHIP,
     MSG_ORDER_LOCKED,
@@ -67,8 +75,12 @@ from core.order_ship_qty import (
     order_line_ship_remainder,
 )
 from core.sales_class_constants import (
+    DIRECT_SALES_CATEGORY_CODE_SET,
+    SALES_CATEGORY_PARENT_CD,
+    SALES_ROUTE_DIRECT,
     SALES_ROUTE_ORDER_SHIP,
     SALES_TYPE_CODE_SET,
+    SALES_TYPE_PARENT_CD,
     map_season_type_to_sales_category,
 )
 from core.sales_stock_trace_schema import REF_TYPE_SALE
@@ -127,6 +139,9 @@ class ShipConfirmIn:
     snd_name: str = ""
     snd_tel: str = ""
     snd_addr: str = ""
+    # S4A: 무주문 직접판매만 사용. 주문 판매는 S2C SSOT(무시).
+    sales_type_cd: str | None = None
+    sales_category_cd: str | None = None
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -258,6 +273,9 @@ class OrderShipService:
             master = self._load_order_master(cur, farm, order_no)
             if not custm_id:
                 custm_id = str(master.get("custm_id") or "").strip() or None
+        else:
+            # 무주문 직접판매 — 재고 OUT 전에 분류 검증 (S4A).
+            self._validate_direct_sales_class(cur, farm, payload)
 
         # 재고 차감 전 배송배분 검증 (실패 시 OUT/sales 0건)
         multi_delivery = self._validate_and_normalize_delivery(payload)
@@ -282,7 +300,7 @@ class OrderShipService:
         tot_sales = tot_item + ship_fee
         dlvry_tp = str(getattr(payload, "dlvry_tp", "") or "").strip()
         sales_type_cd, sales_category_cd, sales_route_cd = self._resolve_sales_class(
-            order_no=order_no, master=master
+            order_no=order_no, master=master, payload=payload
         )
         self._insert_sales_master(
             cur,
@@ -685,22 +703,83 @@ class OrderShipService:
             if not _column_exists(cur, "t_sales_master", col):
                 raise ShipError(MSG_SCHEMA_PRECONDITION, code="SCHEMA_PRECONDITION")
 
+    def _validate_direct_sales_class(
+        self, cur: sqlite3.Cursor, farm: str, payload: ShipConfirmIn
+    ) -> None:
+        """무주문 직접판매: SA01/SA02(경매 제외) 활성 코드 필수. OUT 전 차단."""
+        if not _table_exists(cur, "m_common_code"):
+            raise ShipError(MSG_SCHEMA_PRECONDITION, code="SCHEMA_PRECONDITION")
+        sales_type = str(payload.sales_type_cd or "").strip()
+        sales_category = str(payload.sales_category_cd or "").strip()
+        payload.sales_type_cd = sales_type or None
+        payload.sales_category_cd = sales_category or None
+        if not sales_type:
+            raise ShipValidationError(
+                MSG_DIRECT_SALES_TYPE_REQUIRED, code=CODE_DIRECT_SALES_TYPE_REQUIRED
+            )
+        if sales_type not in SALES_TYPE_CODE_SET or not self._is_active_common_child(
+            cur, farm, parent_cd=SALES_TYPE_PARENT_CD, code_cd=sales_type
+        ):
+            raise ShipValidationError(
+                MSG_DIRECT_SALES_TYPE_INVALID, code=CODE_DIRECT_SALES_TYPE_INVALID
+            )
+        if not sales_category:
+            raise ShipValidationError(
+                MSG_DIRECT_SALES_CATEGORY_REQUIRED,
+                code=CODE_DIRECT_SALES_CATEGORY_REQUIRED,
+            )
+        if (
+            sales_category not in DIRECT_SALES_CATEGORY_CODE_SET
+            or not self._is_active_common_child(
+                cur, farm, parent_cd=SALES_CATEGORY_PARENT_CD, code_cd=sales_category
+            )
+        ):
+            raise ShipValidationError(
+                MSG_DIRECT_SALES_CATEGORY_INVALID,
+                code=CODE_DIRECT_SALES_CATEGORY_INVALID,
+            )
+
+    @staticmethod
+    def _is_active_common_child(
+        cur: sqlite3.Cursor,
+        farm_cd: str,
+        *,
+        parent_cd: str,
+        code_cd: str,
+    ) -> bool:
+        cur.execute(
+            """
+            SELECT 1
+              FROM m_common_code
+             WHERE farm_cd = ?
+               AND code_cd = ?
+               AND parent_cd = ?
+               AND COALESCE(use_yn, 'N') = 'Y'
+             LIMIT 1
+            """,
+            (farm_cd, code_cd, parent_cd),
+        )
+        return cur.fetchone() is not None
+
     @staticmethod
     def _resolve_sales_class(
         *,
         order_no: str | None,
         master: dict[str, Any] | None,
+        payload: ShipConfirmIn | None = None,
     ) -> tuple[str | None, str | None, str | None]:
-        """주문 연결이면 route=주문출고. 유형/구분은 blank·미지 추정 없이 승계."""
-        if not order_no:
-            return None, None, None
-        raw_type = str((master or {}).get("sales_type_cd") or "").strip()
-        # SA01 canonical만 승계. unknown nonblank → NULL (소매 추정 금지).
-        sales_type = raw_type if raw_type in SALES_TYPE_CODE_SET else None
-        sales_category = map_season_type_to_sales_category(
-            (master or {}).get("season_type_cd")
-        )
-        return sales_type, sales_category, SALES_ROUTE_ORDER_SHIP
+        """order_no 있음=S2C 주문승계. 없음=검증된 직접판매 분류 + SA030100."""
+        if order_no:
+            raw_type = str((master or {}).get("sales_type_cd") or "").strip()
+            sales_type = raw_type if raw_type in SALES_TYPE_CODE_SET else None
+            sales_category = map_season_type_to_sales_category(
+                (master or {}).get("season_type_cd")
+            )
+            return sales_type, sales_category, SALES_ROUTE_ORDER_SHIP
+        pl = payload
+        sales_type = str((pl.sales_type_cd if pl else None) or "").strip() or None
+        sales_category = str((pl.sales_category_cd if pl else None) or "").strip() or None
+        return sales_type, sales_category, SALES_ROUTE_DIRECT
 
     def _load_order_master(
         self, cur: sqlite3.Cursor, farm: str, order_no: str

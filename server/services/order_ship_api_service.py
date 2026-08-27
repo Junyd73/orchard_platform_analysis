@@ -79,6 +79,8 @@ def _to_core(farm_cd: str, body: ShipConfirmRequest, user_id: str) -> ShipConfir
         snd_name=getattr(body, "snd_name", "") or "",
         snd_tel=getattr(body, "snd_tel", "") or "",
         snd_addr=getattr(body, "snd_addr", "") or "",
+        sales_type_cd=body.sales_type_cd,
+        sales_category_cd=body.sales_category_cd,
         lines=lines,
     )
 

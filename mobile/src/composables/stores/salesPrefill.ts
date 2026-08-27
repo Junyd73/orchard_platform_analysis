@@ -9,6 +9,8 @@ import {
   defaultShipMode,
   stockDraftKey,
   stockSaleSpecKey,
+  DEFAULT_DIRECT_SALES_TYPE_CD,
+  DEFAULT_DIRECT_SALES_CATEGORY_CD,
   type ShipDeliveryDraft,
   type ShipDraftLine,
   type ShipEntrySource,
@@ -155,6 +157,20 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
   const senderTel = ref('')
   const senderAddr = ref('')
 
+  /** S4A 직접판매 분류 (무주문만). 주문 출고는 사용하지 않음. */
+  const salesTypeCd = ref(DEFAULT_DIRECT_SALES_TYPE_CD)
+  const salesCategoryCd = ref(DEFAULT_DIRECT_SALES_CATEGORY_CD)
+
+  function resetDirectSalesClassDefaults() {
+    salesTypeCd.value = DEFAULT_DIRECT_SALES_TYPE_CD
+    salesCategoryCd.value = DEFAULT_DIRECT_SALES_CATEGORY_CD
+  }
+
+  function clearDirectSalesClass() {
+    salesTypeCd.value = ''
+    salesCategoryCd.value = ''
+  }
+
   const draftCount = computed(() => shipLines.value.length)
   /** STOCK 판매는 규격키, 그 외는 기존 draft key */
   const draftKeys = computed(
@@ -178,6 +194,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange.value = true
     lastResult.value = null
     resetDelivery()
+    resetDirectSalesClassDefaults()
   }
 
   function setFromOrder(detail: OrderDetail, line: OrderLine) {
@@ -198,6 +215,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange.value = true
     lastResult.value = null
     resetDelivery()
+    clearDirectSalesClass()
     // 주문 line의 배송방식을 그대로 이어받는다(혼합 배송방식은 호출측에서 차단).
     const lineDlvryTp = String(orderLines[0]?.dlvry_tp || '').trim()
     if (lineDlvryTp) dlvryTp.value = lineDlvryTp
@@ -233,11 +251,12 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange.value = false
     lastResult.value = null
     resetStockSaleHeader()
+    resetDirectSalesClassDefaults()
   }
 
   /**
    * 재고 판매 세션 보장.
-   * 이미 STOCK이면 헤더/라인 유지. 다른 source에서 전환 시에만 초기화.
+   * 이미 STOCK이면 헤더/라인/분류 유지. 다른 source에서 전환 시에만 초기화.
    */
   function ensureStockSaleSession() {
     if (isStockSaleSession()) {
@@ -257,6 +276,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     allowModeChange.value = false
     lastResult.value = null
     resetStockSaleHeader()
+    resetDirectSalesClassDefaults()
   }
 
   function getStockLine(key: string): ShipDraftLine | undefined {
@@ -418,6 +438,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     lastResult.value = null
     lastRemaining.value = []
     resetDelivery()
+    clearDirectSalesClass()
   }
 
   function hasDraftKey(key: string): boolean {
@@ -445,6 +466,8 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     senderName,
     senderTel,
     senderAddr,
+    salesTypeCd,
+    salesCategoryCd,
     draftCount,
     draftKeys,
     stockDraftTotalQty,

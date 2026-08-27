@@ -55,6 +55,9 @@ class ShipConfirmRequest(BaseModel):
     snd_name: str = ""
     snd_tel: str = ""
     snd_addr: str = ""
+    # S4A: 무주문 직접판매만. 주문 판매는 Core가 무시(S2C).
+    sales_type_cd: str | None = None
+    sales_category_cd: str | None = None
 
 
 class ShipDetailOut(BaseModel):

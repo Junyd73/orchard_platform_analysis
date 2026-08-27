@@ -316,6 +316,11 @@ def _ship(
     item_cd: str = ITEM,
     **extra: object,
 ) -> dict:
+    from core.sales_class_constants import (
+        DEFAULT_DIRECT_SALES_CATEGORY_CD,
+        DEFAULT_DIRECT_SALES_TYPE_CD,
+    )
+
     line = ShipLineIn(
         qty=qty,
         order_detail_id=det,
@@ -328,6 +333,9 @@ def _ship(
         wh_cd=WH,
         unit_price=1000,
     )
+    if not order_no:
+        extra.setdefault("sales_type_cd", DEFAULT_DIRECT_SALES_TYPE_CD)
+        extra.setdefault("sales_category_cd", DEFAULT_DIRECT_SALES_CATEGORY_CD)
     return OrderShipService(conn).confirm(
         ShipConfirmIn(
             farm_cd=FARM,
@@ -663,6 +671,8 @@ class OrderShipServiceTests(unittest.TestCase):
                         ship_mode=SHIP_MODE_DIRECT,
                         sales_dt="2026-08-19",
                         user_id="T",
+                        sales_type_cd="SA010100",
+                        sales_category_cd="SA020100",
                         lines=[
                             ShipLineIn(
                                 qty=2, item_cd=ITEM, variety_cd=VARIETY, grade_cd=GRADE,
@@ -685,6 +695,8 @@ class OrderShipServiceTests(unittest.TestCase):
                         ship_mode=SHIP_MODE_DIRECT,
                         sales_dt="2026-08-19",
                         user_id="T",
+                        sales_type_cd="SA010100",
+                        sales_category_cd="SA020100",
                         lines=[
                             ShipLineIn(
                                 qty=2, item_cd=ITEM, variety_cd=VARIETY, grade_cd=GRADE,
@@ -712,6 +724,8 @@ class OrderShipServiceTests(unittest.TestCase):
                         ship_mode=SHIP_MODE_DIRECT,
                         sales_dt="2026-08-19",
                         user_id="T",
+                        sales_type_cd="SA010100",
+                        sales_category_cd="SA020100",
                         lines=[
                             ShipLineIn(
                                 qty=qty, item_cd=ITEM, variety_cd=VARIETY, grade_cd=GRADE,
@@ -820,6 +834,8 @@ class OrderShipServiceTests(unittest.TestCase):
                 rcv_tel="010-1111-2222",
                 rcv_addr="서울시 테스트구 1",
                 dlvry_msg="문 앞",
+                sales_type_cd="SA010100",
+                sales_category_cd="SA020100",
                 lines=[
                     ShipLineIn(
                         qty=2,
