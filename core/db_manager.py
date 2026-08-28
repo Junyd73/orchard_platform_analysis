@@ -2649,25 +2649,55 @@ class DBManager:
 
     def save_work_details(self, work_dt, farm_cd, work_data_list, user_id):
         try:
-            for i, row in enumerate(work_data_list):
-                work_id = f"{work_dt.replace('-', '')}-{i+1:02d}"
-                sql = """
-                    REPLACE INTO t_work_detail (
-                        work_id, work_dt, farm_cd, work_main_cd, work_mid_cd,
-                        work_loc_id, start_tm, end_tm, status_cd, rmk,
-                        variety_cd, harvest_container_qty,
-                        reg_id, reg_dt, mod_id, mod_dt
-                    ) VALUES (?, ?, ?, 'WK01', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?, datetime('now','localtime'))
-                """
-                params = (
-                    work_id, work_dt, farm_cd, row['mid_cd'], row['loc_id'],
-                    row['start_tm'], row['end_tm'], row['status'],
-                    row.get('rmk') or "",
-                    row.get('variety_cd'),
-                    row.get('harvest_container_qty'),
-                    user_id, user_id,
-                )
-                self.execute_query(sql, params)
+            from core.harvest_consumption_guard import validate_harvest_work_update
+
+            self.conn.isolation_level = None
+            cur = self.conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            try:
+                for i, row in enumerate(work_data_list):
+                    work_id = f"{work_dt.replace('-', '')}-{i+1:02d}"
+                    existing = cur.execute(
+                        """
+                        SELECT work_id FROM t_work_detail
+                        WHERE farm_cd = ? AND work_id = ?
+                        LIMIT 1
+                        """,
+                        (farm_cd, work_id),
+                    ).fetchone()
+                    if existing:
+                        validate_harvest_work_update(
+                            cur,
+                            farm_cd,
+                            work_id,
+                            new_work_dt=work_dt,
+                            new_variety_cd=row.get("variety_cd"),
+                            new_harvest_container_qty=row.get("harvest_container_qty"),
+                            new_work_mid_cd=str(row.get("mid_cd") or ""),
+                        )
+                    sql = """
+                        REPLACE INTO t_work_detail (
+                            work_id, work_dt, farm_cd, work_main_cd, work_mid_cd,
+                            work_loc_id, start_tm, end_tm, status_cd, rmk,
+                            variety_cd, harvest_container_qty,
+                            reg_id, reg_dt, mod_id, mod_dt
+                        ) VALUES (?, ?, ?, 'WK01', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?, datetime('now','localtime'))
+                    """
+                    params = (
+                        work_id, work_dt, farm_cd, row['mid_cd'], row['loc_id'],
+                        row['start_tm'], row['end_tm'], row['status'],
+                        row.get('rmk') or "",
+                        row.get('variety_cd'),
+                        row.get('harvest_container_qty'),
+                        user_id, user_id,
+                    )
+                    cur.execute(sql, params)
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+            finally:
+                self.conn.isolation_level = ""
             return True
         except Exception as e:
             print(f"[DB] Work detail save error: {e}")

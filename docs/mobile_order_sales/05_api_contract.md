@@ -2,7 +2,7 @@
 
 > **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).
 > Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.
-> 수확 N:M · 경매 출하 · 청과 확인 · 경매 판매확정: [DEC-035/036/037](./07_decisions.md) · [02](./02_domain_flow.md) · [03](./03_data_contract.md) · [04](./04_mobile_screen.md) · [09](./09_production_inventory_flow.md) — **APPROVED LOGICAL (설계). 구현·DDL 아님.**
+> 수확 N:M (DEC-035): **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING**. 경매 출하·청과·판매확정: [DEC-036/037](./07_decisions.md) — **APPROVED LOGICAL (설계. 미구현).**
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.
 > PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
@@ -11,10 +11,11 @@
 | 층 | 의미 |
 |----|------|
 | **CURRENT API** | 현재 FastAPI/Core에 실제 구현된 endpoint · request/response · TX |
-| **APPROVED LOGICAL API** | DEC-035/036/037과 02~04가 요구하는 논리 API 책임 (**미구현일 수 있음**) |
-| **OPEN API** | endpoint path · payload 필드명 · DDL · 상태코드 · cardinality · 정책 미확정 |
+| **IMPLEMENTED API** | git `main` DEC-035 HARVEST N:M 계약 (**ops 배포 전**) |
+| **APPROVED LOGICAL API** | DEC-036/037 등 논리 API 책임 (**미구현**) |
+| **OPEN API** | endpoint path · payload · DDL · 상태코드 · cardinality · 정책 미확정 |
 
-APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다.
+APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다. DEC-035 HARVEST는 **IMPLEMENTED API** (운영 activation = **OPS PENDING**).
 
 기존 패턴: `/api/v1/farms/{farm_cd}/…`, Header `X-User-Id`.
 날짜 요청/응답: **`YYYY-MM-DD`**. 내부 저장 신규도 ISO (DEC-012). 읽기는 YYYYMMDD 호환.
@@ -36,7 +37,7 @@ APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다.
 | 소매 출고확정 | 주문/DIRECT 판매+OUT **단일 TX** | `POST …/shipments/confirm` (`OrderShipService`) |
 | 재고 조회 | fruit-stock read | `GET …/fruit-stock` |
 | 생산확정 | PACK/PROCESS · RAW/HARVEST | `POST …/production/confirm` (`ProductionService`) |
-| **수확 소진** | N:M 소진이력 · 잔량 SSOT | harvest-records 확장 · confirm N:M (**LOGICAL**) |
+| **수확 소진** | N:M · 잔량 SSOT · `harvest_consumptions[]` | harvest-records · confirm (**IMPLEMENTED**) |
 | **경매 출하** | 출하중 SSOT · 가용 제외 | **LOGICAL · REST 없음** |
 | **청과 확인/매칭** | 확인수량 별도 · 출하수량 불변 | **LOGICAL · REST 없음** |
 | **경매 판매확정** | CONFIRMED+OUT+SA 자동 · 원자 TX | **LOGICAL · REST 없음** |
@@ -74,9 +75,9 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 |--------|------|---------|------------------|
 | GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B · `available=real−reserved` | `available ≈ real − order_reserved − active_auction_transit` |
 | GET | `/farms/{farm_cd}/fruit-stock/logs` | Stage 5B read-only | 유지 |
-| GET | `/farms/{farm_cd}/production/harvest-records` | 원수확 필드만 | + 유효누적사용 · 잔량 **개념** |
+| GET | `/farms/{farm_cd}/production/harvest-records` | + `harvest_year` · `consumed_container_qty` · `remaining_container_qty` | 유지 |
 | GET | `/farms/{farm_cd}/production/raw-stock` | 원물 가용 | 유지 |
-| POST | `/farms/{farm_cd}/production/confirm` | HARVEST 단일 `harvest_work_id` | HARVEST N:M consumption |
+| POST | `/farms/{farm_cd}/production/confirm` | HARVEST `harvest_consumptions[]` N:M | 유지 |
 
 쓰기(임의 입고/출고) 5B 비범위. 재고 조정: `POST …/fruit-stock/adjust` (§11).
 
@@ -84,53 +85,57 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 ### 2.1 `GET …/production/harvest-records` (DEC-035)
 
-**CURRENT API**
+**IMPLEMENTED API** (git `main` · ops activation **OPS PENDING**)
 
+- Path: `GET /api/v1/farms/{farm_cd}/production/harvest-records`
 - Core: `ProductionService.list_harvest_records` (`core/production_service.py`).
-- 응답(행당): `work_id`, `work_dt`, `variety_cd`, `variety_nm`, `harvest_container_qty`.
-- **유효 누적 사용량 · 잔량 없음.** 소진 영속 이력 없음 ([03 §8A](./03_data_contract.md)).
+- Query: `variety_cd`, `limit` (기존과 동일).
+- 응답 행 (`HarvestRecordOut`):
+  - `work_id`, `work_dt`, `variety_cd`, `variety_nm`, `harvest_container_qty`
+  - `harvest_year` — `work_dt` 연도
+  - `consumed_container_qty` — `t_harvest_consumption` 유효 누적 (`is_valid=1`)
+  - `remaining_container_qty` — `harvest_container_qty − consumed_container_qty`
+- `t_harvest_consumption` 없으면 consumed=0 · remaining=원수확 (schema preflight 전 호환).
 
-**APPROVED LOGICAL API**
-
-- **기존 harvest-records 확장 우선** (별도 balance endpoint = OPEN 후보).
-- 화면(04 §5A)에 필요한 **개념** (필드명 미확정):
-  - 원수확 상자수 (= `harvest_container_qty`)
-  - 유효 누적 사용량
-  - 남은 상자수
-- 잔량 SSOT: `원수확 − SUM(유효 소진 상자수)`.
-- 수확 저장 ≠ `t_stock_master` 자동 IN (DEC-022).
-
-**OPEN API**
-
-- 응답 필드명 · 소진이력 DDL · 집계 SQL · 별도 balance endpoint 여부.
+**OPEN API:** 별도 balance endpoint · OPEN-DONE.
 
 ---
 
 ### 2.2 `POST …/production/confirm` — HARVEST N:M (DEC-035)
 
-**CURRENT API**
+**IMPLEMENTED API** (git `main` · ops activation **OPS PENDING**)
 
+- Path: `POST /api/v1/farms/{farm_cd}/production/confirm`
 - Core: `ProductionService.confirm` · FastAPI `ProductionApiService`.
-- HARVEST: **`harvest_work_id` 1건** (또는 `work_ids`) · `raw_consumptions`는 **RAW_STOCK 전용**.
-- HARVEST 경로: 소진/잔량 검증 없음 · 상품 전량 IN + `_mark_work_done`.
-- RAW_STOCK: `raw_consumptions[]` N건 · 사용량>잔여 거부 · 혼합 품종/연도 거부 (재사용 패턴).
+- Header: `X-User-Id` (기존).
 
-**APPROVED LOGICAL API**
+**HARVEST request (`ProductionConfirmRequest`):**
 
-- HARVEST도 **복수 consumption**: N건 × (수확기록 식별 + 이번 사용 상자수).
-- 서버 책임:
-  - TX 내 최신 잔량 재검증 · 사용량>잔량 **거부**
-  - 동일 품종 · 동일 `harvest_year` (DEC-026)
-  - **생산확정 1회 내부식별** 생성·관리 (사용자 입력 금지)
-  - N건 소진이력 + 상품 **전량 IN** (DEC-023)
-- **TX (원자):** 잔량 재검증 → N건 소진이력 → 상품재고 전량 IN → 생산결과 → 실패 시 **전체 rollback**.
+- `prod_type`: `PACK` | `PROCESS` (HARVEST는 `PACK`만)
+- `input_source`: `HARVEST`
+- `variety_cd`, `wh_cd`, `pack_weight`, `lines[]` — 기존 PACK 계약
+- **`harvest_consumptions[]`** (필수, 1건 이상):
+  - `work_id` — `t_work_detail.work_id`
+  - `qty` — 사용 상자수 (≥1)
+- **legacy reject:** `harvest_work_id` only · `work_ids` only · 빈 `harvest_consumptions` → `HARVEST_CONSUMPTIONS`
+- RAW_STOCK 전용: `raw_consumptions[]` (HARVEST와 혼합 금지)
 
-**OPEN API**
+**서버 책임 (동일 TX · `BEGIN IMMEDIATE`):**
 
-- payload 필드명 (`harvest_consumptions[]` vs 확장 등) · 생산확정 event 영속키 · 응답에 내부 ID 노출 여부.
-- **OPEN-DONE:** HARVEST `DONE` 최종 의미 — 잔량 SSOT와 분리 ([07 DEC-035](./07_decisions.md)).
+- schema preflight: `t_harvest_consumption` + production trace (`ref_type`/`ref_id`/`stock_seq`)
+- TX 내 최신 `remaining_container_qty` 재검증 · overconsume **reject**
+- 동일 `variety_cd` · 동일 `harvest_year` (DEC-026)
+- `prod_confirm_id` 채번 (`PRD`+`YYYYMMDD`+`-`+SEQ) · N건 `t_harvest_consumption` INSERT
+- 상품 **전량 IN** + `t_stock_log` `ref_type='PRODUCTION'` · `ref_id=prod_confirm_id`
+- 실패 시 **전체 rollback**
 
-**금지:** 사용자에게 production event id · 내부 `work_id` 입력 요구.
+**Response:** `{ ok, prefill_lines[] }` — 기존과 동일.
+
+**RAW_STOCK:** `raw_consumptions[]` N건 · 사용량>잔여 거부 · 혼합 품종/연도 거부 — **변경 없음**.
+
+**OPEN API:** **OPEN-DONE** — HARVEST `DONE` 최종 의미 ([07 DEC-035](./07_decisions.md)).
+
+**금지:** 사용자에게 `prod_confirm_id` · 내부 `work_id` 입력 요구 · legacy `harvest_work_id` fallback.
 
 ---
 

@@ -18,11 +18,14 @@ for p in (_REPO, _REPO / "server"):
 
 from core.order_allocation_service import OrderAllocationService  # noqa: E402
 from core.production_service import (  # noqa: E402
+    HarvestConsumptionIn,
     ProductionConfirmIn,
     ProductionLineIn,
     ProductionService,
     RawStockConsumptionIn,
 )
+from core.harvest_consumption_schema import ensure_harvest_consumption_schema  # noqa: E402
+from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
 from core.stock_constants import (  # noqa: E402
     INPUT_SOURCE_HARVEST,
     INPUT_SOURCE_RAW_STOCK,
@@ -91,6 +94,9 @@ def _build_db() -> tuple[sqlite3.Connection, Path]:
             remark TEXT, reg_id TEXT, reg_dt TEXT
         );
     """)
+    ensure_harvest_consumption_schema(conn)
+    ensure_sales_stock_trace_schema(conn)
+    conn.commit()
     return conn, Path(path_s)
 
 
@@ -154,7 +160,8 @@ class TestStockMob(unittest.TestCase):
             farm_cd=FARM, prod_type=PROD_TYPE_PACK,
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY, wh_cd=WH, pack_weight=0,
-            harvest_work_id=WORK_HARVEST, lines=lines, raw_consumptions=[],
+            harvest_consumptions=[HarvestConsumptionIn(work_id=WORK_HARVEST, qty=12)],
+            lines=lines, raw_consumptions=[],
         )
         self.svc.confirm("U1", payload)
         rows = self.alloc.get_available_stock(FARM, item_cd=ITEM_PRODUCT)

@@ -60,6 +60,16 @@ import {
   PROD_TYPE_PROCESS,
 } from '@/views/production/productionConstants'
 import { attachPrefillDisplayNames } from '@/views/production/prefillDisplay'
+import {
+  buildHarvestConsumptions,
+  canSelectHarvestRow,
+  formatHarvestRowLabel,
+  harvestAnchor,
+  harvestSelectionSummary,
+  isHarvestSelectable,
+  mapProductionHarvestError,
+  validateHarvestSelections,
+} from '@/views/production/harvestSelection'
 import { todayIso } from '@/views/work-log/workLogConstants'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
@@ -98,7 +108,7 @@ const varietyCd   = ref('')
 
 // 원료 rows
 const harvestRows      = ref<HarvestRecord[]>([])
-const selectedHarvestId = ref('')
+const harvestUseQtyMap = ref<Record<string, string>>({})
 const rawRows           = ref<RawStockItem[]>([])
 const selectedRawKey    = ref('')
 // 원물 key → 사용수량 (각 행 독립 관리)
@@ -160,6 +170,21 @@ const totalPositiveLines = computed(() =>
   weightCards.value.reduce((sum, card) =>
     sum + card.sizes.reduce((s2, tab) =>
       s2 + Object.values(tab.gradeQty).filter(v => Number(v) > 0).length, 0), 0),
+)
+
+const harvestSelections = computed(() => {
+  const out: Record<string, number> = {}
+  for (const [wid, raw] of Object.entries(harvestUseQtyMap.value)) {
+    const qty = Number(raw)
+    if (Number.isInteger(qty) && qty >= 1) out[wid] = qty
+  }
+  return out
+})
+const harvestAnchorRow = computed(() =>
+  harvestAnchor(harvestRows.value, harvestSelections.value),
+)
+const harvestSummaryText = computed(() =>
+  harvestSelectionSummary(harvestSelections.value),
 )
 
 // ── 유틸 ─────────────────────────────────────────────────────────────
@@ -240,10 +265,36 @@ async function loadSources() {
 }
 
 // ── 원료 선택 ────────────────────────────────────────────────────────
-function onSelectHarvest(id: string) {
-  selectedHarvestId.value = id
-  const row = harvestRows.value.find(r => r.work_id === id)
-  if (row?.variety_cd) varietyCd.value = row.variety_cd
+function isHarvestSelected(workId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(harvestUseQtyMap.value, workId)
+}
+
+function harvestUseQtyOf(row: HarvestRecord): number {
+  const n = Number(harvestUseQtyMap.value[row.work_id] ?? '')
+  return Number.isInteger(n) ? n : 0
+}
+
+function onToggleHarvest(row: HarvestRecord) {
+  if (!isHarvestSelectable(row)) return
+  const check = canSelectHarvestRow(row, harvestAnchorRow.value)
+  if (!check.ok) {
+    if (check.message) errorMsg.value = check.message
+    return
+  }
+  errorMsg.value = ''
+  if (isHarvestSelected(row.work_id)) {
+    const next = { ...harvestUseQtyMap.value }
+    delete next[row.work_id]
+    harvestUseQtyMap.value = next
+    if (!Object.keys(next).length) varietyCd.value = ''
+    return
+  }
+  harvestUseQtyMap.value = { ...harvestUseQtyMap.value, [row.work_id]: '1' }
+  if (row.variety_cd) varietyCd.value = row.variety_cd
+}
+
+function setHarvestUseQty(workId: string, value: string) {
+  harvestUseQtyMap.value = { ...harvestUseQtyMap.value, [workId]: value }
 }
 
 function onSelectRaw(key: string) {
@@ -339,14 +390,17 @@ function resetPostConfirm() {
   juiceQty.value        = ''
   juiceItemCd.value     = ITEM_JUICE_PLAIN
   rawUseQtyMap.value    = {}
-  selectedHarvestId.value = ''
+  harvestUseQtyMap.value = {}
   selectedRawKey.value  = ''
   errorMsg.value        = ''
 }
 
 // ── validation ────────────────────────────────────────────────────────
 function validate(): string {
-  if (isHarvest.value && !selectedHarvestId.value) return MSG_SELECT_HARVEST
+  if (isHarvest.value) {
+    const msgHarvest = validateHarvestSelections(harvestRows.value, harvestSelections.value)
+    if (msgHarvest) return msgHarvest
+  }
   if (!isHarvest.value) {
     const used = buildRawConsumptions()
     if (used.length === 0) return MSG_SELECT_RAW
@@ -400,25 +454,39 @@ async function onConfirm() {
   errorMsg.value   = ''
   try {
     const consumptions = isHarvest.value ? [] : buildRawConsumptions()
+    const harvestConsumptions = isHarvest.value
+      ? buildHarvestConsumptions(harvestRows.value, harvestSelections.value)
+      : []
     const firstRaw = consumptions[0]
+    const firstHarvest = harvestRows.value.find(
+      (r) => r.work_id === Object.keys(harvestSelections.value)[0],
+    )
     const res = await confirmProduction(farmCd.value, {
       prod_type:   prodType.value,
       input_source: inputSource.value,
-      variety_cd:  firstRaw?.variety_cd || varietyCd.value,
+      variety_cd:  firstRaw?.variety_cd || firstHarvest?.variety_cd || varietyCd.value,
       wh_cd:       firstRaw?.wh_cd || DEFAULT_WH_CD,
       pack_weight: 0,           // 각 line에 weight 포함
       lines:       buildLines(),
-      harvest_work_id: isHarvest.value ? selectedHarvestId.value : undefined,
       work_ids:    [],
       juice_qty:   isPack.value ? 0 : Number(juiceQty.value),
       juice_item_cd: isPack.value ? undefined : juiceItemCd.value,
       raw_consumptions: consumptions,
+      harvest_consumptions: harvestConsumptions,
     })
     lastPrefill.value = res.prefill_lines || []
     postConfirm.value = true
     emit('toast', MSG_CONFIRM_OK)
   } catch (err) {
-    errorMsg.value = err instanceof ApiClientError ? err.message : MSG_CONFIRM_FAIL
+    const code = err instanceof ApiClientError ? err.errorCode : undefined
+    errorMsg.value = mapProductionHarvestError(
+      code,
+      err instanceof ApiClientError ? err.message : MSG_CONFIRM_FAIL,
+    )
+    if (code === 'HARVEST_EXCEED' && isHarvest.value) {
+      harvestUseQtyMap.value = {}
+      void loadSources()
+    }
   } finally {
     confirming.value = false
   }
@@ -492,17 +560,47 @@ onMounted(async () => {
         <div v-else-if="!harvestRows.length" class="pack-prod__hint">
           {{ MSG_HARVEST_EMPTY }}
         </div>
-        <!-- 수확기록 선택 행 (품종 중복 표시 없음 — 행 안에 품종명 포함) -->
-        <button
+        <!-- 수확기록: 복수 선택 + 행별 사용량 -->
+        <div
           v-for="row in harvestRows"
           :key="row.work_id"
-          type="button"
-          class="pack-prod__pick"
-          :class="{ 'pack-prod__pick--on': selectedHarvestId === row.work_id }"
-          @click="onSelectHarvest(row.work_id)"
+          class="pack-prod__harvest-row"
+          :class="{
+            'pack-prod__harvest-row--on': isHarvestSelected(row.work_id),
+            'pack-prod__harvest-row--disabled': !isHarvestSelectable(row),
+          }"
         >
-          <span>{{ row.work_dt }} · {{ row.variety_nm || row.variety_cd }} · {{ row.harvest_container_qty }}{{ LABEL_BOX_UNIT }}</span>
-        </button>
+          <button
+            type="button"
+            class="pack-prod__harvest-label"
+            :disabled="!isHarvestSelectable(row) && !isHarvestSelected(row.work_id)"
+            @click="onToggleHarvest(row)"
+          >
+            <span class="pack-prod__harvest-identity">{{ formatHarvestRowLabel(row) }}</span>
+          </button>
+          <template v-if="isHarvestSelected(row.work_id)">
+            <span class="pack-prod__harvest-use-label">이번 사용</span>
+            <input
+              :value="harvestUseQtyMap[row.work_id] ?? ''"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              :max="row.remaining_container_qty"
+              placeholder="1"
+              class="pack-prod__harvest-use-input"
+              :aria-label="`${row.variety_nm || row.variety_cd} 이번 사용 상자`"
+              @click.stop
+              @input="(e) => setHarvestUseQty(row.work_id, (e.target as HTMLInputElement).value)"
+            />
+            <span class="pack-prod__harvest-use-unit">상자</span>
+          </template>
+          <template v-else-if="harvestUseQtyOf(row) >= 1">
+            <span class="pack-prod__harvest-use-badge">
+              사용 {{ harvestUseQtyMap[row.work_id] }}상자
+            </span>
+          </template>
+        </div>
+        <p v-if="harvestSummaryText" class="pack-prod__harvest-summary">{{ harvestSummaryText }}</p>
       </template>
 
       <template v-else>
@@ -774,6 +872,74 @@ onMounted(async () => {
   color: var(--ods-color-text-secondary);
   white-space: nowrap;
   margin-left: var(--ods-space-8);
+}
+
+.pack-prod__harvest-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: var(--ods-space-6, 6px);
+  min-height: 44px;
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-surface);
+}
+.pack-prod__harvest-row--on {
+  border-color: var(--ods-color-primary);
+  background: var(--ods-color-primary-subtle, #f0f7f4);
+}
+.pack-prod__harvest-row--disabled {
+  opacity: 0.55;
+}
+.pack-prod__harvest-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.pack-prod__harvest-label:disabled {
+  cursor: not-allowed;
+}
+.pack-prod__harvest-identity {
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+}
+.pack-prod__harvest-use-label,
+.pack-prod__harvest-use-unit {
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-secondary);
+  white-space: nowrap;
+}
+.pack-prod__harvest-use-input {
+  width: 52px;
+  height: 36px;
+  padding: 0 var(--ods-space-4);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  background: var(--ods-color-white);
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+  text-align: right;
+}
+.pack-prod__harvest-use-badge {
+  grid-column: 2 / 5;
+  justify-self: end;
+  font: var(--ods-font-footnote);
+  font-weight: 600;
+  color: var(--ods-color-primary);
+  white-space: nowrap;
+}
+.pack-prod__harvest-summary {
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-secondary);
 }
 /* 투입 수량 (미사용, 하위 호환) */
 .pack-prod__raw-qty {

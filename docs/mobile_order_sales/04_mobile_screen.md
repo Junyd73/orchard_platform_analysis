@@ -2,7 +2,7 @@
 
 > 단계 2 **완료/대표 승인**. **판매관리 4탭 Shell**. Stage 6 판매/출고 UX **1차 구현** (`/orders/ship`). Stage 3B 배정 UI **후순위**.
 > UX 원칙: [09 §0](./09_production_inventory_flow.md) · [DEC-021](./07_decisions.md) · ODS · [SCR-030](../../mobile/docs/screens/SCR-030.md)
-> 경매·수확 N:M: [02](./02_domain_flow.md) · [03](./03_data_contract.md) · [DEC-035/036/037](./07_decisions.md) — **설계 TARGET**. 구현·API·DDL 아님.
+> 경매: [02](./02_domain_flow.md) · [03](./03_data_contract.md) · [DEC-036/037](./07_decisions.md) — **설계 TARGET**. DEC-035 HARVEST N:M = **IMPLEMENTED IN GIT** · **OPS PENDING**.
 
 범례: **CURRENT** = 현재 모바일 코드 사실 · **TARGET** = 승인 UX 목표 · **OPEN** = 미확정
 
@@ -29,8 +29,8 @@
 
 | 영역 | 파일·경로 | CURRENT 사실 |
 |------|-----------|----------------|
-| 포장/생산 | `PackProdPanel.vue` | HARVEST = **`selectedHarvestId` 단일**. 표시=`work_dt · 품종 · harvest_container_qty`만. **남음/이번 사용 없음**. payload `harvest_work_id` 1개 · `work_ids: []`. **RAW_STOCK**는 다중행+사용수량 패턴 **존재** |
-| 수확 API | `api/production.ts` `HarvestRecord` | 잔량·사용됨 필드 **없음** |
+| 포장/생산 | `PackProdPanel.vue` · `harvestSelection.ts` | HARVEST **N:M** — 복수 선택 · 행별 이번 사용량 · `harvest_consumptions[]`. 표시=`harvest_container_qty` · `consumed_container_qty` · `remaining_container_qty`. legacy `harvest_work_id` **미사용**. **RAW_STOCK** 다중행+사용수량 패턴 **유지** |
+| 수확 API | `api/production.ts` `HarvestRecord` | + `harvest_year` · `consumed_container_qty` · `remaining_container_qty` · confirm `harvest_consumptions[]` |
 | 재고 | `StockView.vue` | 행별 수량 스텝퍼 · **담기** → `salesPrefill`. 하단 **「판매예정 n품목」+「판매 미리보기」**(판매 전용 의미). `SalesPreviewView` / 출고 경로 |
 | 출고확정 | `ShipConfirmView.vue` · `/orders/ship` | 주문/DIRECT의 **판매+OUT**. 경매 출하와 **동일 업무 아님**. SA020400은 직접판매 Select에서 제외 |
 | 판매 탭 | `OrderView.vue` 등 | 판매 목록·상세. **경매출하 전용 화면 없음** |
@@ -38,7 +38,7 @@
 
 AppBar 톱니 → `/settings`. 목록에 가짜 배정 배지 없음.
 
-**목표(TARGET)와 섞어 읽지 말 것.** TARGET은 §5A·§5B·§6.3~ 이하.
+**git `main` (IMPLEMENTED IN GIT).** Lightsail PWA는 **`bb8c872` 계열일 수 있음** — **OPS activation pending**. TARGET은 §5B·§6.3~ (경매).
 
 ---
 
@@ -174,16 +174,18 @@ OdsBottomNav  … 판매관리
 
 ---
 
-## 5A. HARVEST N:M 포장 UX (DEC-035) — TARGET
+## 5A. HARVEST N:M 포장 UX (DEC-035) — **IMPLEMENTED IN GIT**
 
-상세: [09 §0.2·§16.4](./09_production_inventory_flow.md). **설계 TARGET · 구현 완료 아님.**
+상세: [09 §0.2·§16.4](./09_production_inventory_flow.md). **REHEARSAL PASS** · **OPS activation pending**.
 
-### CURRENT
-- `PackProdPanel` HARVEST **단일** 선택 · 수확일/품종/수확상자만
-- API에 남음·사용됨 필드 **없음**
-- RAW_STOCK의 **다중행+사용수량** UI 패턴은 재사용 후보
+### IMPLEMENTED (git `main` · `2aa47de`)
 
-### TARGET UX (권장 — RAW_STOCK와 동일 조작감)
+- `PackProdPanel` — 복수 수확 선택 · 행별 사용 상자수 · `harvest_consumptions[]` 전송
+- PC `stock_page` + `production_harvest_helper.py` — 동일 N:M UX
+- harvest-records: `harvest_year` · `consumed_container_qty` · `remaining_container_qty`
+- legacy `harvest_work_id` only → API **reject**
+
+### UX (RAW_STOCK와 동일 조작감)
 
 ```
 8/27 신고
@@ -206,8 +208,11 @@ OdsBottomNav  … 판매관리
 **사용됨(누적):** 꼭 필요할 때만. 표시 시 「사용됨」등 **과거 누적**임을 명확히 (「사용」=이번 입력과 혼동 금지).
 
 ### OPEN
-HARVEST **잔량 API**/표시 필드 · 소진 DDL ([OPEN-DDL](./07_decisions.md)) · OPEN-DONE.
-잔량 API 없이 UI를 구현완료처럼 쓰지 않는다.
+
+- **OPEN-DONE** — HARVEST `DONE` 최종 의미
+- **OPS activation** — operating production HARVEST N:M **비활성** (Lightsail **`bb8c872`**)
+
+**SUPERSEDED:** 단일 HARVEST · 잔량 API 없음 · OPEN-DDL( consumption design ) — pre-C 스냅샷.
 
 ---
 

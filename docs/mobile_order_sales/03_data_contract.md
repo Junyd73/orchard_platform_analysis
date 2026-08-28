@@ -10,10 +10,13 @@
 | 층 | 의미 |
 |----|------|
 | **CURRENT PHYSICAL** | 현재 실제 존재하는 테이블/컬럼/코드 계약 |
-| **APPROVED LOGICAL** | DEC-035/036/037로 승인된 논리 데이터 요구 (**아직 DB에 없다고 가정**) |
-| **OPEN PHYSICAL** | 신규 테이블명·컬럼명·PK/FK·상태코드·migration — **미확정** |
+| **IMPLEMENTED PHYSICAL CONTRACT** | git `main`에 구현·문서화된 물리 계약 (DEC-035) — **운영 DB 미적용 가능** |
+| **APPROVED LOGICAL** | DEC-036/037 등 승인 논리 요구 (**미구현일 수 있음**) |
+| **OPEN PHYSICAL** | 경매 출하 등 신규 테이블·상태코드 — **미확정** |
+| **OPS PENDING** | 운영 DB DDL·신규 code 배포 **미적용** |
 
-수확 N:M 소진·경매 출하중에서 **기존 구조만으로는 명백한 부족**이 확인됨 → **최소 구조만** 논리 승인. 물리 DDL = **OPEN-DDL**. APPROVED LOGICAL을 이미 DB에 있는 것처럼 쓰지 않는다.
+DEC-035 `t_harvest_consumption` · `prod_confirm_id` · production trace = **IMPLEMENTED PHYSICAL CONTRACT**. 운영 적용 = **OPS PENDING**.
+경매 출하중 물리 DDL = **OPEN**. APPROVED LOGICAL을 운영 DB에 이미 있다고 쓰지 않는다.
 
 운영 DB baseline (CURRENT):
 `t_order_*`, `t_sales_*`, `t_stock_master/log`, `t_cash_ledger`, `t_ledger`, `m_customer`, `m_warehouse`, `m_common_code`.
@@ -336,34 +339,46 @@ available ≈ real - order_reserved - active_auction_transit
 
 ---
 
-## 8A. 수확 소진 최소 논리계약 (DEC-035)
+## 8A. 수확 소진 물리계약 (DEC-035)
 
-상세 업무: [09 §0.2·§16.4](./09_production_inventory_flow.md). **설계 APPROVED · 구현·DDL 아님.**
+상세 업무: [09 §0.2·§16.4](./09_production_inventory_flow.md). **IMPLEMENTED PHYSICAL CONTRACT** · **OPS PENDING**.
 
-### CURRENT PHYSICAL
+### CURRENT PHYSICAL (수확 원장)
 
 `t_work_detail` (수확): `work_id` · `farm_cd` · `work_dt` · `variety_cd` · `harvest_container_qty` 등.
 - 수확 저장 ≠ `t_stock_master` 자동 IN. 단위 = 콘테이너 상자.
-- **소진 영속 이력 없음.** **생산확정 1회 영속 event key 없음** (TX·work DONE만으로는 N:M 구분 불가).
 
-### APPROVED LOGICAL
+### IMPLEMENTED PHYSICAL CONTRACT (git `main`)
 
-반드시 보존하는 **최소 소진이력** 축:
+**테이블 `t_harvest_consumption`** (`core/harvest_consumption_schema.py` — 멱등 CREATE, 운영 자동 실행 금지):
 
-1. harvest work 식별
-2. **생산확정 1회** 내부식별
-3. 사용 콘테이너 상자수
+| 컬럼 | 타입 | 의미 |
+|------|------|------|
+| `consumption_seq` | INTEGER PK AUTOINCREMENT | 소진 행 식별 |
+| `farm_cd` | TEXT NOT NULL | 농장 |
+| `prod_confirm_id` | TEXT NOT NULL | 생산확정 1회 event (`PRD`+`YYYYMMDD`+`-`+SEQ) |
+| `harvest_work_id` | TEXT NOT NULL | `t_work_detail.work_id` |
+| `consumed_container_qty` | INTEGER NOT NULL CHECK > 0 | 이번 생산 사용 상자수 |
+| `is_valid` | INTEGER NOT NULL DEFAULT 1 CHECK IN (0,1) | 유효 소진 (cancel/reversal용) |
+| `reg_id` | TEXT | 등록자 |
+| `reg_dt` | TEXT NOT NULL | 등록 시각 |
 
-공통: farm · 감사 시각 · 기록 사용자.
+**Index (2개):**
+- `idx_harvest_consumption_work_valid` — (`farm_cd`, `harvest_work_id`, `is_valid`)
+- `idx_harvest_consumption_confirm` — (`farm_cd`, `prod_confirm_id`)
 
-잔량 SSOT: `harvest_container_qty − SUM(유효 소진 상자수)`.
-상품 전량 IN = [DEC-023](./07_decisions.md). 동일 품종·연도 = [DEC-026](./07_decisions.md).
+**잔량 SSOT:** `harvest_container_qty − SUM(consumed_container_qty WHERE is_valid=1)` (행별 집계는 harvest-records API).
 
-**기각:** `t_stock_log` 단독 · `used_qty` 누적만 · CT01/20kg 자동변환 · 상품 natural key 중복 저장 · `t_production_*` 풀세트 · 사용자에게 내부 생산번호/`work_id` 입력.
+**상품 추적 (production trace):** HARVEST 생산 IN 시 `t_stock_log.ref_type='PRODUCTION'` · `ref_id=prod_confirm_id` (`core/stock_constants.py` · Stage 5C trace DDL).
 
-### OPEN PHYSICAL
+**OPS PENDING:** PC·Lightsail **운영 DB**에는 `t_harvest_consumption` **없음** (2026-08-28 preflight). copy rehearsal(D1/D2)에서만 DDL 적용 검증.
 
-소진 구조 테이블명 · 생산확정 이벤트 영속키 · PK/FK · 취소/역분개 물리 · [OPEN-DONE](./07_decisions.md) · **OPEN-DDL**.
+### OPEN (DEC-035)
+
+- **OPEN-DONE** — HARVEST `DONE` 최종 의미 (잔량 SSOT와 분리는 확정)
+- idempotency / cancel-reversal 물리 — **구현 유지** · 운영 적용 후에도 동일
+
+**기각:** `t_stock_log` 단독 · `used_qty` 누적만 · CT01/20kg 자동변환 · `t_production_*` 풀세트 · legacy `harvest_work_id` only.
 
 ---
 
@@ -589,8 +604,8 @@ t_stock_master
 
 | 항목 | 근거 | 상태 |
 |------|------|------|
-| 수확 소진 최소이력 | DEC-035 | 논리 승인 · **OPEN-DDL** |
-| 생산확정 1회 영속키 | DEC-035 | **OPEN-DDL** |
+| 수확 소진 `t_harvest_consumption` | DEC-035 | **IMPLEMENTED PHYSICAL CONTRACT** · **OPS DDL PENDING** |
+| 생산확정 `prod_confirm_id` + PRODUCTION trace | DEC-035 | **IMPLEMENTED** · **OPS DDL PENDING** |
 | 경매 출하 헤더/라인 | DEC-036 | 논리 승인 · **OPEN-DDL** |
 | 출하/확인 수량 두 축 | DEC-036 | 논리 승인 · 물리명 미정 |
 | 출하 상태값 | OPEN-SHIP-STATE | **OPEN** |

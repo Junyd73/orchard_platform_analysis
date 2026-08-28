@@ -7,7 +7,7 @@
 
 최상위: `수확 → (생산) → (재고) → 판매 ← (주문)`.
 본 문서는 **주문·배정·출고·판매** 구간. 생산확정·원물/상품 재고는 **StockPage** (09 §3).
-수확잔량·HARVEST N:M 상세는 [09](./09_production_inventory_flow.md) · [DEC-035](./07_decisions.md) SSOT — 본 문서에 장문 복제하지 않음.
+수확잔량·HARVEST N:M — **IMPLEMENTED IN GIT** · **OPS activation pending** ([09](./09_production_inventory_flow.md) · [DEC-035](./07_decisions.md) SSOT).
 
 경매는 **출하중([DEC-036](./07_decisions.md))**과 **판매확정([DEC-037](./07_decisions.md))**을 **서로 다른 업무 단계**로 구분한다.
 

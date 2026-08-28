@@ -24,6 +24,20 @@ STOCK_LOG_COLUMNS = (
 )
 
 
+def stock_log_production_trace_ready(conn: sqlite3.Connection) -> bool:
+    """t_stock_log ref_type/ref_id 존재 여부 (DEC-027 ALTER 미적용 DB 방어)."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='t_stock_log' LIMIT 1",
+    ).fetchone()
+    if not row:
+        return False
+    cols = {
+        str(r[1]).strip().lower()
+        for r in conn.execute("PRAGMA table_info(t_stock_log)")
+    }
+    return "ref_type" in cols and "ref_id" in cols
+
+
 def ensure_sales_stock_trace_schema(db: Path | str | sqlite3.Connection | Any) -> dict[str, Any]:
     """t_sales_detail.stock_seq · t_stock_log stock_seq/ref_type/ref_id 멱등 추가.
 

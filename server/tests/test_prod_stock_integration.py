@@ -18,12 +18,15 @@ for p in (_REPO, _REPO / "server"):
 
 from core.order_allocation_service import OrderAllocationService  # noqa: E402
 from core.production_service import (  # noqa: E402
+    HarvestConsumptionIn,
     ProductionConfirmIn,
     ProductionError,
     ProductionLineIn,
     ProductionService,
     RawStockConsumptionIn,
 )
+from core.harvest_consumption_schema import ensure_harvest_consumption_schema  # noqa: E402
+from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
 from core.stock_constants import (  # noqa: E402
     INPUT_SOURCE_HARVEST,
     INPUT_SOURCE_RAW_STOCK,
@@ -100,6 +103,9 @@ def _build_db() -> tuple[sqlite3.Connection, Path]:
         );
         """
     )
+    ensure_harvest_consumption_schema(conn)
+    ensure_sales_stock_trace_schema(conn)
+    conn.commit()
     return conn, Path(path_s)
 
 
@@ -110,7 +116,10 @@ def _raw(size_cd: str, qty: int) -> RawStockConsumptionIn:
     )
 
 
-def _pack_payload(*, raws, lines, src=INPUT_SOURCE_RAW_STOCK, harvest=None):
+def _pack_payload(*, raws, lines, src=INPUT_SOURCE_RAW_STOCK, harvest=None, harvest_qty: int = 12):
+    harvest_rows: list[HarvestConsumptionIn] = []
+    if harvest:
+        harvest_rows = [HarvestConsumptionIn(work_id=harvest, qty=harvest_qty)]
     return ProductionConfirmIn(
         farm_cd=FARM,
         prod_type=PROD_TYPE_PACK,
@@ -120,7 +129,7 @@ def _pack_payload(*, raws, lines, src=INPUT_SOURCE_RAW_STOCK, harvest=None):
         pack_weight=0.0,
         lines=lines,
         raw_consumptions=raws,
-        harvest_work_id=harvest,
+        harvest_consumptions=harvest_rows,
     )
 
 

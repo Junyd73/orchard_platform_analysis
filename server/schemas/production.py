@@ -24,6 +24,11 @@ class RawStockConsumptionIn(BaseModel):
     qty: int = Field(ge=1, description="사용 통수, 1 이상")
 
 
+class HarvestConsumptionIn(BaseModel):
+    work_id: str
+    qty: int = Field(ge=1, description="사용 상자 수, 1 이상")
+
+
 class ProductionConfirmRequest(BaseModel):
     prod_type: str = Field(description="PACK | PROCESS")
     input_source: str = Field(description="HARVEST | RAW_STOCK")
@@ -32,6 +37,7 @@ class ProductionConfirmRequest(BaseModel):
     pack_weight: float = 0
     lines: list[ProductionLineIn] = Field(default_factory=list)
     raw_consumptions: list[RawStockConsumptionIn] = Field(default_factory=list)
+    harvest_consumptions: list[HarvestConsumptionIn] = Field(default_factory=list)
     work_ids: list[str] = Field(default_factory=list)
     harvest_work_id: str | None = None
     juice_qty: int = 0
@@ -63,6 +69,9 @@ class HarvestRecordOut(BaseModel):
     variety_cd: str
     variety_nm: str = ""
     harvest_container_qty: int
+    harvest_year: int = 0
+    consumed_container_qty: int = 0
+    remaining_container_qty: int = 0
 
 
 class RawStockItemOut(BaseModel):

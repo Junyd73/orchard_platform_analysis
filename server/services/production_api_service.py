@@ -17,6 +17,7 @@ from app.services._core_path import ensure_repo_root_on_path
 ensure_repo_root_on_path()
 
 from core.production_service import (  # noqa: E402
+    HarvestConsumptionIn,
     ProductionConfirmIn,
     ProductionError,
     ProductionLineIn,
@@ -99,6 +100,10 @@ class ProductionApiService:
                     qty=r.qty,
                 )
                 for r in body.raw_consumptions
+            ],
+            harvest_consumptions=[
+                HarvestConsumptionIn(work_id=h.work_id, qty=h.qty)
+                for h in body.harvest_consumptions
             ],
             work_ids=list(body.work_ids or []),
             harvest_work_id=body.harvest_work_id,

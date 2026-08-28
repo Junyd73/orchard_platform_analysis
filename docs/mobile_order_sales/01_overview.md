@@ -1,20 +1,23 @@
 # 01. Overview — 주문/판매 통합
 
-> **현재 기준 (2026-08-21~27):** Stage 6·Order→Ship·compact 목록 **운영 반영** (`fd963e0`).
-> **2026-08-27:** DEC-035/036/037 **설계 APPROVED** — [07](./07_decisions.md) · [09](./09_production_inventory_flow.md). 구현·DDL 아님.
-> 생산/재고 SSOT: [09](./09_production_inventory_flow.md). API: [05](./05_api_contract.md).
-> **진행·게이트:** [06](./06_development_progress.md) — **구현 진행 참고**. 이번 재설계 정합은 **다음 단계**에서 06 갱신. **설계 SSOT = 02~05·07·09.**
+> **현재 기준 (2026-08-28):** DEC-035 HARVEST N:M — **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS activation pending** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
+> Stage 6·Order→Ship·compact 목록 **운영 반영** (`fd963e0`) — DEC-035와 별개.
+> DEC-036/037는 **설계 APPROVED** · 미구현. 생산/재고 SSOT: [09](./09_production_inventory_flow.md). API: [05](./05_api_contract.md).
+> **진행·게이트:** [06](./06_development_progress.md).
 
-**표현 3층 (본 문서):**
+**표현 4층 (본 문서):**
 
 | 층 | 의미 |
 |----|------|
 | **CURRENT** | 지금 FastAPI/Core/PC/모바일에 **실제 있는** 기능·코드 |
-| **APPROVED TARGET** | DEC-035/036/037 등 **설계 승인** · **미구현**일 수 있음 |
-| **OPEN** | DDL · API · 상태 · 차이정책 등 **미확정** |
+| **IMPLEMENTED IN GIT** | repo `main`에 merge된 구현 (DEC-035 A~C) |
+| **REHEARSAL PASS** | copy DB migration/E2E 검증 완료 (D1/D2) |
+| **OPS PENDING** | 운영 DB DDL·신규 code 배포 **미적용** — operational/current production **아님** |
+| **APPROVED TARGET** | DEC-036/037 등 **설계 승인** · **미구현** |
+| **OPEN** | OPEN-DONE · OPEN-SHIP-STATE · 경매 DDL 등 **미확정** |
 
-APPROVED TARGET에 `완료` · `운영` · `IMPLEMENTED` **금지**. CURRENT도 근거 없이 flat `완료·운영` **금지**.
-필요 시 **구현 완료** · **private main** · **운영 배포** · **운영 DDL 적용**을 **분리** 표기.
+`운영 적용 완료` · `production operational` · `deployed`(DEC-035) **금지**.
+필요 시 **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING** · **ops 배포** · **ops DDL**을 **분리** 표기.
 
 ---
 
@@ -55,7 +58,7 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 
 | 대표 원칙 | |
 |-----------|--|
-| 수확 **N건** → 포장/생산 **1회** 가능 · **부분사용** · **잔량** 유지 | APPROVED TARGET (DEC-035) |
+| 수확 **N건** → 포장/생산 **1회** · **부분사용** · **잔량** | **IMPLEMENTED IN GIT** · REHEARSAL PASS · OPS PENDING (DEC-035) |
 | 수확 **저장** ≠ `t_stock_master` IN | CURRENT + DEC-022 |
 | 생산확정 후 상품 **전량 IN** | CURRENT + DEC-023 |
 
@@ -103,7 +106,7 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 | 생산확정 → 상품 **전량 IN** | 023 | APPROVED |
 | **full-set production 금지 · 최소 보완 우선** | 025 | APPROVED |
 | harvest_year = 원료 수확연도 | 026 | APPROVED |
-| **수확잔량 · HARVEST N:M 소진** | **035** | **APPROVED (설계)** |
+| **수확잔량 · HARVEST N:M 소진** | **035** | **IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS PENDING** |
 | **`reserved_qty` = 주문 HOLD 전용** | **018, 036** | APPROVED |
 | **경매 출하 ≠ 판매 · ≠ DRAFT · 출하 시 OUT 없음** | **036** | **APPROVED (설계)** |
 | **경매 판매확정 = 최종 승인수량 OUT · 원자 TX** | **037** | **APPROVED (설계)** |
@@ -166,10 +169,11 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 
 ### 승인된 후속설계 (범위에 가까움 · **미구현**)
 
-- DEC-035 **최소 수확 소진** 구조
 - DEC-036 **최소 경매 출하** 구조
 
-**정확한 표현:** full production system 신규 구축은 **금지**하되, 기존 구조의 명백한 부족을 해결하는 **최소 보완구조는 승인됨**. 물리 DDL = **OPEN**.
+**DEC-035:** **IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS activation pending** — [06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md).
+
+**정확한 표현:** full production system 신규 구축은 **금지**하되, DEC-035 최소 보완구조는 **git에 구현됨**. 경매 물리 DDL = **OPEN**. DEC-035 운영 DDL = **OPS PENDING**.
 
 ### OPEN (01에서는 링크만)
 
@@ -242,7 +246,7 @@ Stage H/P를 **미완료로 되돌리지 않음** — 위는 **기존 기능 위
 
 | 묶음 | 대표 OPEN |
 |------|-----------|
-| **수확·생산** | OPEN-DONE · 생산확정 1회 영속식별 · 최소 소진 **OPEN-DDL** |
+| **수확·생산** | OPEN-DONE · **OPS DDL PENDING**(DEC-035 consumption) |
 | **경매 출하** | OPEN-DDL · OPEN-SHIP-STATE · 출하 취소/정정 |
 | **청과·매칭** | OPEN-AUCTION-MATCH-CARDINALITY · 시장/법인 유효조합·API |
 | **판매확정** | OPEN-QTY-DIFF · 차이 시 confirm 허용 · DRAFT 필수 · **DEC-016** (가락 배송) |

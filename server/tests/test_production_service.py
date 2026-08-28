@@ -17,12 +17,18 @@ for p in (_REPO, _REPO / "server"):
         sys.path.insert(0, s)
 
 from core.production_service import (  # noqa: E402
+    HarvestConsumptionIn,
     ProductionConfirmIn,
     ProductionError,
     ProductionLineIn,
     ProductionService,
     RawStockConsumptionIn,
 )
+from core.harvest_consumption_schema import (  # noqa: E402
+    TABLE_HARVEST_CONSUMPTION,
+    ensure_harvest_consumption_schema,
+)
+from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
 from core.stock_constants import (  # noqa: E402
     INPUT_SOURCE_HARVEST,
     INPUT_SOURCE_RAW_STOCK,
@@ -43,6 +49,14 @@ GRADE = "GR010100"
 RAW_SIZE = "CT010100"
 HARVEST_MID = "WK010300"
 WORK_HARVEST = "W-HARV-001"
+
+
+def _hc(work_id: str = WORK_HARVEST, qty: int = 12) -> HarvestConsumptionIn:
+    return HarvestConsumptionIn(work_id=work_id, qty=qty)
+
+
+def _harvest_use(work_id: str = WORK_HARVEST, qty: int = 12) -> list[HarvestConsumptionIn]:
+    return [_hc(work_id, qty)]
 
 
 def _build_db() -> tuple[sqlite3.Connection, Path]:
@@ -93,6 +107,9 @@ def _build_db() -> tuple[sqlite3.Connection, Path]:
         );
         """
     )
+    ensure_harvest_consumption_schema(conn)
+    ensure_sales_stock_trace_schema(conn)
+    conn.commit()
     return conn, path
 
 
@@ -175,7 +192,7 @@ class ProductionServiceTests(unittest.TestCase):
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY,
             pack_weight=15.0,
-            harvest_work_id=WORK_HARVEST,
+            harvest_consumptions=_harvest_use(qty=5),
             lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=2)],
         )
         self.svc.confirm("U1", payload)
@@ -241,7 +258,7 @@ class ProductionServiceTests(unittest.TestCase):
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY,
             pack_weight=15.0,
-            harvest_work_id=WORK_HARVEST,
+            harvest_consumptions=_harvest_use(qty=5),
             lines=[
                 ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=5),
                 ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=0),
@@ -258,7 +275,7 @@ class ProductionServiceTests(unittest.TestCase):
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY,
             pack_weight=15.0,
-            harvest_work_id=WORK_HARVEST,
+            harvest_consumptions=_harvest_use(qty=5),
             lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=1)],
         )
         res = self.svc.confirm("U1", payload)
@@ -274,7 +291,7 @@ class ProductionServiceTests(unittest.TestCase):
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY,
             pack_weight=15.0,
-            harvest_work_id=WORK_HARVEST,
+            harvest_consumptions=_harvest_use(qty=5),
             lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=2)],
         )
         ln = self.svc.confirm("U1", payload)["prefill_lines"][0]
@@ -297,7 +314,7 @@ class ProductionServiceTests(unittest.TestCase):
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY,
             pack_weight=15.0,
-            harvest_work_id=WORK_HARVEST,
+            harvest_consumptions=_harvest_use(qty=5),
             lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=9)],
         )
         self.svc.confirm("U1", payload)
@@ -459,7 +476,7 @@ class ProductionServiceTests(unittest.TestCase):
                 input_source=INPUT_SOURCE_HARVEST,
                 variety_cd=VARIETY,
                 pack_weight=15.0,
-                harvest_work_id=WORK_HARVEST,
+                harvest_consumptions=_harvest_use(qty=1),
                 juice_item_cd=ITEM_JUICE_DORAJI,
                 lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=1)],
             ),
@@ -475,7 +492,7 @@ class ProductionServiceTests(unittest.TestCase):
                     prod_type=PROD_TYPE_PROCESS,
                     input_source=INPUT_SOURCE_HARVEST,
                     variety_cd=VARIETY,
-                    harvest_work_id=WORK_HARVEST,
+                    harvest_consumptions=_harvest_use(qty=1),
                     juice_qty=1,
                 ),
             )
@@ -484,7 +501,7 @@ class ProductionServiceTests(unittest.TestCase):
     # T-PROD-MULTI — 다중 중량/과수/등급 N:N:N 생산결과
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _multi_payload(self, lines, source=INPUT_SOURCE_HARVEST):
+    def _multi_payload(self, lines, source=INPUT_SOURCE_HARVEST, harvest_qty: int = 12):
         """다중 line payload 헬퍼."""
         return ProductionConfirmIn(
             farm_cd=FARM,
@@ -493,7 +510,9 @@ class ProductionServiceTests(unittest.TestCase):
             variety_cd=VARIETY,
             wh_cd=WH,
             pack_weight=0.0,   # line별 weight 사용
-            harvest_work_id=WORK_HARVEST if source == INPUT_SOURCE_HARVEST else None,
+            harvest_consumptions=(
+                _harvest_use(qty=harvest_qty) if source == INPUT_SOURCE_HARVEST else []
+            ),
             lines=lines,
         )
 
@@ -618,16 +637,36 @@ class ProductionServiceTests(unittest.TestCase):
         res = self.svc.confirm("U1", self._multi_payload(lines))
         self.assertEqual(len(res["prefill_lines"]), 2)
 
-    def test_multi_10_backward_compat_pack_weight(self) -> None:
-        """T-PROD-MULTI-10: 기존 pack_weight 방식(line.weight=0)도 동작."""
+    def test_multi_10_legacy_harvest_work_id_rejected(self) -> None:
+        """구식 harvest_work_id only 요청은 consumption·product IN 없이 거부."""
         payload = ProductionConfirmIn(
             farm_cd=FARM,
             prod_type=PROD_TYPE_PACK,
             input_source=INPUT_SOURCE_HARVEST,
             variety_cd=VARIETY,
-            pack_weight=15.0,      # 구버전 방식
+            pack_weight=15.0,
             harvest_work_id=WORK_HARVEST,
-            lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=4)],  # weight 미설정
+            lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=4)],
+        )
+        with self.assertRaises(ProductionError) as ctx:
+            self.svc.confirm("U1", payload)
+        self.assertEqual(ctx.exception.code, "HARVEST_CONSUMPTIONS")
+        self.assertEqual(_product_in_qty(self.conn), 0.0)
+        cnt = self.conn.execute(
+            f"SELECT COUNT(*) FROM {TABLE_HARVEST_CONSUMPTION}"
+        ).fetchone()[0]
+        self.assertEqual(cnt, 0)
+
+    def test_multi_11_pack_weight_with_harvest_consumptions(self) -> None:
+        """pack_weight + harvest_consumptions 조합은 동작."""
+        payload = ProductionConfirmIn(
+            farm_cd=FARM,
+            prod_type=PROD_TYPE_PACK,
+            input_source=INPUT_SOURCE_HARVEST,
+            variety_cd=VARIETY,
+            pack_weight=15.0,
+            harvest_consumptions=_harvest_use(qty=4),
+            lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=4)],
         )
         res = self.svc.confirm("U1", payload)
         self.assertTrue(res["ok"])
@@ -844,7 +883,7 @@ class TestRawUse(unittest.TestCase):
             variety_cd=VARIETY,
             wh_cd=WH,
             pack_weight=15.0,
-            harvest_work_id=WORK_HARVEST,
+            harvest_consumptions=_harvest_use(qty=5),
             lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=5, weight=15.0)],
             raw_consumptions=[],
         )
@@ -975,7 +1014,8 @@ class TestHarvestYear(unittest.TestCase):
             self.svc.confirm("U1", ProductionConfirmIn(
                 farm_cd=FARM, prod_type=PROD_TYPE_PACK,
                 input_source=INPUT_SOURCE_HARVEST, variety_cd=VARIETY, wh_cd=WH,
-                pack_weight=15.0, harvest_work_id=WORK_HARVEST,
+                pack_weight=15.0,
+                harvest_consumptions=_harvest_use(qty=1),
                 lines=[ProductionLineIn(grade_cd=GRADE, size_cd=SIZE_DAI, qty=1)],
             ))
         self.assertEqual(_product_harvest_year(self.conn), 2026)

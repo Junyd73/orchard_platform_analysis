@@ -19,6 +19,10 @@ from core.pesticide_manager import (
     is_nutrient_category,
 )
 from core.work_harvest_schema import ensure_work_harvest_schema
+from core.harvest_consumption_guard import (
+    assert_harvest_work_deletable,
+    validate_harvest_work_update,
+)
 from core.work_log_constants import (
     DAY_OF_WEEK_SHORT,
     LABOR_ACCT_CD,
@@ -439,8 +443,61 @@ class WorkLogIntegratedSaveService:
             pest_ops = self._build_pesticide_cursor_ops(
                 payload, work_dt, user_id, preview_ids
             )
-        self._execute_transaction(queries, pest_ops)
+
+        def _harvest_guard_pre(cur: sqlite3.Cursor) -> None:
+            self._enforce_harvest_consumption_invariants(
+                cur,
+                payload=payload,
+                work_dt=work_dt,
+                preview_ids=preview_ids,
+                prev_ids=prev_ids,
+                sync_delete_missing=sync_delete_missing,
+            )
+
+        self._execute_transaction(
+            queries,
+            pest_ops,
+            pre_cursor_ops=[_harvest_guard_pre],
+        )
         return SaveResult(ok=True, work_dt=work_dt, message="저장 완료")
+
+    def _enforce_harvest_consumption_invariants(
+        self,
+        cur: sqlite3.Cursor,
+        *,
+        payload: WorkLogSavePayload,
+        work_dt: str,
+        preview_ids: list[str],
+        prev_ids: set[str],
+        sync_delete_missing: bool,
+    ) -> None:
+        """DEC-035-A: 소비된 수확기록 수정/삭제 invariant (동일 TX 선행)."""
+        for w in payload.works or []:
+            if not (w.work_mid_cd or "").strip():
+                continue
+            wid = str(w.work_id or "").strip()
+            if not wid:
+                continue
+            validate_harvest_work_update(
+                cur,
+                self.farm_cd,
+                wid,
+                new_work_dt=work_dt,
+                new_variety_cd=w.variety_cd,
+                new_harvest_container_qty=w.harvest_container_qty,
+                new_work_mid_cd=str(w.work_mid_cd or ""),
+                new_work_mid_nm=str(w.work_mid_nm or ""),
+            )
+
+        if not sync_delete_missing:
+            return
+
+        preview_set = {str(x or "").strip() for x in preview_ids if str(x or "").strip()}
+        for gone in prev_ids - preview_set:
+            assert_harvest_work_deletable(cur, self.farm_cd, str(gone))
+        if not preview_set and prev_ids:
+            for pid in prev_ids:
+                assert_harvest_work_deletable(cur, self.farm_cd, str(pid))
 
     def cancel_pesticide_use(
         self,
@@ -563,6 +620,9 @@ class WorkLogIntegratedSaveService:
             except (TypeError, ValueError, IndexError):
                 continue
 
+        def _guard_delete(cur: sqlite3.Cursor) -> None:
+            assert_harvest_work_deletable(cur, self.farm_cd, wid)
+
         def _related_op(cur: sqlite3.Cursor) -> None:
             for uid in applied_ids:
                 ok, errs = self.pest.cancel_use_restore_stock_on_cursor(
@@ -609,7 +669,11 @@ class WorkLogIntegratedSaveService:
             for op in extra_cursor_ops or []:
                 op(cur)
 
-        self._execute_transaction(queries, [_related_op])
+        self._execute_transaction(
+            queries,
+            [_related_op],
+            pre_cursor_ops=[_guard_delete],
+        )
 
     def replace_pesticide_use(
         self,
@@ -1252,10 +1316,14 @@ class WorkLogIntegratedSaveService:
         self,
         queries: List[QueryItem],
         cursor_ops: Optional[Sequence[CursorOp]] = None,
+        *,
+        pre_cursor_ops: Optional[Sequence[CursorOp]] = None,
     ) -> None:
         """동일 connection/cursor 트랜잭션. Manager 내부 BEGIN 금지(on_cursor만)."""
 
         def _run(cur: sqlite3.Cursor) -> None:
+            for op in pre_cursor_ops or []:
+                op(cur)
             for query, params in queries:
                 cur.execute(materialize_now_ops_sql(query), params)
             for op in cursor_ops or []:

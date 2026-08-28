@@ -11,7 +11,10 @@
 | 구분 | 의미 |
 |------|------|
 | **CURRENT IMPLEMENTATION** | repo·코드에서 확인된 사실 |
-| **APPROVED NEXT DESIGN** | 01~05·07·09에서 승인됐으나 **미구현** |
+| **IMPLEMENTED IN GIT** | repo `main`에 merge된 구현 (DEC-035 A~C) |
+| **REHEARSAL PASS** | copy DB migration/E2E 검증 (D1/D2) |
+| **OPS PENDING** | 운영 DB DDL·신규 code 배포 **미적용** |
+| **APPROVED NEXT DESIGN** | DEC-036/037 등 **설계 승인** · **미구현** |
 | **HISTORICAL SNAPSHOT** | 과거 당시 merge·테스트·배포 기록 |
 
 **표기 원칙:**
@@ -19,9 +22,23 @@
 - **Core/API** · **git main** · **ops 배포** · **ops DDL**을 `완료·운영` 한 단어로 **뭉개지 않음**
 - `git main 반영` = repo 사실 · `ops 미배포` = 문서·SHA 기준 확인 범위 · `ops 상태 미확인` = 외부 미확인
 - ops 상태는 **실제 배포/DB 확인이 있을 때만** 확정. 이번 문서 수정 시 ops SSH/DB **미확인**
-- 2026-08-27~28 설계 재정합은 **구현 완료가 아님**
+- 2026-08-28 **DEC-035 IMPLEMENTED IN GIT** · D1/D2 **REHEARSAL PASS** · **OPS PENDING**
 
-**조사 기준:** git `main` @ `bb8c872` (2026-08-28) · ops backend 기록 SHA `b48ca8b` (Stage5, **과거 이력** — 이번 작업에서 임의 갱신 없음)
+**조사 기준:** git `main` @ `2aa47de` (2026-08-28, DEC-035 C) · Lightsail ops code **`bb8c872`** (DEC-035 **미배포**) · ops backend 기록 SHA `b48ca8b` (Stage5, **과거 이력**)
+
+---
+
+## CHANGELOG — DEC-035 구현·rehearsal (2026-08-28)
+
+| 항목 | 내용 |
+|------|------|
+| DEC-035-A | foundation / guard — `eea8511` **PASS** |
+| DEC-035-B | Core/API N:M — `21e9de9` **PASS** |
+| DEC-035-B-fix | trace schema / concurrency — `e12bf96` **PASS** |
+| DEC-035-C | PC/Mobile N:M — `2aa47de` **PASS** |
+| DEC-035-D1 | PC DB copy rehearsal — **REHEARSAL PASS** |
+| DEC-035-D2 | Lightsail DB copy rehearsal — **REHEARSAL PASS** (RAW_STOCK 실데이터 **CAN-DEFER**) |
+| OPS | PC·Lightsail 운영 DDL **미적용** · Lightsail code **`bb8c872`** · HARVEST N:M **operating production 비활성** |
 
 ---
 
@@ -30,16 +47,40 @@
 | 항목 | 내용 |
 |------|------|
 | DEC-010 | **SUPERSEDED** — 경매 = 출하→청과→판매확정 흐름으로 대체 |
-| DEC-035 | HARVEST N:M / 수확잔량 / 최소 consumption |
+| DEC-035 | HARVEST N:M — **IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS PENDING** |
 | DEC-036 | 경매 출하 / 출하중 / 가용 제외 |
 | DEC-037 | 경매 판매확정 / 최종 승인수량 OUT |
 | 문서 | 01·02·03·04·05·07·09 재정합 |
 
-**상태:** `APPROVED DESIGN · local documentation updated · uncommitted`
+**상태:** DEC-035 문서·코드 **local `main` 반영** · **push 0** · **운영 activation PENDING**
 
-- 설계문서 01~05·07·09 및 본 06은 **working tree 수정 상태** · **commit/push 전**
-- **IMPLEMENTED / 운영 / 배포완료 아님**
-- 2026-08-17 Stage 0 승인([아래 HISTORICAL](#단계-0-산출물)) 이후 **설계가 확장·재정합**됨 — 「다시 열지 않음」을 **현재 규칙 frozen**으로 읽지 않음
+- DEC-035: **IMPLEMENTED IN GIT** · D1/D2 **REHEARSAL PASS** · **OPS PENDING**
+- DEC-036/037: **APPROVED DESIGN** · 미구현
+- 2026-08-17 Stage 0 승인 이후 설계 확장 — 「다시 열지 않음」을 **현재 규칙 frozen**으로 읽지 않음
+
+---
+
+## DEC-035 — IMPLEMENTED IN GIT / REHEARSAL PASS / OPS PENDING
+
+| 단계 | 범위 | 판정 | git / 비고 |
+|------|------|------|------------|
+| **A** | `t_harvest_consumption` schema · guard · work-log protection | **PASS** | `eea8511` |
+| **B** | Core/API N:M · `harvest_consumptions[]` · 잔량 검증 | **PASS** | `21e9de9` |
+| **B-fix** | production trace (`ref_type=PRODUCTION`) · `BEGIN IMMEDIATE` | **PASS** | `e12bf96` |
+| **C** | PC `stock_page` · Mobile `PackProdPanel` · legacy reject | **PASS** | `2aa47de` |
+| **D1** | PC 운영 DB **copy** rehearsal — DDL + E2E | **REHEARSAL PASS** | 운영 DB mutation **0** |
+| **D2** | Lightsail 운영 DB **copy** rehearsal — DDL + E2E | **REHEARSAL PASS** | 운영 DB mutation **0** · RAW 0건 → RAW E2E **CAN-DEFER** |
+| **OPS** | PC·Lightsail **운영 DDL** · code deploy | **PENDING** | Lightsail running **`bb8c872`** |
+
+**운영 activation 순서 (DEC-035):**
+
+1. **Git:** push는 운영 migration **전에** 가능 (대표 승인 후).
+2. **PC maintenance:** write/app 중지 → full backup → integrity/preflight → trace schema 확인 → consumption DDL → post-DDL integrity → **신규 PC code** → smoke → 첫 소량 HARVEST N:M.
+3. **Lightsail maintenance:** orchard-api 중지 → full backup → integrity/preflight → trace schema 확인 → consumption DDL → post-DDL integrity → **신규 server code deploy** → mobile/dist → orchard-api start → SW/update → smoke → 첫 소량 HARVEST N:M.
+
+**금지:** schema 적용 **전** 신규 code 활성화 · `운영 적용 완료` · `production operational` 표현.
+
+**RAW_STOCK OPEN (Lightsail rehearsal):** rehearsal DB 원물 0건 → RAW 생산 E2E **미수행**. PC D1 RAW **PASS** · Core/API/Mobile regression **PASS** → **CAN-DEFER / non-blocking**.
 
 ---
 
@@ -50,7 +91,7 @@
 | 0 | 주문·판매·재고 설계 / PC 기준 | — | — | HISTORICAL (2026-08-17) |
 | 1 | 모바일 진입·메뉴·라우팅 | **구현** | **반영** | ops 반영 (과거 기록) |
 | 2 | 주문 조회·등록·수정·취소 | **구현** | **반영** | ops 반영 (과거 기록) |
-| 3 (=H) | 수확기록 — 품종·콘테이너 (**단일 HARVEST**) | **구현** | **반영** | harvest DDL **ops 확인 필요** |
+| 3 (=H) | 수확기록 · **HARVEST N:M** (DEC-035) | **구현** | **반영** (`2aa47de`) | harvest/consumption DDL **OPS PENDING** |
 | 4 (=P) | 생산/변환 PACK·PROCESS | **구현** | **반영** | core 반영 · ops **미확인** |
 | 5A (=3A) | 재고배정 HOLD/RELEASE/allocation | **구현** | **반영** (`OrderAllocationService`) | **ops allocation DDL 별도 게이트** · ops 적용 **미확인** |
 | 5B | fruit-stock 조회·이력 | **구현** | **반영** | ops **미확인** |
@@ -61,16 +102,17 @@
 
 \*Stage 7·8은 **기존 게이트 번호 유지**. Stage 7 **TARGET 의미만** 갱신. 신규 Stage 번호 **부여 없음**.
 
-**HARVEST N:M (DEC-035):** Stage H **단일 수확 생산 = CURRENT**. 복수 수확·잔량 = **APPROVED NEXT** — H/P를 미완료로 **되돌리지 않음**.
+**HARVEST N:M (DEC-035):** **IMPLEMENTED IN GIT** · D1/D2 **REHEARSAL PASS** · **OPS activation pending**. operating production HARVEST N:M **아직 비활성**.
 
 ---
 
 ## git main 반영 · ops 미배포 (현재 확인 기준)
 
-ops backend 기록: **`b48ca8b`** (Stage5 판매목록 수준, **과거 SHA**). git `main` @ `bb8c872`에는 아래가 **코드상 존재**하나, **ops 배포 완료로 확정하지 않음**.
+ops backend 기록: **`b48ca8b`** (Stage5 판매목록 수준, **과거 SHA**). git `main` @ `2aa47de`에는 DEC-035 포함 아래가 **코드상 존재**하나, **ops 배포 완료로 확정하지 않음**. Lightsail running code **`bb8c872`**.
 
 | 항목 | Core/API | git main | ops (문서 기준) |
 |------|----------|----------|-----------------|
+| **DEC-035 HARVEST N:M** | **IMPLEMENTED** | **반영** (`2aa47de`) | consumption DDL **미적용** · code **미배포** |
 | Stage4 선입금·수금 Core·배분 | **구현** | **반영** | ops 반영 (과거 기록 · `fb413a3`/`b48ca8b` 계열) |
 | Stage5 판매목록 | **구현** | **반영** | ops **`b48ca8b`** (과거 기록) |
 | Stage6-0 수금상태 조회 계약 | **구현** | **반영** | **미배포** |
@@ -90,13 +132,13 @@ ops backend 기록: **`b48ca8b`** (Stage5 판매목록 수준, **과거 SHA**). 
 
 설계 상세는 01~05·07·09 참조. **체크 완료 표기 금지.**
 
-### A. HARVEST N:M — DEC-035
+### A. HARVEST N:M — DEC-035 — **IMPLEMENTED IN GIT**
 
-**CURRENT:** 단일 HARVEST 선택 생산.
+**상태:** A~C **PASS** · D1/D2 **REHEARSAL PASS** · **OPS PENDING**.
 
-**TARGET:** 복수 수확 · 부분소진 · 잔량 · 최소 consumption 이력.
+**IMPLEMENTED:** `t_harvest_consumption` · `harvest_consumptions[]` · PC/Mobile N:M · production trace.
 
-**OPEN:** OPEN-DDL · production confirmation persistent identity · OPEN-DONE
+**OPEN:** **OPEN-DONE** · **OPS DDL/code activation**
 
 ### B. 경매 출하 — DEC-036
 
@@ -139,15 +181,14 @@ git main 반영 · ops 미배포: 6A~7B · S4A 등 — ops SHA · 필요 DDL · 
 
 ### 신규 구현 순서 후보
 
-1. DEC-035 물리설계
-2. HARVEST N:M Core/API/Mobile
-3. DEC-036 물리설계
-4. 경매 출하 Core/API/Mobile
-5. 시장/법인 + 청과결과 read/매칭
-6. OPEN-AUCTION-MATCH-CARDINALITY 실데이터 검증
-7. OPEN-QTY-DIFF 정책
-8. DEC-037 경매 판매확정
-9. 통합 회귀 / **승인된** migration / 운영 배포
+1. ~~DEC-035 물리설계~~ · ~~HARVEST N:M Core/API/Mobile~~ — **IMPLEMENTED IN GIT** · **OPS PENDING**
+2. DEC-036 물리설계
+3. 경매 출하 Core/API/Mobile
+4. 시장/법인 + 청과결과 read/매칭
+5. OPEN-AUCTION-MATCH-CARDINALITY 실데이터 검증
+6. OPEN-QTY-DIFF 정책
+7. DEC-037 경매 판매확정
+8. 통합 회귀 / **승인된** migration / 운영 배포
 
 **Stage 7 (TARGET 의미):** 경매 출하 → 출하중 → 청과 확인/매칭 → 판매확정 → 정산.
 설명형 sub-gate(출하/가용 · 청과/매칭 · 판매확정/정산)로만 분리 — **`7a/7b/7c` 식별자 생성 없음**.
@@ -168,9 +209,10 @@ git main 반영 · ops 미배포: 6A~7B · S4A 등 — ops SHA · 필요 DDL · 
 
 | 항목 | 분류 | 필요한 시점 |
 |------|------|-------------|
-| 수확 최소 DDL | **BLOCKER** | HARVEST N:M 구현 전 |
-| 생산확정 영속 식별 | **BLOCKER** | HARVEST N:M 구현 전 |
-| OPEN-DONE | **CAN-DEFER** | N:M 1차 |
+| 수확 consumption DDL (design) | **CLOSED** | DEC-035-A (`eea8511`) |
+| 생산확정 `prod_confirm_id` (design) | **CLOSED** | DEC-035-B |
+| **OPS consumption DDL apply** | **PENDING** | PC·Lightsail maintenance |
+| OPEN-DONE | **CAN-DEFER** | N:M 1차 — **유지 OPEN** |
 | 경매 출하 최소 DDL | **BLOCKER** | 경매 출하 구현 전 |
 | OPEN-SHIP-STATE | **BLOCKER** | 경매 출하 구현 전 |
 | 가용 집계 방식 | **BLOCKER** | 경매 출하/fruit-stock |
@@ -343,7 +385,7 @@ private main merge 완료. 단계 3는 별도 브랜치.
 
 ## 단계 H (수확기록)
 
-**CURRENT (2026-08-28):** Core·API·PC·모바일·테스트 **구현 완료** · git `main` **반영** · **단일 HARVEST** 생산. **HARVEST N:M (DEC-035) = APPROVED NEXT.**
+**CURRENT (2026-08-28):** Stage H 수확기록 + **DEC-035 HARVEST N:M** — Core·API·PC·모바일·테스트 **IMPLEMENTED IN GIT** (`2aa47de`) · D1/D2 **REHEARSAL PASS** · **OPS activation pending**.
 
 > **HISTORICAL (2026-08-19 당시):** 「private main merge 아님 · 운영 DB migration 미실행」 — 당시 기록.
 

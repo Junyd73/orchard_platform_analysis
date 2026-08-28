@@ -4,8 +4,7 @@
 > 주문/판매 상세는 [02_domain_flow.md](./02_domain_flow.md). 데이터 계약은 [03_data_contract.md](./03_data_contract.md).
 > OPEN-PROD-01~03 **CLOSED**. Stage P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). *(역사 스냅샷의「main 미머지」는 [06](./06_development_progress.md) 역사 절 참고)*.
 >
-> **개정 범위 (문서):** 수확잔량·HARVEST N:M 부분소진·경매 출하중·청과확인·판매확정 흐름을 SSOT에 반영.
-> 코드·DDL·DEC 상태 변경은 본 문서 작업에 **포함하지 않음**. 물리 테이블/컬럼명 **미확정** ([§23](#23-open-정책)).
+> **개정 (2026-08-28):** DEC-035 HARVEST N:M — **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING** ([06](./06_development_progress.md)). 경매(DEC-036/037)는 설계·미구현. DEC-035 물리 스키마 = [03 §8A](./03_data_contract.md).
 
 ---
 
@@ -128,11 +127,9 @@
 
 ### DEC-025와의 관계
 
-현재 요구에서 기존 구조만으로는 위 3축을 **의미·정정·추적성을 훼손하지 않고** 보존하기 어렵다는 점이 READ ONLY로 확인됨.
-→ **최소 소진이력**에 한해 DEC-025 **보완 DEC 검토가 필요** ([§22](#22-dec-영향-맵-이번-개정)).
-DEC-025 상태 자체는 본 문서에서 변경하지 않는다. 물리 스키마는 [OPEN-DDL](#23-open-정책).
+DEC-025 **유지** (`t_production_*` 풀세트 금지). DEC-035 **최소 소진이력** = `t_harvest_consumption` — **IMPLEMENTED IN GIT** · **OPS DDL PENDING** ([03 §8A](./03_data_contract.md) · [07 DEC-035](./07_decisions.md)).
 
-생산확정 TX에서는 **소진이력 기록 + 상품 전량 IN(DEC-023)** 을 정합 처리한다 ([§16.4](#164-harvest-복수--부분소진)).
+생산확정 TX에서는 **consumption INSERT + 상품 전량 IN(DEC-023)** 을 `BEGIN IMMEDIATE` 한 TX에서 처리 ([§16.4](#164-harvest-복수--부분소진)).
 
 ---
 
@@ -476,10 +473,7 @@ STOCK/DIRECT **폐기 아님**. 다만 **전체 판매모델 설명에는 부족
 | **OPEN-PROD-02** | **CLOSED** | `variety_cd` + `harvest_container_qty` |
 | **OPEN-PROD-03** | **CLOSED** | §5.1 **전량 IN → 판매/출고 OUT**. 생산/판매 TX **분리** |
 
-**보완 검토 (상태 변경 아님):**
-수확 N:M 부분소진·경매 출하 묶음/라인에서 기존 구조의 **명백한 부족**이 확인됨.
-→ **최소 소진이력** · **최소 출하 묶음+라인** 개념에 한해 DEC-025 **보완 DEC 검토 필요** ([§22](#22-dec-영향-맵-이번-개정)).
-물리 스키마는 [OPEN-DDL](#23-open-정책).
+**보완 (2026-08-28):** DEC-035 `t_harvest_consumption` · `prod_confirm_id` · production trace — **IMPLEMENTED IN GIT** · copy rehearsal **PASS** · **OPS DB 미적용**.
 
 ### 9.1 생산확정 DB — 전량 IN (CLOSED)
 
@@ -507,9 +501,9 @@ STOCK/DIRECT **폐기 아님**. 다만 **전체 판매모델 설명에는 부족
 | 영역 | 기존 PC/DB | 그대로 사용 | 최소 보완 | 비고 |
 |------|------------|-------------|-----------|------|
 | 수확기록 | `t_work_detail` | 작업일·품종·상자 | 잔량 표시 | DEC-022 |
-| 수확 소진 | (없음) | — | **최소 소진이력 3축** | OPEN-DDL |
+| 수확 소진 | `t_harvest_consumption` | consumption 3축 | **IMPLEMENTED IN GIT** | **OPS DDL PENDING** |
 | 원물재고 | `register_raw_material` | CT01·IN/OUT | 수확과 **분리** | |
-| PACK HARVEST | 1건·소진 없음 | 상품 전량 IN | **복수·부분소진** | §16.4 |
+| PACK HARVEST | N:M · partial · overconsume reject | 상품 전량 IN | **IMPLEMENTED IN GIT** | **OPS activation pending** |
 | PACK RAW_STOCK | N건 | 유지 | — | §16.1 |
 | 경매 출하중 | (없음) · DRAFT만 | — | **출하 묶음+라인** | ≠ DRAFT |
 | 가락 판매 | DRAFT (legacy) | 판매초안 경로 · **출하 SSOT 아님** | **DEC-037** 확정+OUT · 분류 자동 | **DEC-010 SUPERSEDED** |
@@ -632,9 +626,9 @@ Production IN · GET fruit-stock · allocation FIFO는 위 키를 **같은 의�
 
 ---
 
-## 16. 생산 ↔ 재고 · 복수 원물 / 복수 수확 (Stage 4/5B+)
+## 16. 생산 ↔ 재고 · 복수 원물 / 복수 수확 (Stage 4/5B+) — **IMPLEMENTED IN GIT**
 
-동일 Production TX (`ProductionService.confirm`, `BEGIN IMMEDIATE` 1회) — 목표 모델.
+동일 Production TX (`ProductionService.confirm`, `BEGIN IMMEDIATE` 1회) — git `main` 구현. **OPS activation pending.**
 
 | 조합 | 원물/수확 소진 | 결과 IN |
 |------|:--------------:|:-------:|
@@ -665,9 +659,9 @@ Mobile payload: `raw_consumptions`에 `qty > 0`인 row만 포함.
 차단: 신고/2025 + 신고/2026 (`MIXED_YEAR`).
 HARVEST 복수 선택 시에도 **동일 품종·동일 수확연도**만 허용.
 
-### 16.4 HARVEST 복수 · 부분소진
+### 16.4 HARVEST 복수 · 부분소진 — **IMPLEMENTED IN GIT**
 
-**목표 업무:**
+**업무 흐름 (git `main`):**
 
 ```
 8/27 수확 30 · 8/28 수확 40
@@ -684,10 +678,15 @@ HARVEST 복수 선택 시에도 **동일 품종·동일 수확연도**만 허용
 | 잔량 | §0.2 공식. 남음 > 0 → 다음 포장 재사용 |
 | TX | 소진이력(3축) + 상품 **전량 IN** 동일 TX |
 | stock | 수확 상자 → `t_stock_master` OUT **없음** (DEC-022) |
-| DONE | **잔량 SSOT로 쓰지 않음** ([OPEN-DONE](#23-open-정책)) |
+| TX | `BEGIN IMMEDIATE` · consumption + 상품 **전량 IN** + `ref_type=PRODUCTION` 동일 TX |
+| overconsume | TX 내 잔량 재검증 · **reject** |
+| production trace | `t_stock_log.ref_type='PRODUCTION'` · `ref_id=prod_confirm_id` |
+| DONE | **잔량 SSOT로 쓰지 않음** · `DONE ≠ remaining 0` ([OPEN-DONE](#23-open-정책)) |
+| OPS | PC·Lightsail 운영 DB DDL **미적용** · operating HARVEST N:M **비활성** |
 
-**현행 코드 (스냅샷):** Mobile `PackProdPanel` · PC는 수확 **1건** 선택, `work_ids: []`, 소진이력 없음, 확정 시 work `DONE`.
-→ 목표와 다름. 구현은 후속. 역사 표기는 [부록](#부록-superseded--현행-코드-스냅샷).
+**Client (C — `2aa47de`):** Mobile `PackProdPanel` · PC `stock_page` — 복수 선택 + 행별 `harvest_consumptions[]`. legacy `harvest_work_id` only **reject**.
+
+**SUPERSEDED:** 단일 HARVEST · 소진이력 없음 · `work_ids: []` only — [부록](#부록-superseded--현행-코드-스냅샷).
 
 ---
 
@@ -813,7 +812,7 @@ DEC-027의 **판매 OUT**은 **판매확정** 시점. 경매 **출하중**은 OU
 | **OPEN-QTY-DIFF** | 출하수량 ≠ 청과확인수량일 때 감모·반입·정정·회계 처리 |
 | **OPEN-DONE** | HARVEST `DONE`의 최종 의미 (잔량 SSOT로 쓰지 않음은 확정) |
 | **OPEN-SHIP-STATE** | 출하중 / 확인 / 매칭 / 확정 등 **상태값** 목록 |
-| **OPEN-DDL** | 수확 소진이력 · 출하 헤더/라인의 **물리 스키마·테이블/컬럼명** |
+| **OPEN-DDL** | **경매** 출하 헤더/라인 **물리 스키마**. DEC-035 consumption = design **CLOSED** · **OPS DDL PENDING** |
 | **DEC-016** | 경매 확정 시 `t_sales_delivery` 생성 여부 (기존 OPEN 유지 · [07](./07_decisions.md)) |
 
 > **HISTORY — SUPERSEDED (OPEN 아님):** **DEC-010** — `AUCTION_RT DRAFT→CONFIRMED+OUT` 단일 TX. **2026-08-27** 후계 **DEC-036/037**로 전환 완료.
@@ -827,10 +826,7 @@ DEC-027의 **판매 OUT**은 **판매확정** 시점. 경매 **출하중**은 OU
 | 구분 | 내용 |
 |------|------|
 | SUPERSEDED | 「생산/재고 범위 재설계 없음」(구 머리말) |
-| SUPERSEDED | HARVEST = 사실상 **1건** + 소진이력 없음 + `DONE`으로 종료한 설계 서술 |
-| SUPERSEDED | 가락을 **`DRAFT → CONFIRMED → OUT`만**으로 출하까지 설명 |
-| SUPERSEDED | DRAFT를 **경매출하 SSOT**처럼 읽을 수 있던 표현 |
-| SUPERSEDED | 가용 = `in − out − reserved`**만**으로 충분하다는 암시 |
-| 현행 코드 | `PackProdPanel` / PC: 수확 단일 선택 · `work_ids: []` · 소진이력 없음 · DONE 마킹 |
+| SUPERSEDED | HARVEST = **단일** + 소진이력 없음 + legacy `harvest_work_id` (pre-DEC-035-C) |
+| **IMPLEMENTED IN GIT** | HARVEST N:M · `harvest_consumptions[]` · `t_harvest_consumption` · PC/Mobile (`2aa47de`) · **OPS PENDING** |
 | 현행 코드 | `save_realtime_auction_draft`: `t_sales_*` DRAFT+AUCTION_RT · 재고 미접촉 · `stock_seq` 없음 |
 | 참고 | DEC-025 **상태**는 SUPERSEDED로 바꾸지 않음 — §9·§22의 「보완 검토」표현만 사용 |
