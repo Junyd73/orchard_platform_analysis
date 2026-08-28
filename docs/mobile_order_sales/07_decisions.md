@@ -8,6 +8,7 @@
 승인일 표기: 대표 검토 반영일 **2026-08-17**. 단계 0 **최종승인 완료** (2026-08-17 대표). 단계 0은 다시 열지 않음.  
 **2026-08-21 대표 승인:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**.  
 **2026-08-23 대표 승인:** DEC-030 **신규 APPROVED** (6C write validation 전용).
+**2026-08-27 대표 승인:** DEC-010 **SUPERSEDED** (후계 DEC-036/037) · DEC-035 · DEC-036 · DEC-037 **신규 APPROVED** (설계. 구현·DDL 아님).
 
 ---
 
@@ -41,6 +42,17 @@
 | DEC-030 | **신규 수금일** `sales_dt ≤ pay_dt ≤ today` (legacy 조회만) | DEC-030 |
 | DEC-031 | **출고확정 CONFIRMED** PC read-only | DEC-031 |
 | DEC-032 | **PC 수금 append-only** (IMPLEMENTED) | DEC-032 |
+
+## 대표 확정 대응 (2026-08-27)
+
+| 대표 ID | 내용 | DEC |
+|---------|------|-----|
+| DEC-010 | **SUPERSEDED** — `AUCTION_RT DRAFT→CONFIRMED+OUT`만으로 가락 출하 전체를 설명하던 정책 폐기. 후계 DEC-036(출하중) / DEC-037(판매확정) | DEC-010 → 036/037 |
+| DEC-035 | 수확잔량 SSOT · HARVEST N:M 부분소진 · 최소 소진이력 (**설계 APPROVED**) | DEC-035 |
+| DEC-036 | 경매 출하 ≠ DRAFT · 출하 묶음+라인 · 출하중 (**설계 APPROVED**) | DEC-036 |
+| DEC-037 | 경매 판매확정 · 최종 승인 수량 OUT · SA 자동분류 · 원자 TX (**설계 APPROVED**) | DEC-037 |
+
+SSOT 상세: [09](./09_production_inventory_flow.md). 본 승인 = **문서/DEC 설계**. 코드·DDL·IMPLEMENTED 아님.
 
 ---
 
@@ -180,11 +192,13 @@
 
 | | |
 |--|--|
-| 상태 | **APPROVED** (방향). 현재 PC는 확정 함수가 없어 **보완 구현 필요**. |
-| 결정 | confirm 한 트랜잭션: 상태 CONFIRMED + 가용 재검증 + `out_qty` 증가 + stock log + (선택) 수금/전표. 실패 시 전체 rollback. |
-| 이유 | 재고만 빠지거나 판매만 CONFIRMED 되는 상태를 금지. |
-| 영향 | 단계 6. 초안 저장 시점에는 재고를 건드리지 않음(현재와 동일). 배송행이 초안에 없으면 확정 TX에서 생성할지 **OPEN**(DEC-016). |
-| 승인 | 2026-08-17 대표 (DEC-C) |
+| 상태 | **SUPERSEDED — 2026-08-27**, 후계 **DEC-036** / **DEC-037** |
+| 결정 (역사) | confirm 한 트랜잭션: 상태 CONFIRMED + 가용 재검증 + `out_qty` 증가 + stock log + (선택) 수금/전표. 실패 시 전체 rollback. |
+| 이유 (역사) | 재고만 빠지거나 판매만 CONFIRMED 되는 상태를 금지. |
+| 영향 (역사) | 단계 6. 초안 저장 시점에는 재고를 건드리지 않음(현재와 동일). 배송행이 초안에 없으면 확정 TX에서 생성할지 **OPEN**(DEC-016). |
+| 승인 (역사) | 2026-08-17 대표 (DEC-C) |
+| SUPERSEDED 사유 | `AUCTION_RT DRAFT → CONFIRMED + OUT`만으로 **가락 전체 출하 흐름**을 설명하던 정책은 폐기. **판매 DRAFT는 경매 출하중 SSOT가 아님**. 경매 **출하중**은 **DEC-036**, 경매 **판매확정**은 **DEC-037**로 분리. |
+| 후계가 승계하는 원칙 | **판매확정 + 재고 OUT은 하나의 원자적 업무 TX이며 실패 시 전체 rollback** — 이 원자성만 **DEC-037**이 승계. |
 
 ---
 
@@ -353,7 +367,7 @@
 |--|--|
 | 상태 | **APPROVED** |
 | 결정 | 중복입력 금지. 생산수량 판매 재입력 금지(A안). 자동(날짜·채번). 선택 단계 강제 화면 금지. Batch 사용자 관리 금지. |
-| 영향 | 모바일·PC·생산→판매 연동 설계. [09 §0](./09_production_inventory_flow.md). Stage 6 판매화면 4정책: [04 §9](./04_mobile_screen.md) |
+| 영향 | 모바일·PC·생산→판매 연동 설계. [09 §0](./09_production_inventory_flow.md). Stage 6 판매화면 4정책: [04 §9](./04_mobile_screen.md). **경매(DEC-036):** 다건 선택·일괄 [경매 넘기기] · 내부 `stock_seq`/`work_id`/출하 내부번호 **비노출** · 농부 중복입력 금지. |
 | 승인 | 2026-08-19 대표 논의 반영 |
 
 ---
@@ -369,6 +383,7 @@
 | DDL 설계 | `variety_cd TEXT` · `harvest_container_qty INTEGER` (convention 준수). **`core/work_harvest_schema.py` 멱등 ALTER** — 로컬/테스트만. 운영 자동실행 금지 |
 | PC | `work_log_page` 수확 입력 · `register_raw_material`과 **미연동** |
 | 구현 | PC/모바일 영농일지 필드 — **Stage H 완료** (2026-08-19). 통계 화면은 후속 |
+| 관련 | **수확잔량 및 N:M 부분소진은 DEC-035** ([09 §0.2·§16.4](./09_production_inventory_flow.md)) |
 | 승인 | 2026-08-19 대표 |
 
 ---
@@ -383,6 +398,7 @@
 | 결정 | 선택: [재고로 저장] / [바로 판매]. **재고로 저장 = 확정 TX 이후 UI reset** (추가 IN 아님). 바로 판매: 생산수량→판매 화면 자동·재입력 금지. 판매 80/생산 100 → **20 자동 상품재고**. 생산 화면에서 80/20 분할 입력 금지. |
 | 기술 | **전량 IN**(현 PC) → 판매/출고 확정 시 **OUT** (Stage 5C). partial IN **폐기**. 생산 TX와 판매 TX **분리**. 판매 중단해도 생산재고 유지. rollback 금지. IN/OUT은 내부 처리. 원물 N건·harvest_year 승계는 **DEC-026**. |
 | PC | `save_production_log` 전량 IN = 확정안과 **동일**. 바로판매 prefill·OUT **미구현** (후속) |
+| 관련 | **DEC-035** — 수확 소진이력은 투입 추적 **별축**이며 상품 **전량 IN** 정책과 충돌하지 않음 |
 | 승인 | 2026-08-19 대표 |
 
 ---
@@ -406,9 +422,10 @@
 
 | | |
 |--|--|
-| 상태 | **APPROVED** |
-| 결정 | `t_stock_master` · `t_stock_log` · `t_work_*` · 판매/주문 우선. `t_production_master`/`t_production_detail` **생성 안 함**. Batch 사용자 UI·번호 입력 **금지**. 명백한 부족이 구현에서 확인되기 전 신규 생산테이블 **제안 금지**. |
+| 상태 | **APPROVED** (SUPERSEDED **금지**. 2026-08-27에도 상태 유지) |
+| 결정 | `t_stock_master` · `t_stock_log` · `t_work_*` · 판매/주문 우선. `t_production_master`/`t_production_detail` **풀세트 생성 안 함**. Batch 사용자 UI·번호 입력 **금지**. 명백한 부족이 확인되기 전 신규 생산테이블 **제안 금지**. |
 | DDL | 수확만: `variety_cd` + `harvest_container_qty` (DEC-022). 생산/판매는 기존 구조. |
+| 보완 (2026-08-27) | READ ONLY 검증([09](./09_production_inventory_flow.md))에서 **수확 N:M 소진**·**경매 출하중**은 기존 구조만으로 **명백한 부족**이 확인됨. **최소 구조** 허용 범위는 **DEC-035**(소진이력) · **DEC-036**(출하 묶음+라인). `t_production_*` **풀세트 금지는 유지**. |
 | 승인 | 2026-08-19 대표 |
 
 ---
@@ -424,7 +441,7 @@
 | 결정 | `harvest_year`는 **생산(포장)연도가 아니라 원료 과실의 수확연도**. RAW_STOCK: 상품/배즙 = 투입 원물 `harvest_year` 승계. HARVEST: 수확기록 `work_dt` 연도. PROCESS: 원물 승계. 한 생산에서 **다른 harvest_year 혼합 금지**, **다른 품종 원물 혼합 금지** (Core `MIXED_YEAR` / `MIXED_VARIETY`). |
 | 이유 | 생산일과 원료 연도는 다를 수 있음. 저장배는 다음 해 포장 가능. 주문 allocation이 `harvest_year`로 재고 탐색 (DEC-018). 상품 traceability 유지. |
 | 운영 제약 | 배 재고는 1년 이상 장기보관을 일반 전제로 하지 않음. 다년도 rollover UI **도입하지 않음**. `harvest_year` 필드는 유지. |
-| 관련 | DEC-004 (규격에 harvest_year 포함) · DEC-018 (FIFO 키에 harvest_year) · DEC-023 (전량 IN, TX 분리 — 충돌 없음) · DEC-025 (신규 테이블 없음) |
+| 관련 | DEC-004 (규격에 harvest_year 포함) · DEC-018 (FIFO 키에 harvest_year) · DEC-023 (전량 IN, TX 분리 — 충돌 없음) · DEC-025 (신규 테이블 없음) · **DEC-035** (복수 HARVEST에서도 **동일 품종·동일 harvest_year**) |
 | 승인 | 2026-08-19 대표 (Stage 5B 구현 확정) |
 
 ---
@@ -453,7 +470,7 @@
 
 DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자동실행 금지. `ensure_order_alloc_schema`와 분리.
 
-| 관련 | DEC-013 · **017** · **018** (HOLD≠OUT, alloc SSOT) · **020** · **026** |
+| 관련 | DEC-013 · **017** · **018** (HOLD≠OUT, alloc SSOT) · **020** · **026** · **DEC-036**(경매 출하중 — **`reserved_qty`/`out_qty` 아님**) · **DEC-037**(경매 판매확정 OUT) |
 | 승인 | 2026-08-19 대표 |
 
 ---
@@ -575,13 +592,114 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ---
 
+## DEC-035
+
+**수확잔량 SSOT와 HARVEST N:M 부분소진을 최소 소진이력으로 관리한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (설계. **구현·DDL 아님**) — **2026-08-27 대표** |
+| 결정 | 아래. |
+
+1. 수확 원장은 **DEC-022**의 `t_work_detail` 유지.
+2. 수확 저장 ≠ `t_stock_master` 자동 IN. 단위 = **콘테이너 상자**.
+3. 잔량 SSOT: `수확 상자수 − 유효한 누적 소진 상자수`.
+4. 한 생산에 **복수** 수확기록 투입 가능. 한 수확기록을 **여러** 생산에서 **부분소진** 가능.
+5. 최소 추적 **3축**: `harvest work` ↔ `생산확정 1회 내부식별` ↔ `사용 상자수`.
+6. 부분소진 후 잔량 > 0 이면 **다음 생산에 재사용** 가능.
+7. 동일 품종·동일 `harvest_year`는 **DEC-026**. 생산확정 시 상품 **전량 IN**은 **DEC-023**.
+
+| 기각 | 이유 |
+|------|------|
+| `t_stock_log` **단독** SSOT | 수확은 stock row가 아님. 생산확정 1회·부분 원복 불가 |
+| `t_work_detail.used_qty` 등 **누적값만** | 포장별 기여·감사 추적 불가 |
+| 수확 → CT01/20kg 원물 **자동 변환** | DEC-022와 충돌 |
+| `t_production_master`/`detail` **풀세트** 선행 | DEC-025 유지 |
+
+| OPEN | 내용 |
+|------|------|
+| 생산확정 내부식별 | 물리 구현 미정 (**OPEN-DDL**) |
+| 소진이력 | 실제 테이블/컬럼 미정 (**OPEN-DDL**) |
+| HARVEST `DONE` | **잔량 SSOT로 쓰지 않음**만 확정. 폐지/전량소진 등 최종 의미는 **OPEN-DONE** |
+
+| 관련 | DEC-021 · **022** · **023** · **025** · **026** · [09 §0.2·§16.4](./09_production_inventory_flow.md) |
+| 승인 | **2026-08-27 대표** |
+
+---
+
+## DEC-036
+
+**경매 출하는 판매 DRAFT와 분리하고 최소 출하 묶음+라인을 출하중 SSOT로 한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (설계. **구현·DDL 아님**) — **2026-08-27 대표** |
+| 업무 흐름 | `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정` |
+| 결정 | 아래. |
+
+1. 경매 출하 ≠ 판매 **DRAFT**. DRAFT는 출하중 SSOT가 **아님** (DEC-010 SUPERSEDED 후계).
+2. 최소 **출하 묶음 + 출하 라인** 개념 필요. 물리 테이블/컬럼명 **미확정** (**OPEN-DDL**).
+3. 묶음(개념): 출하일 · 시장 · 법인 · 업무상태 등.
+4. 라인(개념): 원천 상품재고 연결 · **농장 출하수량** · **청과 확인수량** · 후속 판매 연결.
+5. 농장 출하수량은 **원본 보존** — 확인수량으로 **덮어쓰기 금지**. 확인수량은 **별도** 보존.
+6. 차이 = `확인수량 − 출하수량`. 차이 최종 처리(감모·반입·정정·회계)는 **OPEN-QTY-DIFF**.
+7. 출하중 수량 SSOT = **유효한 출하 라인 집계**. 단순 `transit_qty` 컬럼 하나 = SSOT **금지**.
+8. 출하 시 상품은 **가용재고에서 제외**. 아직 **판매 OUT 아님**.
+9. `reserved_qty` = **주문 HOLD 전용** — 경매 **재사용 금지**. 출하 시 `out_qty` **선차감 금지**.
+10. UX: `stock_seq`·출하 내부키 **비노출**(DEC-021). 여러 상품행 일괄 [경매 넘기기].
+
+| OPEN | 내용 |
+|------|------|
+| OPEN-SHIP-STATE | 출하중/확인/매칭/확정 등 **실제 상태 코드** |
+| OPEN-DDL | 출하 헤더/라인 물리 스키마 |
+| 출하 취소·정정 | 세부 TX 미정 |
+| OPEN-QTY-DIFF | 출하/확인 차이 최종 처리 |
+
+| 관련 | DEC-021 · **025** · **027** · **037** · [09 §2.3.1·§2.3.2·§14.1](./09_production_inventory_flow.md) |
+| 승인 | **2026-08-27 대표** |
+
+---
+
+## DEC-037
+
+**경매 판매확정은 최종 승인수량을 기준으로 판매·재고 OUT을 원자적으로 처리하고 판매분류를 자동 설정한다.**
+
+| | |
+|--|--|
+| 상태 | **APPROVED** (설계. **구현·DDL 아님**) — **2026-08-27 대표** |
+| 결정 | 아래. |
+
+1. **DEC-036** 출하중 이후 청과 확인/매칭을 거쳐 **판매확정**.
+2. 판매확정 시 **출하중 상태 종료**.
+3. **최종 승인된 판매수량** 기준으로 상품재고 **OUT**. 출하 시 OUT하지 않음 → **이중 OUT 금지**.
+4. 판매 생성/`CONFIRMED` + 재고 OUT + stock log = **하나의 원자적 업무 TX**. 하나라도 실패하면 **전체 rollback**.
+5. **DEC-010**이 남긴 원칙을 승계: **판매확정 + 재고 OUT은 원자 TX · 실패 시 rollback**.
+
+**경매 판매분류 자동** (사용자 선택 **금지**):
+
+| 축 | 코드 | 명칭 |
+|----|------|------|
+| 판매유형 | `SA010200` | 도매 |
+| 판매구분 | `SA020400` | 경매판매 |
+| 판매경로 | `SA030300` | 경매연동 |
+
+**수량:** 농장 출하수량·청과 확인수량 **원본 유지**. 판매확정에 쓰는 **최종 승인수량**은 별도 판단 결과.
+출하 20 / 확인 19 등 차이의 감모·반입·정정·재고조정·회계처리는 **본 DEC에서 확정하지 않음** → **OPEN-QTY-DIFF**.
+
+**Delivery:** 경매 확정 시 `t_sales_delivery` 생성 여부는 **DEC-016 OPEN 유지**. 본 DEC에서 임의 확정 **금지**.
+
+| 관련 | DEC-010(**SUPERSEDED**) · **016**(OPEN) · **027** · **036** · S4A · [09 §2.3·§5.3·§21](./09_production_inventory_flow.md) |
+| 승인 | **2026-08-27 대표** |
+
+---
+
 ## OPEN-PROD (CLOSED — 2026-08-19 대표 최종승인)
 
-설계 확정. Stage H/P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). 잔여 OPEN은 [06](./06_development_progress.md).
+설계 확정. Stage H/P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). 잔여 OPEN은 [06](./06_development_progress.md) · 아래 **OPEN (생산·경매 후속)**.
 
 | ID | 상태 | 확정 내용 | 후속 구현 |
 |----|------|-----------|-----------|
-| OPEN-PROD-01 | **CLOSED** | 추적 = `work_id` + `t_stock_log`. `t_production_*` 없음 | 구현 중 부족 확인 전 테이블 제안 금지 |
+| OPEN-PROD-01 | **CLOSED** | 추적 = `work_id` + `t_stock_log`. `t_production_*` 없음 | 최소 소진·출하는 **DEC-035/036** (풀세트 금지 유지) |
 | OPEN-PROD-02 | **CLOSED** | 영농일지. DDL `variety_cd TEXT` + `harvest_container_qty INTEGER` | **Stage H 구현 완료** — 운영 ALTER는 별도 승인 |
 | OPEN-PROD-03 | **CLOSED** | 전량 IN → 판매/출고 OUT. TX 분리. partial IN 폐기 | StockPage 바로판매 prefill · 공통 OUT TX |
 
@@ -589,16 +707,37 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ---
 
+## OPEN (생산·경매 후속 — 2026-08-27)
+
+확정 DEC와 **섞어 읽지 말 것**. 임의 CLOSED **금지**.
+
+| ID | 상태 | 내용 |
+|----|------|------|
+| **OPEN-QTY-DIFF** | **OPEN** | 출하수량 ≠ 청과확인수량일 때 감모·반입·정정·재고조정·회계 처리 |
+| **OPEN-DONE** | **OPEN** | HARVEST `DONE` **최종 의미**. (잔량 SSOT로 쓰지 않음은 DEC-035에서 확정) |
+| **OPEN-SHIP-STATE** | **OPEN** | 경매 출하 상태 **실제 코드/상태값** |
+| **OPEN-DDL** | **OPEN** | 수확 소진이력 · 경매 출하 헤더/라인 **물리 스키마** |
+| **OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** | 출하라인 ↔ 청과 경매결과 cardinality (1:1 / 1:N / N:M **미확정**). 상세 [05 §9B](./05_api_contract.md) · [DEC-036](#dec-036) 청과 확인/매칭 |
+| **DEC-016** | **OPEN** | 경매 판매확정 시 `t_sales_delivery` 생성 여부 |
+
+**역사:** 구 「OPEN-DEC-010」(출하중 선행 후 DEC-010 재정의 범위)는 **2026-08-27** DEC-010 **SUPERSEDED** + **DEC-036/037 APPROVED**로 **전환 완료**. 동일 주제를 중복 OPEN으로 남기지 않는다.
+
+---
+
 ## 상태 요약
 
 | ID | 상태 |
 |----|------|
-| DEC-001 ~ 014, **017, 018, 019, 020 ~ 027, 028, 029, 030, 031, 032, 033, 034** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
-| DEC-015, 016 | **OPEN** |
-| **OPEN-PROD-01~03** | **CLOSED** (설계·Core 반영됨. 상세 현황은 [06 현재 운영 기준](./06_development_progress.md)) |
+| DEC-001 ~ 009, **011** ~ 014, **017** ~ **027**, **028** ~ **034** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
+| **DEC-010** | **SUPERSEDED** (2026-08-27) → 후계 **036/037** |
+| **DEC-035**, **036**, **037** | **APPROVED** (설계. 구현·DDL·IMPLEMENTED **아님**) |
+| DEC-015, **016** | **OPEN** |
+| **OPEN-PROD-01~03** | **CLOSED** |
+| **OPEN-QTY-DIFF · OPEN-DONE · OPEN-SHIP-STATE · OPEN-DDL · OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** |
 
-2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.  
+2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.
 2026-08-26 갱신: **Stage7B-2 private main merge** · DEC-032/033/034 **IMPLEMENTED** · Stage7B PC 수금 공용화 완료 · 운영 미배포 · P1 COMMIT/UI 경계 유지.
+2026-08-27 갱신: **DEC-010 SUPERSEDED** · **DEC-035/036/037 신규 APPROVED**(설계) · OPEN-QTY-DIFF/DONE/SHIP-STATE/DDL 명시 · DEC-016 OPEN 유지.
 
 ### 스키마 확인 (2026-08-22)
 

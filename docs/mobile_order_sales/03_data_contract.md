@@ -1,10 +1,21 @@
-# 03. Data contract — 기존 테이블
+# 03. Data contract — 기존 테이블 · 승인 논리계약
 
-> **범위:** 주문/판매/재고 **기존** 테이블. 생산/변환 업무모델: [09_production_inventory_flow.md](./09_production_inventory_flow.md)  
-> Stage 3A migration: `core/order_alloc_migrate.py` (로컬·테스트). 운영 자동 실행 금지.  
-> **`t_production_*` 생성 안 함** (OPEN-PROD-01 **CLOSED**).
+> **범위:** 주문/판매/재고 **기존** 테이블 + 수확 소진·경매 출하의 **승인된 논리 계약**.
+> 업무 흐름: [09](./09_production_inventory_flow.md) · [02](./02_domain_flow.md). 정책: [07](./07_decisions.md).
+> Stage 3A migration: `core/order_alloc_migrate.py` (로컬·테스트). 운영 자동 실행 금지.
+> **`t_production_master`/`detail` 풀세트 생성 안 함** ([DEC-025](./07_decisions.md) · OPEN-PROD-01 **CLOSED**).
 
-운영 DB baseline:  
+**문서 층 (혼동 금지):**
+
+| 층 | 의미 |
+|----|------|
+| **CURRENT PHYSICAL** | 현재 실제 존재하는 테이블/컬럼/코드 계약 |
+| **APPROVED LOGICAL** | DEC-035/036/037로 승인된 논리 데이터 요구 (**아직 DB에 없다고 가정**) |
+| **OPEN PHYSICAL** | 신규 테이블명·컬럼명·PK/FK·상태코드·migration — **미확정** |
+
+수확 N:M 소진·경매 출하중에서 **기존 구조만으로는 명백한 부족**이 확인됨 → **최소 구조만** 논리 승인. 물리 DDL = **OPEN-DDL**. APPROVED LOGICAL을 이미 DB에 있는 것처럼 쓰지 않는다.
+
+운영 DB baseline (CURRENT):
 `t_order_*`, `t_sales_*`, `t_stock_master/log`, `t_cash_ledger`, `t_ledger`, `m_customer`, `m_warehouse`, `m_common_code`.
 
 ### 품목 코드 (PC `StockPage` SSOT)
@@ -18,6 +29,7 @@
 | FR010201 | 도라지배즙 | PROCESS 결과 |
 
 생산확정(PC): 원물 OUT + 상품 IN + `t_stock_log`. 판매 테이블은 **생산 시점에 만들지 않음** (DEC-005).
+수확 저장 ≠ stock 자동 IN ([DEC-022](./07_decisions.md) · [DEC-035](./07_decisions.md)).
 
 ---
 
@@ -123,19 +135,26 @@ migration 직전 운영 점검 필수 → §15.
 | 컬럼 | 문서 | 코드 | 설계 |
 |------|------|------|------|
 | sales_dt | YYYY-MM-DD | 판매화면 ISO / **주문경로 YYYYMMDD** | 신규 ISO (DEC-012). 과거 변환 없음 |
-| sales_tp | RETAIL/WHOLE | 주문 `'NORMAL'` | 정리 제안, 1차 비범위 가능 |
-| sales_status / sales_source | 문서 없음 | ALTER 후 사용 | **`DRAFT`/`CONFIRMED` 두 값만** (DEC-029). ORDER/AUCTION_RT 유지 |
+| sales_tp | RETAIL/WHOLE | 주문 `'NORMAL'` | 정리 제안, 1차 비범위 가능. **임의 폐기 금지** |
+| sales_status / sales_source | 문서 없음 | ALTER 후 사용 | **`DRAFT`/`CONFIRMED` 두 값만** (DEC-029). ORDER/AUCTION_RT **호환 유지** |
+| sales_type_cd / sales_category_cd / sales_route_cd | — | S4A canonical (**CURRENT PHYSICAL**) | 아래 §4.2. 경매 확정 자동값은 [DEC-037](./07_decisions.md) |
 | tot_sales_amt / tot_paid_amt / tot_unpaid_amt | 있음 | 판매금액 / 수금액 / 미수금 | **수금 SSOT는 `t_cash_ledger` SUM.** master `tot_paid_amt`/`tot_unpaid_amt`는 동기화·조회용 (개발순서 3 `SalesPaymentService`) |
 | order_no | 문서 없음 | 주문 INSERT만. **재저장 시 누락**. UNIQUE 없음 | 출고마다 동일 `order_no` 가능 → **주문 1:N 판매 SSOT** (DEC-017). 재저장 보존 |
 | slip_no / pay_method_cd | 문서 있음 | 판매 INSERT 일부 | **N회·복수 결제수단 수금의 SSOT 아님.** Core는 이 두 필드를 수금으로 갱신하지 않음 |
 
 채번: `generate_sales_no` vs 주문 `get_next_seq` 이중 → P0 공통화.
 
+**경매·판매상태 경계:**
+- **출하중은 `sales_status`가 아님** ([DEC-036](./07_decisions.md) · [02 §8.2](./02_domain_flow.md)).
+- `SHIPPED` / `TRANSIT` 등 **신규 `sales_status` 금지**.
+- **CURRENT:** `AUCTION_RT`+`DRAFT` 존재 가능. **출하중 SSOT가 아님**.
+- 경매 **판매확정** = [DEC-037](./07_decisions.md) (`CONFIRMED` + OUT 원자 TX).
+
 ### 4.1 수금상태는 계산값 (DEC-029 APPROVED · Stage6-0 통일)
 
 **수금상태 컬럼을 만들지 않는다.** `sales_status`에 수금 의미를 넣지 않는다.
 
-**API/Core 코드 (`payment_status`):** `UNPAID` · `PARTIAL` · `PAID` · `null`  
+**API/Core 코드 (`payment_status`):** `UNPAID` · `PARTIAL` · `PAID` · `null`
 **UI label:** 미수 · 부분수금 · 수금완료 · 수금대기(DRAFT/`null`)
 
 | API 코드 | 조건 (조회 시 **cash SUM 기준** `paid` / `unpaid`) | UI label |
@@ -157,21 +176,43 @@ migration 직전 운영 점검 필수 → §15.
 | 주문완료 | `t_order_master.status_cd='ST010400'` AND `stock_status='Y'` |
 | 수금완료 | CONFIRMED · `payment_status = PAID` (조회 시 cash SUM + clamp) |
 
-**현재 구현:** 출고 TX에서 판매 INSERT 후 `SalesPaymentService.add_payment_in_tx`로 선입금 적용. `tot_paid_amt`/`tot_unpaid_amt`는 cash SUM 동기화 (DEC-019). **Stage4 · Stage3 Core 완료 · 운영.**  
-**Stage6-0:** `SalesQueryService` · `SalesPaymentService.get_payment_summary`가 동일 `compute_payment_status` helper 사용.  
-**Stage6B:** 수금내역 SSOT = `t_cash_ledger` 행. `payment_source` = `cash.order_no`만으로 `GENERAL`/`ORDER_PREPAY` 파생 (DB 컬럼 추가 없음). rmk/slip/id 패턴 추론 금지.  
-**DEC-030 (6C write · private main):** 신규 일반 수금 `pay_dt`는 Core `add_payment`에서 `sales_dt ≤ pay_dt ≤ today` 검증 · blank/future/before-sales reject. legacy cash는 조회만 · 자동보정 없음. `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt` (불변).  
+경매 **출하중/청과확인**은 위 3종과 **별도 물류 상태**이며 판매확정이 아니다 ([02 §8.4](./02_domain_flow.md)).
+
+**현재 구현:** 출고 TX에서 판매 INSERT 후 `SalesPaymentService.add_payment_in_tx`로 선입금 적용. `tot_paid_amt`/`tot_unpaid_amt`는 cash SUM 동기화 (DEC-019). **Stage4 · Stage3 Core 완료 · 운영.**
+**Stage6-0:** `SalesQueryService` · `SalesPaymentService.get_payment_summary`가 동일 `compute_payment_status` helper 사용.
+**Stage6B:** 수금내역 SSOT = `t_cash_ledger` 행. `payment_source` = `cash.order_no`만으로 `GENERAL`/`ORDER_PREPAY` 파생 (DB 컬럼 추가 없음). rmk/slip/id 패턴 추론 금지.
+**DEC-030 (6C write · private main):** 신규 일반 수금 `pay_dt`는 Core `add_payment`에서 `sales_dt ≤ pay_dt ≤ today` 검증 · blank/future/before-sales reject. legacy cash는 조회만 · 자동보정 없음. `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt` (불변).
 **적용액:** `min(remaining_prepay, 이번 판매 tot_sales_amt)`. 기존 CONFIRMED 판매는 수정하지 않는다.
+
+### 4.2 판매분류 (S4A · CURRENT PHYSICAL) · 경매 자동값 (DEC-037)
+
+**CURRENT PHYSICAL:** `t_sales_master`에 canonical 분류 3컬럼이 있다 (`core/sales_class_schema` · 공통코드 SA01/SA02/SA03).
+
+| 컬럼 | 축 |
+|------|-----|
+| `sales_type_cd` | 판매유형 (SA01…) |
+| `sales_category_cd` | 판매구분 (SA02…) |
+| `sales_route_cd` | 판매경로 (SA03…) |
+
+**APPROVED LOGICAL (경매 판매확정, DEC-037):** 사용자 선택 없이 자동:
+
+| 컬럼 | 값 | 명칭 |
+|------|-----|------|
+| `sales_type_cd` | `SA010200` | 도매 |
+| `sales_category_cd` | `SA020400` | 경매판매 |
+| `sales_route_cd` | `SA030300` | 경매연동 |
+
+legacy `sales_tp` / `sales_source`는 **임의 폐기하지 않음**.
 
 ---
 
 ## 5. `t_sales_detail`
 
-문서: `delivery_tp`. 코드: **`dlvry_tp`**.  
-주문 INSERT: `order_detail_id`, `wh_cd`.  
+문서: `delivery_tp`. 코드: **`dlvry_tp`**.
+주문 INSERT: `order_detail_id`, `wh_cd`.
 판매화면 `execute_full_save`: **`order_detail_id` 없음**. 경매: `crop_nm`. **harvest_year 없음.**
 
-**Stage 5C (DEC-027):** `stock_seq INTEGER NULL` — CONFIRMED 재고출고가 가리키는 `t_stock_master` row.  
+**Stage 5C (DEC-027) — CURRENT / 주문·DIRECT OUT:** `stock_seq INTEGER NULL` — CONFIRMED 재고출고가 가리키는 `t_stock_master` row.
 1행 = 1 `stock_seq`. FIFO N로트면 N행. DRAFT·레거시는 NULL. 물리 FK·NOT NULL 없음.
 
 `shipped_qty`(주문 출고 누적) = **컬럼 아님.** `SUM(t_sales_detail.qty)` WHERE 같은 `order_detail_id` AND 마스터 `sales_status='CONFIRMED'`. DRAFT 제외. `t_order_detail.out_qty` 사용 금지.
@@ -179,6 +220,12 @@ migration 직전 운영 점검 필수 → §15.
 부분출고: 같은 `order_detail_id`가 **여러 `sales_no`** 및 **같은 판매의 여러 상세**에 나타날 수 있다 (DEC-017 · FIFO 분할). 기존 CONFIRMED 판매를 후속 출고로 수정하여 수량을 증가시키지 않는다.
 
 **Stage6A 상세 조회:** API는 FIFO 분할 **raw 행 그대로** 반환 (`sale_detail_no ASC`). Mobile 상세는 `order_detail_id`+`item_cd`+규격+`unit_price`가 같을 때만 qty·item_amt 합산 표시(첫 등장 위치 유지). `order_detail_id` NULL(직접판매·경매)은 임의 spec grouping 금지.
+
+**경매 (APPROVED LOGICAL · DEC-036/037):**
+- 경매 **출하 라인을 `t_sales_detail`로 선행 생성하지 않는다**.
+- 농장 출하수량·청과 확인수량을 `qty` **하나로 덮어쓰지 않는다** — 원본은 출하 원장(DEC-036).
+- 판매확정 시 `t_sales_detail.qty` = **최종 승인 판매수량** 축 (DEC-037).
+- 출하 원천 상품재고는 **추적 가능**해야 한다. 실제 `stock_seq` 분할·사용자 상품행↔라인↔stock cardinality는 **OPEN-DDL** (화면 1행=라인 1행=`stock_seq` 1개로 **조기 확정 금지**).
 
 ---
 
@@ -194,11 +241,14 @@ migration 직전 운영 점검 필수 → §15.
 
 설계: 출고 TX에서 **해당 출고분만큼만** 생성. 주문 저장 시에는 만들지 않음 (DEC-005). 주문 배송계획 전체 복제 금지 (DEC-017).
 
+**고객배송 ≠ 경매출하:** `t_sales_delivery`는 **경매 출하중 SSOT가 아님**. 청과시장 출하는 고객배송과 **다른 업무** ([DEC-036](./07_decisions.md) · [02 §10](./02_domain_flow.md)).
+경매 판매확정 시 delivery 생성 여부 = [DEC-016](./07_decisions.md) **OPEN** (임의 확정 금지).
+
 ---
 
 ## 7. `t_stock_master` (재고관리 · PC StockPage)
 
-키(생산 UPSERT · 배정 FIFO):  
+키(생산 UPSERT · 배정 FIFO):
 `farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight, harvest_year, storage_dt`
 
 surrogate PK `stock_seq` — **추적키만** (DEC-027). 업무키를 대체하지 않음. UPSERT 후 natural key로 `SELECT stock_seq`.
@@ -206,16 +256,14 @@ surrogate PK `stock_seq` — **추적키만** (DEC-027). 업무키를 대체하�
 | 컬럼 | 의미 | PC / 설계 |
 |------|------|-----------|
 | in_qty | 입고 누적 | 원물등록·**생산확정 상품 IN** |
-| out_qty | 출고·폐기·**생산 원물 OUT** | `save_production_log` 원물 차감 |
-| reserved_qty | Hold | Stage 5A **주문 배정**만. 생산 IN과 별개. **OUT이 아님** |
+| out_qty | 출고·폐기·**생산 원물 OUT** | `save_production_log` 원물 차감. **경매 출하 시 증가 금지** (DEC-036) |
+| reserved_qty | Hold | Stage 5A **주문 배정만**. **OUT 아님** · **경매 출하중 아님** |
 | real_qty | 계산 (컬럼 아님) | `in_qty - out_qty` **현재고**. Mobile 재계산 금지 |
-| available_qty | 계산 (컬럼 아님) | `real_qty - reserved_qty` **가용** |
+| available_qty | 계산 (컬럼 아님) | 아래 CURRENT / APPROVED LOGICAL |
 
 **PC 현재 = 확정안:** 생산 100 → 상품 IN 100. 바로판매는 이후 OUT (OPEN-PROD-03 **CLOSED**, 코드 후속).
 
 **Stage 5A:** `reserved_qty`는 `t_order_alloc` 미출고분과 일치 (상품재고 FR010100/200). HOLD는 real_qty를 바꾸지 않음.
-
-가용: `SUM(in_qty-out_qty) - SUM(reserved_qty)` = `available_qty`. Core/API 계산값 표시.
 
 Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
@@ -223,16 +271,43 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
 배정 API는 **같은 트랜잭션 안에서** 가용수량을 다시 읽고 `request <= available`일 때만 `reserved_qty +=`. 동시 복수 주문 초과예약 방지.
 
+### 7.1 가용과 경매 출하중
+
+**CURRENT PHYSICAL:**
+
+```
+real_qty      = in_qty - out_qty
+available_qty = real_qty - reserved_qty
+```
+
+Core/API가 위 식으로 표시·배정 검증.
+
+**APPROVED LOGICAL ([DEC-036](./07_decisions.md) · [09 §14.1](./09_production_inventory_flow.md) · [02 §14](./02_domain_flow.md)):**
+
+판매·배정·경매 넘기기에 쓸 수 있는 가용은 개념적으로:
+
+```
+available ≈ real - order_reserved - active_auction_transit
+```
+
+- `order_reserved` = 기존 `reserved_qty` (**주문 HOLD 전용** 의미 유지).
+- `active_auction_transit` = **유효한 경매 출하 라인 집계** (논리 용어). **실제 컬럼명·SQL·뷰명 아님**.
+- 경매 출하 시 `out_qty` **증가 금지**. 단순 `transit_qty` 컬럼 하나 = SSOT **금지**.
+
+**OPEN PHYSICAL:** 집계 SQL·컬럼·뷰 · TX `BEGIN` 방식.
+
+**동시성 불변 (APPROVED LOGICAL):** 경매 출하 생성 시 (1) 현재 가용 재검증 (2) 유효 출하라인 생성 (3) 출하중 집계 반영이 **하나의 업무 TX 경계**에서 정합되어야 한다. 주문 HOLD와 경매 출하가 같은 가용을 **중복 소비**하지 못하게 한다. 실제 SQL은 OPEN PHYSICAL.
+
 ---
 
 ## 8. `t_stock_log`
 
 실값: `IN`, `OUT`, `AUDIT`, `HOLD`, `CANCEL_HOLD`.
 
-**Stage 5C DDL (DEC-027, 멱등):** `stock_seq INTEGER NULL`, `ref_type TEXT NULL`, `ref_id TEXT NULL`.  
+**Stage 5C DDL (DEC-027, 멱등):** `stock_seq INTEGER NULL`, `ref_type TEXT NULL`, `ref_id TEXT NULL`.
 물리 FK·NOT NULL 없음. 기존 행 NULL 유지. SALE 출고 시 `ref_type='SALE'`, `ref_id=sale_detail_no`.
 
-주문 HOLD/CANCEL_HOLD INSERT 컬럼 (현재 코드, 5C Core 전):  
+주문 HOLD/CANCEL_HOLD INSERT 컬럼 (현재 코드, 5C Core 전):
 `farm_cd, item_cd, variety_cd, harvest_year, grade_cd, size_cd, weight, io_type, qty, (parent_raw_size HOLD만), remark, reg_id, reg_dt`
 
 | 필드 | 주문 로그(현) | 5C 이후 |
@@ -251,6 +326,101 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 | 출고확정 | OUT (가능한 범위에서 판매번호·줄·자연키) — **신설 계약** |
 
 신규 io_type 문자열 남발 금지.
+
+**역할 경계 (APPROVED LOGICAL):**
+- [DEC-035](./07_decisions.md) 수확 N:M **소진 SSOT로 사용 금지**.
+- [DEC-036](./07_decisions.md) 경매 출하 묶음/라인 **SSOT로 사용 금지**.
+- 출하중 표현용 **신규 io_type 임의 확정 금지**.
+- [DEC-037](./07_decisions.md) 최종 판매 OUT은 기존 **`OUT` + `ref_type='SALE'`** 계약과 정합.
+- `t_stock_log` = **감사/이력**. 출하 **현재상태 원장이 아님**.
+
+---
+
+## 8A. 수확 소진 최소 논리계약 (DEC-035)
+
+상세 업무: [09 §0.2·§16.4](./09_production_inventory_flow.md). **설계 APPROVED · 구현·DDL 아님.**
+
+### CURRENT PHYSICAL
+
+`t_work_detail` (수확): `work_id` · `farm_cd` · `work_dt` · `variety_cd` · `harvest_container_qty` 등.
+- 수확 저장 ≠ `t_stock_master` 자동 IN. 단위 = 콘테이너 상자.
+- **소진 영속 이력 없음.** **생산확정 1회 영속 event key 없음** (TX·work DONE만으로는 N:M 구분 불가).
+
+### APPROVED LOGICAL
+
+반드시 보존하는 **최소 소진이력** 축:
+
+1. harvest work 식별
+2. **생산확정 1회** 내부식별
+3. 사용 콘테이너 상자수
+
+공통: farm · 감사 시각 · 기록 사용자.
+
+잔량 SSOT: `harvest_container_qty − SUM(유효 소진 상자수)`.
+상품 전량 IN = [DEC-023](./07_decisions.md). 동일 품종·연도 = [DEC-026](./07_decisions.md).
+
+**기각:** `t_stock_log` 단독 · `used_qty` 누적만 · CT01/20kg 자동변환 · 상품 natural key 중복 저장 · `t_production_*` 풀세트 · 사용자에게 내부 생산번호/`work_id` 입력.
+
+### OPEN PHYSICAL
+
+소진 구조 테이블명 · 생산확정 이벤트 영속키 · PK/FK · 취소/역분개 물리 · [OPEN-DONE](./07_decisions.md) · **OPEN-DDL**.
+
+---
+
+## 8B. 경매 출하 논리계약 (DEC-036)
+
+상세: [09 §2.3.1·§2.3.2](./09_production_inventory_flow.md) · [02 §6.1](./02_domain_flow.md). **설계 APPROVED · 구현·DDL 아님.**
+
+흐름: `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정`.
+
+### CURRENT PHYSICAL
+
+전용 출하 헤더/라인 **없음**. `AUCTION_RT`+`DRAFT` 판매만 (`save_realtime_auction_draft`) · 재고 미접촉 · **출하중 SSOT 아님**.
+
+### APPROVED LOGICAL
+
+**헤더(개념) 최소:** 내부 묶음식별 · farm · 출하일 · 시장 · 법인/거래처 · 업무상태 · 감사정보.
+
+**라인(개념) 최소:** 소속 묶음 · 원천 상품재고 **추적 가능성** · **농장 출하수량**(원본 불변) · **청과 확인수량**(별도) · 차이 파생 · 후속 판매 연결 · 감사정보.
+
+규격/품종/중량 등은 기존 stock join으로 복원 가능하면 **중복 최소화**.
+
+- 출하 ≠ 판매 DRAFT · 출하중 ≠ `sales_status`.
+- `reserved_qty` 재사용 금지 · 출하 시 `out_qty` 선차감 금지.
+- 출하중 수량 = **유효 출하 라인 집계**. 취소/정정 라인은 active 집계에서 **제외 가능**해야 함.
+- 단순 `transit_qty` 단독 SSOT **금지**.
+
+### OPEN PHYSICAL
+
+테이블명 · 컬럼명 · stock_seq 분할 cardinality · 상태코드(**OPEN-SHIP-STATE**) · 취소/정정 TX · PK/FK · **OPEN-DDL**.
+
+---
+
+## 8C. 경매 판매확정 연결계약 (DEC-037)
+
+상세: [09 §5.3](./09_production_inventory_flow.md) · [02 §6.2](./02_domain_flow.md). **설계 APPROVED · 구현·DDL 아님.** DEC-010 **SUPERSEDED** 원자성 승계.
+
+개념 TX (실패 시 **전체 rollback**):
+
+1. 출하/매칭 원장 확인
+2. **최종 승인 판매수량** 확인
+3. **판매 생성 또는 기존 DRAFT 확정** → `CONFIRMED` *(목표에서 DRAFT 필수 여부 = OPEN)*
+4. `t_sales_detail` ↔ stock 추적 (`stock_seq` 등 · cardinality OPEN-DDL)
+5. `t_stock_master.out_qty` 증가 (최종 승인 수량)
+6. `t_stock_log` SALE OUT (`OUT` + `ref_type='SALE'`)
+7. S4A 자동분류 (`SA010200` / `SA020400` / `SA030300`)
+8. rollback on failure
+
+- 출하 시 OUT **없음** → **이중 OUT 금지**.
+- `t_sales_detail.qty` = **최종 승인 판매수량** 축. 출하/확인 **원본은 출하 원장에 유지**.
+
+**예 (20 출하 / 19 확인):** 판매확정 19 → OUT 19.
+남은 차이 1을 자동 가용복귀·자동 OUT·감모·반입·재고조정 중 무엇으로 할지는 **OPEN-QTY-DIFF**.
+「판매확정 시 출하라인 전체가 자동 종료된다」고 **단정하지 않는다**.
+
+문구: **최종 승인수량은 판매 OUT 처리한다. 출하수량과 최종 승인수량의 미해결 차이분이 이후 가용·출하중·조정 중 어디에 귀속되는지는 OPEN-QTY-DIFF이며 임의 처리하지 않는다.**
+
+[DEC-016](./07_decisions.md) delivery 생성 여부 **OPEN**.
 
 ---
 
@@ -361,15 +531,31 @@ t_order_master.order_no
     └─ t_order_master.sales_no ──→ legacy/reference (최초 출고 또는 대표 참조)
          전체 판매 조회: t_sales_master.order_no = 주문번호 (1:N SSOT)
 
-t_stock_master.reserved_qty  ↔  t_order_alloc 미출고분 합 (행 단위)
+t_stock_master.reserved_qty  ↔  t_order_alloc 미출고분 합 (행 단위)  -- 주문 HOLD만
 t_stock_log                  =  HOLD / CANCEL_HOLD / OUT 이력 (현재상태 SSOT 아님)
 t_order_master.stock_status  =  전량 출고 시만 Y
 ```
 
+**APPROVED LOGICAL 추가 (물리 FK/테이블명 = OPEN-DDL):**
+
+```
+[수확 DEC-035]
+t_work_detail (harvest)
+    → 최소 소진이력 (3축)
+    → 생산확정 1회 내부식별
+    → 상품 IN (기존 t_stock_master)   -- DEC-023
+
+[경매 DEC-036/037]
+t_stock_master
+    → 경매 출하 라인 → 경매 출하 묶음
+    → (판매확정) t_sales_detail ← stock 추적
+    → out_qty + · t_stock_log SALE OUT
+```
+
 | 필드 | 현재 | 확정 설계 |
 |------|------|-----------|
-| reserved_qty | 주문 전량 Hold | 미출고 배정분. 출고 시 − |
-| out_qty | 판매출고 없음 | 출고 TX에서 + |
+| reserved_qty | 주문 전량 Hold | 미출고 배정분. 출고 시 −. **경매 출하중 아님** |
+| out_qty | 판매출고 없음 | 출고 TX / 경매 **판매확정**에서 +. **경매 출하 시 + 금지** |
 | stock_status | N만. Y 세팅 없음 | 전량 출고 시 Y. 부분출고 N |
 | allocated_qty | 없음 | **누적 배정**. 출고 후 유지 |
 | shipped_qty | 없음 | CONFIRMED 판매상세 합. 컬럼 없음 |
@@ -397,6 +583,28 @@ t_order_master.stock_status  =  전량 출고 시만 Y
 | `t_sales_detail.harvest_year` | 하지 않음 (주문 조인) |
 | 이행상태 컬럼 | 하지 않음 (계산) |
 | 주문↔판매 연결 새 컬럼 | **하지 않음.** SSOT는 기존 `t_sales_master.order_no` + `t_sales_detail.order_detail_id` |
+| S4A `sales_type_cd` / `sales_category_cd` / `sales_route_cd` | **CURRENT PHYSICAL** (기존). 경매 자동값 = DEC-037 |
+
+### APPROVED LOGICAL / OPEN PHYSICAL (물리명·ALTER 예정 표현 금지)
+
+| 항목 | 근거 | 상태 |
+|------|------|------|
+| 수확 소진 최소이력 | DEC-035 | 논리 승인 · **OPEN-DDL** |
+| 생산확정 1회 영속키 | DEC-035 | **OPEN-DDL** |
+| 경매 출하 헤더/라인 | DEC-036 | 논리 승인 · **OPEN-DDL** |
+| 출하/확인 수량 두 축 | DEC-036 | 논리 승인 · 물리명 미정 |
+| 출하 상태값 | OPEN-SHIP-STATE | **OPEN** |
+| 가용에서 출하중 제외 집계 | DEC-036 · §7.1 | 논리 승인 · SQL **OPEN** |
+
+### 하지 않음
+
+| 항목 | 이유 |
+|------|------|
+| `sales_status`에 `SHIPPED`/`TRANSIT` | 출하중 ≠ sales_status |
+| `transit_qty` 단독 SSOT | DEC-036 |
+| `t_production_master`/`detail` 풀세트 | DEC-025 |
+| `t_stock_log`를 출하/소진 SSOT로 재사용 | DEC-035/036 |
+| 경매용 `reserved_qty`/`out_qty` 선차감 | DEC-036 |
 
 ### 12.1 `t_order_alloc` (Stage 3A)
 
@@ -445,14 +653,33 @@ UNIQUE (farm_cd, order_detail_id, wh_cd, item_cd, variety_cd,
 8. 주문/판매 채번 이중 경로 충돌 가능.
 9. 부분배정 동시성: 두 요청이 같은 가용 30을 각각 30으로 배정.
 10. 동일 규격 복수 주문 초과예약.
+11. 수확 소진이력 없으면 부분포장 잔량/원복 불가 (DEC-035).
+12. 생산확정 내부식별 없으면 N:M 추적 불가 (DEC-035).
+13. DRAFT를 출하 SSOT로 사용하면 판매/물류 의미 오염 (DEC-036).
+14. 경매 출하중을 `reserved`로 처리하면 주문 HOLD 충돌.
+15. 출하 시 `out` 처리하면 판매확정에서 이중 OUT 위험 (DEC-037).
+16. 출하/확인 단일 qty 사용 시 원본 유실.
+17. 가용계산에 유효 출하중 미반영 시 과대계상.
+18. 주문 HOLD와 경매 출하 동시 요청 시 가용 중복 소비 위험 (§7.1).
+19. OPEN-QTY-DIFF 확정 전 차이수량 임의 재고조정 위험.
+20. 사용자 상품행과 `stock_seq` cardinality 조기 고정 위험 (OPEN-DDL).
 
-**원칙:** 배정·출고 서비스는 BEGIN(가능하면 IMMEDIATE) 후 가용/배정수량을 **다시 SELECT** 하고 조건 불일치 시 rollback.
+**원칙:** 배정·출고·(목표) 경매 출하 서비스는 BEGIN(가능하면 IMMEDIATE) 후 가용/배정수량을 **다시 SELECT** 하고 조건 불일치 시 rollback.
 
 ---
 
 ## 15. 구현/migration 직전 운영 DB 점검 (read-only)
 
 이번 문서 작업에서는 운영 DB에 **접근하지 않음.** 실행은 단계 3·4 직전.
+
+**향후 DDL 직전 점검 후보 (문장 · 이번 범위에서 SQL 실행 금지):**
+- `t_work_detail` harvest 컬럼 (`variety_cd` · `harvest_container_qty`)
+- 생산확정 식별로 **재사용 가능한 기존 영속키** 존재 여부
+- 동일 목적 **소진** 구조 존재 여부
+- 동일 목적 **경매출하** 구조 존재 여부
+- `stock_seq` 실사용
+- S4A 3컬럼·SA01/02/03 코드
+- 기존 `AUCTION_RT`+`DRAFT` 데이터
 
 ```sql
 -- ST01 실코드

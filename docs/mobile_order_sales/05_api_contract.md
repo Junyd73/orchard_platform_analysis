@@ -1,33 +1,54 @@
 # 05. API contract — 초안
 
-> **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).  
-> Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.  
-> 마운트: `server/app/main.py` → `/api/v1` + `router.py`.  
+> **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).
+> Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.
+> 수확 N:M · 경매 출하 · 청과 확인 · 경매 판매확정: [DEC-035/036/037](./07_decisions.md) · [02](./02_domain_flow.md) · [03](./03_data_contract.md) · [04](./04_mobile_screen.md) · [09](./09_production_inventory_flow.md) — **APPROVED LOGICAL (설계). 구현·DDL 아님.**
+> 마운트: `server/app/main.py` → `/api/v1` + `router.py`.
 > PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
-기존 패턴: `/api/v1/farms/{farm_cd}/…`, Header `X-User-Id`.  
-날짜 요청/응답: **`YYYY-MM-DD`**. 내부 저장 신규도 ISO (DEC-012). 읽기는 YYYYMMDD 호환.  
-오류: 기존 `BusinessRuleError` / HTTP 4xx.
+**표현 3층 (본 문서 전역):**
+
+| 층 | 의미 |
+|----|------|
+| **CURRENT API** | 현재 FastAPI/Core에 실제 구현된 endpoint · request/response · TX |
+| **APPROVED LOGICAL API** | DEC-035/036/037과 02~04가 요구하는 논리 API 책임 (**미구현일 수 있음**) |
+| **OPEN API** | endpoint path · payload 필드명 · DDL · 상태코드 · cardinality · 정책 미확정 |
+
+APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다.
+
+기존 패턴: `/api/v1/farms/{farm_cd}/…`, Header `X-User-Id`.
+날짜 요청/응답: **`YYYY-MM-DD`**. 내부 저장 신규도 ISO (DEC-012). 읽기는 YYYYMMDD 호환.
+오류: 기존 `BusinessRuleError` / HTTP 4xx · envelope `{detail, error_code}`.
 
 ---
 
-## 0. 공통서비스 (가칭 · 아키텍처 미확정)
+## 0. 공통 Core 책임 (논리 · 아키텍처 미확정)
 
-이름은 기존 `*Service` / `DBManager` / `AccountManager` 관례. 신규 계층을 지금 고정하지 않음.
+**기존 구현 클래스** (`OrderService`, `OrderAllocationService`, `OrderShipService`, `ProductionService`, `SalesQueryService`, `SalesPaymentService` 등)는 CURRENT 사실로만 기술한다.
 
-| 가칭 | 책임 | API |
-|------|------|-----|
-| OrderService | 주문 3테이블 CRUD·취소 (판매 INSERT 금지) | orders |
-| OrderAllocationService | 배정/해제 + reserved + log + allocated_qty | allocations |
-| OrderShipService | 소매 출고확정 **단일 TX** | ship |
-| StockQueryService | `get_stock_map` | fruit-stock |
-| SalesService | 직접판매 저장, 경매 DRAFT, PUT 시 `order_no` 보존 | sales |
-| SalesConfirmService | 가락 DRAFT 확정+출고 **단일 TX** | confirm |
-| CustomerService | 검색·등록 | customers |
-| AccountManager | `sync_ledger_by_basket` (**기존 엔진 그대로**. 모바일 전용 회계 엔진 금지) | payment / 출고 시 선입금 적용 |
-| DBManager | `generate_sales_no` + **신설** `generate_order_no` | 채번 |
+**금지:** `AuctionShipService`, `HarvestConsumptionService` 등 **신규 Service 클래스명을 본 문서에서 확정하지 않는다.**
+아래는 **논리 책임**만 나열한다. 실제 Core 분리·명칭 = **OPEN** (구현 설계 단계).
 
-FastAPI 라우터는 위 함수만 호출.
+| 논리 책임 | 내용 | 관련 API (CURRENT·LOGICAL) |
+|-----------|------|---------------------------|
+| 주문 CRUD | 주문 3테이블 · 판매 INSERT 금지 | orders (`OrderService`) |
+| 재고배정 | reserved + HOLD + allocated_qty | allocations (`OrderAllocationService`) |
+| 소매 출고확정 | 주문/DIRECT 판매+OUT **단일 TX** | `POST …/shipments/confirm` (`OrderShipService`) |
+| 재고 조회 | fruit-stock read | `GET …/fruit-stock` |
+| 생산확정 | PACK/PROCESS · RAW/HARVEST | `POST …/production/confirm` (`ProductionService`) |
+| **수확 소진** | N:M 소진이력 · 잔량 SSOT | harvest-records 확장 · confirm N:M (**LOGICAL**) |
+| **경매 출하** | 출하중 SSOT · 가용 제외 | **LOGICAL · REST 없음** |
+| **청과 확인/매칭** | 확인수량 별도 · 출하수량 불변 | **LOGICAL · REST 없음** |
+| **경매 판매확정** | CONFIRMED+OUT+SA 자동 · 원자 TX | **LOGICAL · REST 없음** |
+| 판매 조회·수금 | GET sales · payments append | sales (`SalesQueryService`, `SalesPaymentService`) |
+| 고객 | 검색·등록 | customers |
+| 회계 | `sync_ledger_by_basket` (기존 엔진) | payment / 출고 선입금 |
+| 채번 | `generate_sales_no` · `generate_order_no` | `DBManager` |
+
+**History — SUPERSEDED:** DEC-010 시절 문서의 `SalesConfirmService` = `AUCTION_RT DRAFT → CONFIRMED + OUT` **단일 TX** 가칭.
+현행 목표 SSOT는 **DEC-036(출하)** + **DEC-037(판매확정)**. §9 History 참조.
+
+FastAPI 라우터는 **CURRENT** 구현 Core만 호출. LOGICAL 책임은 구현 단계에서 기존 Core 확장 또는 분리 (**OPEN**).
 
 ---
 
@@ -43,19 +64,100 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 ---
 
-## 2. stock (과일)
+## 2. stock (과일) · production
 
-| method | path | 설명 |
-|--------|------|------|
-| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B. `include_zero` 기본 false(소진 숨김). 응답 `real_qty`/`reserved_qty`/`available_qty` Core 계산 |
-| GET | `/farms/{farm_cd}/fruit-stock/logs` | Stage 5B 이력 read-only (`t_stock_log`) |
-| GET | `/farms/{farm_cd}/production/harvest-records` | 수확기록 조회 (Stage P) |
-| GET | `/farms/{farm_cd}/production/raw-stock` | 원물재고 조회 (Stage P) |
-| POST | `/farms/{farm_cd}/production/confirm` | 생산확정 1 TX. `raw_consumptions`는 qty>0만. N건 OUT+IN 전체 rollback |
+경로 prefix: 클라이언트가 `/api/v1`을 붙이므로 **`/farms/...`**.
 
-경로 prefix는 클라이언트가 이미 `/api/v1`을 붙이므로 **`/farms/...`**.  
-응답: `real_qty=in-out`, `available_qty=real-reserved`. **클라이언트가 가용재고를 재계산하지 않음.**  
-쓰기(임의 입고/출고) 5B 비범위.
+### 2.0 endpoint 목록
+
+| method | path | CURRENT | APPROVED LOGICAL |
+|--------|------|---------|------------------|
+| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B · `available=real−reserved` | `available ≈ real − order_reserved − active_auction_transit` |
+| GET | `/farms/{farm_cd}/fruit-stock/logs` | Stage 5B read-only | 유지 |
+| GET | `/farms/{farm_cd}/production/harvest-records` | 원수확 필드만 | + 유효누적사용 · 잔량 **개념** |
+| GET | `/farms/{farm_cd}/production/raw-stock` | 원물 가용 | 유지 |
+| POST | `/farms/{farm_cd}/production/confirm` | HARVEST 단일 `harvest_work_id` | HARVEST N:M consumption |
+
+쓰기(임의 입고/출고) 5B 비범위. 재고 조정: `POST …/fruit-stock/adjust` (§11).
+
+---
+
+### 2.1 `GET …/production/harvest-records` (DEC-035)
+
+**CURRENT API**
+
+- Core: `ProductionService.list_harvest_records` (`core/production_service.py`).
+- 응답(행당): `work_id`, `work_dt`, `variety_cd`, `variety_nm`, `harvest_container_qty`.
+- **유효 누적 사용량 · 잔량 없음.** 소진 영속 이력 없음 ([03 §8A](./03_data_contract.md)).
+
+**APPROVED LOGICAL API**
+
+- **기존 harvest-records 확장 우선** (별도 balance endpoint = OPEN 후보).
+- 화면(04 §5A)에 필요한 **개념** (필드명 미확정):
+  - 원수확 상자수 (= `harvest_container_qty`)
+  - 유효 누적 사용량
+  - 남은 상자수
+- 잔량 SSOT: `원수확 − SUM(유효 소진 상자수)`.
+- 수확 저장 ≠ `t_stock_master` 자동 IN (DEC-022).
+
+**OPEN API**
+
+- 응답 필드명 · 소진이력 DDL · 집계 SQL · 별도 balance endpoint 여부.
+
+---
+
+### 2.2 `POST …/production/confirm` — HARVEST N:M (DEC-035)
+
+**CURRENT API**
+
+- Core: `ProductionService.confirm` · FastAPI `ProductionApiService`.
+- HARVEST: **`harvest_work_id` 1건** (또는 `work_ids`) · `raw_consumptions`는 **RAW_STOCK 전용**.
+- HARVEST 경로: 소진/잔량 검증 없음 · 상품 전량 IN + `_mark_work_done`.
+- RAW_STOCK: `raw_consumptions[]` N건 · 사용량>잔여 거부 · 혼합 품종/연도 거부 (재사용 패턴).
+
+**APPROVED LOGICAL API**
+
+- HARVEST도 **복수 consumption**: N건 × (수확기록 식별 + 이번 사용 상자수).
+- 서버 책임:
+  - TX 내 최신 잔량 재검증 · 사용량>잔량 **거부**
+  - 동일 품종 · 동일 `harvest_year` (DEC-026)
+  - **생산확정 1회 내부식별** 생성·관리 (사용자 입력 금지)
+  - N건 소진이력 + 상품 **전량 IN** (DEC-023)
+- **TX (원자):** 잔량 재검증 → N건 소진이력 → 상품재고 전량 IN → 생산결과 → 실패 시 **전체 rollback**.
+
+**OPEN API**
+
+- payload 필드명 (`harvest_consumptions[]` vs 확장 등) · 생산확정 event 영속키 · 응답에 내부 ID 노출 여부.
+- **OPEN-DONE:** HARVEST `DONE` 최종 의미 — 잔량 SSOT와 분리 ([07 DEC-035](./07_decisions.md)).
+
+**금지:** 사용자에게 production event id · 내부 `work_id` 입력 요구.
+
+---
+
+### 2.3 `GET …/fruit-stock` — 가용수량 (DEC-036)
+
+**CURRENT API**
+
+- Core: `OrderAllocationService.get_available_stock`.
+- `real_qty = in_qty − out_qty`
+- **`available_qty = real_qty − reserved_qty`**
+- `reserved_qty` = 주문 HOLD (`t_order_alloc` 연계).
+- **클라이언트가 가용재고를 재계산하지 않음** (CURRENT 계약 유지).
+
+**APPROVED LOGICAL API**
+
+- 서버가 반환하는 **판매가능 가용** (`available_qty`):
+  - `현재고 − 주문 HOLD − 유효 경매 출하중`
+  - 개념: `available ≈ real − order_reserved − active_auction_transit`
+- **반드시 보장할 API 계약 = `available_qty` 정확성.**
+- `reserved_qty` 의미 **유지** (주문 HOLD 전용). 경매 출하를 `reserved_qty`에 **넣지 않음**.
+- 경매 출하 시 `out_qty` **증가 없음**.
+- `active_auction_transit` = **유효 출하 라인 집계** (DEC-036). `transit_qty` 단독 DB 컬럼 SSOT **금지**.
+
+**OPEN API**
+
+- 출하중 수량을 응답에 **별도 필드로 표시**할지 — **필수 계약 아님** (UI 설명용 **선택 후보**).
+- 집계 SQL · OPEN-DDL · 별도 필드명.
 
 ---
 
@@ -73,11 +175,11 @@ POST 본문 초안: 고객, `order_dt`(ISO), 시즌, `pre_pay_amt`, **`pre_pay_m
 
 검증: 고객, 줄≥1, 줄 qty=배송 합, 방문 외 주소. **`available < qty`여도 200.** `warnings[]` 선택.
 
-**TX:** `t_order_master` + `detail` + `delivery`만.  
-`allocated_qty=0`. `order_dt` ISO.  
+**TX:** `t_order_master` + `detail` + `delivery`만.
+`allocated_qty=0`. `order_dt` ISO.
 **금지:** `t_sales_*`, `reserved_qty` Hold, `t_cash_ledger`, `t_ledger`.
 
-PUT: `stock_status=Y` → 409. 부분출고(`shipped_qty>0`) 후 주문 헤더/줄 수정은 1차 거부 권고.  
+PUT: `stock_status=Y` → 409. 부분출고(`shipped_qty>0`) 후 주문 헤더/줄 수정은 1차 거부 권고.
 cancel: `shipped_qty>0`이면 409 (출고 전만). 배정분 CANCEL_HOLD는 **`t_order_alloc` 행 단위** (DEC-018). 이미 출고된 allocation은 단순 취소 금지.
 
 ### 3.1 선입금 결제수단 (DEC-028 APPROVED · **완료·운영**)
@@ -97,7 +199,7 @@ POST / PUT 공통 필드. `t_order_master.pre_pay_method_cd` 운영 반영됨.
 
 ## 4. 재고배정 — 저장재고형 주문의 선택 경로 (DEC-020)
 
-allocation은 필수 단계가 아니다. `allocated_qty=0`인 주문은 정상이다.  
+allocation은 필수 단계가 아니다. `allocated_qty=0`인 주문은 정상이다.
 저장재고 출고를 선택한 주문만 이 API를 쓴다. 품종 if로 강제하지 않는다.
 
 | method | path |
@@ -150,15 +252,32 @@ allocation은 필수 단계가 아니다. `allocated_qty=0`인 주문은 정상�
 |--------|------|
 | POST | `/farms/{farm_cd}/shipments/confirm` |
 
-**Core:** `core/order_ship_service.py` `OrderShipService.confirm()` (DEC-027).  
-**FastAPI:** `POST /api/v1/farms/{farm_cd}/shipments/confirm` (`app/routers/shipments.py`). 주문 전용 `/orders/{order_no}/ship` **없음** (무주문 DIRECT).  
+**Core:** `core/order_ship_service.py` `OrderShipService.confirm()` (DEC-027).
+**FastAPI:** `POST /api/v1/farms/{farm_cd}/shipments/confirm` (`app/routers/shipments.py`). 주문 전용 `/orders/{order_no}/ship` **없음** (무주문 DIRECT).
 요청에 출고방식 `STOCK` / `DIRECT`. **`stock_seq`는 클라이언트가 고르지 않음** — Core FIFO. 요청 extra 필드(`stock_seq` 포함)는 422.
+
+### 6.0 경계 — 경매 출하와 분리 (DEC-036)
+
+**CURRENT · 의미 불변:** 본 endpoint = 주문 STOCK/DIRECT **판매 생성 + 재고 OUT + allocation 소비 + 선입금**.
+
+**경매 “넘기기”는 본 API가 아님:**
+
+| | `shipments/confirm` | 경매 출하 (LOGICAL §9A) |
+|--|---------------------|-------------------------|
+| 판매 | 생성·CONFIRMED | **아님** |
+| `out_qty` | 증가 | **증가 없음** |
+| `reserved_qty` | STOCK 시 감소 | **변경 없음** |
+| 출하중 SSOT | 해당 없음 | 유효 출하 라인 |
+
+**기각:** `POST …/shipments/confirm`을 경매 출하 생성 API로 **재사용**하는 설계.
+
+**공통 재사용 후보 (Core 내부만 · OPEN):** 가용 검증 helper · FIFO stock 선택 · `{detail, error_code}` envelope.
 
 ### 6.A STOCK / 재고출고
 
 저장재고 배정분에서 출고. `t_order_alloc` 필수. 주문 없음+STOCK **거부**.
 
-`ship_qty <= allocated_qty - shipped_qty` (alloc 잔여).  
+`ship_qty <= allocated_qty - shipped_qty` (alloc 잔여).
 주문 잔여: `qty - SUM(CONFIRMED sales_detail)`. 과출고 거부 (`confirmed + request <= qty`). 완료는 `==`.
 
 FIFO가 stock Nrow면 **`t_sales_detail` N행** (`stock_seq`마다 1행). 연결 테이블 없음.
@@ -174,8 +293,10 @@ FIFO가 stock Nrow면 **`t_sales_detail` N행** (`stock_seq`마다 1행). 연결
 
 ### 6.B DIRECT / 즉시출고
 
-allocation/`shipped_qty` **미갱신**. 가용 FIFO로 stock row 선택. 결과 Nrow면 판매상세 N행. `stock_seq` 기록은 STOCK과 동일.  
+allocation/`shipped_qty` **미갱신**. 가용 FIFO로 stock row 선택. 결과 Nrow면 판매상세 N행. `stock_seq` 기록은 STOCK과 동일.
 주문 있으면 주문 잔여만 검증. 주문 없으면 직접판매. STOCK의 `ship_qty <= alloc 잔여`를 DIRECT에 적용하지 않음.
+
+S4A: 무주문 DIRECT만 `sales_type_cd` / `sales_category_cd` 요청. **`SA020400`(경매판매) 클라이언트 선택 거부** (CURRENT). 경매 자동분류 = DEC-037 §9C.
 
 ### 6.C 선입금 순차 배분 (DEC-019 APPROVED · 확정 설계)
 
@@ -189,16 +310,12 @@ confirm이 판매를 CONFIRMED로 만든 **같은 TX 안에서** 처리한다.
 
 **금지:** 이미 CONFIRMED 된 판매·전표를 이번 confirm에서 수정 · 첫 판매에 선입금 전액 부착 · `sales_status`를 수금 의미로 변경 (DEC-029).
 
-예: 주문 30만 · 선입금 15만 → confirm①(판매 10만) 적용 10만·미수 0 → confirm②(판매 20만) 적용 5만·미수 15만.
-
 **현재 구현 (Stage4):** `OrderShipService.confirm()`이 동일 TX에서 순차 배분·`SalesPaymentService.add_payment_in_tx`(source_order_no)·cash SUM 동기화를 수행한다. **완료 · 운영** (backend/PC `fb413a3`). HTTP 응답 필드(적용액·잔액)는 미추가.
 
 부분출고를 여러 번 호출할 수 있다. 매번 DEC-014 TX + 새 판매 1건 (DEC-017). Core·HTTP confirm **구현**. Mobile UI **후속**.
 
-요청 요약: `ship_mode`, `sales_dt`, `order_no`(nullable), `custm_id`(nullable), `lines[]` (`order_detail_id` nullable, 규격, `qty>0`, `unit_price`).  
+요청 요약: `ship_mode`, `sales_dt`, `order_no`(nullable), `custm_id`(nullable), `lines[]` (`order_detail_id` nullable, 규격, `qty>0`, `unit_price`).
 응답 요약: `ok`, `sales_no`, `sales_status=CONFIRMED`, `ship_mode`, `order_no`, `details[]`, `order_status`, `remaining_order[]`, `remaining_order_qty`.
-
-**화면 SSOT (Stage 6):** 줄 잔여·다음 출고 = `remaining_order[]`. `remaining_order_qty`는 합 요약만. 완료 = `order_status`. 무주문이면 잔여 필드 비움.
 
 HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 · envelope `{detail, error_code}`.
 
@@ -206,12 +323,13 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 ## 7. sales
 
-| method | path |
-|--------|------|
-| GET | `/farms/{farm_cd}/sales` |
-| GET | `/farms/{farm_cd}/sales/{sales_no}` |
-| POST | `/farms/{farm_cd}/sales` |
-| PUT | `/farms/{farm_cd}/sales/{sales_no}` |
+| method | path | CURRENT |
+|--------|------|---------|
+| GET | `/farms/{farm_cd}/sales` | **구현** (목록) |
+| GET | `/farms/{farm_cd}/sales/{sales_no}` | **구현** (상세 · private main) |
+| GET/POST | `…/sales/{sales_no}/payments` | **구현** (Stage6B/C · private main) |
+| POST | `/farms/{farm_cd}/sales` | **미구현** |
+| PUT | `/farms/{farm_cd}/sales/{sales_no}` | **미구현** |
 
 ### 7.1 GET 목록 (Stage 5 · 완료 · 운영)
 
@@ -219,173 +337,301 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 **Query:** `from_date`, `to_date`, `sales_status` (`CONFIRMED` \| `DRAFT`), `payment_status` (`UNPAID` \| `PARTIAL` \| `PAID`), `keyword`, `page`(default 1), `page_size`(default 20, max 100).
 
-**날짜:** `t_sales_master.sales_dt` · ISO·`YYYYMMDD` 혼재 조회(주문 목록과 동일 compact 비교). 일괄 변환 없음.
+**수금 SSOT:** `paid_amt = SUM(t_cash_ledger.pay_amt)`. master `tot_paid_amt`/`tot_unpaid_amt`는 목록 계산에 사용하지 않음.
 
-**수금 SSOT:** `paid_amt = SUM(t_cash_ledger.pay_amt)` (`farm_cd`+`sales_no`). `unpaid_amt = MAX(0, tot_sales_amt - paid_amt)`. master `tot_paid_amt`/`tot_unpaid_amt`는 목록 계산에 사용하지 않음.
+**응답 item:** `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`, `rep_*`.
 
-**payment_status (응답 계산):** CONFIRMED만 — `UNPAID` / `PARTIAL` / `PAID`. DRAFT는 `null`(화면: 수금대기). 수금상태 필터 시 DRAFT 제외.
+**CURRENT:** `sales_source=AUCTION_RT` + `sales_status=DRAFT` 건이 목록에 **나타날 수 있음** (PC `save_realtime_auction_draft`).
+**DRAFT ≠ 경매 출하중 SSOT** (DEC-036).
 
-**payment_status filter (Core·SQL 동일 · 상호배타):** `UNPAID`=`paid<=0` · `PARTIAL`=`paid>0 AND paid<total` · `PAID`=`paid>0 AND (total-paid)<=0`. `total=0,paid=0`는 `UNPAID`만(0원 판매 PAID 승격 없음).
+**APPROVED LOGICAL:** 경매 **출하중** 목록을 sales GET에 **합치지 않음** (04 §6 · 별도 호출 §9A).
+경매 **판매확정** 후 CONFIRMED 건은 기존 sales GET/상세/수금 **재사용 가능**.
 
-**날짜 validation:** malformed `from_date`/`to_date` → `SalesQueryValidationError` → HTTP 400. ISO·legacy `YYYYMMDD` 호환 유지. `from>to` swap 기존 동작 유지.
+**S4A 3분류 (`sales_type_cd` / `sales_category_cd` / `sales_route_cd`):**
 
-**대표상품:** 판매 1행. `t_sales_detail` 다건이어도 `sale_detail_no ASC` 첫 행. cash는 선 aggregate 후 join(cash×detail 곱집계 방지).
-
-**응답:** `{ items[], total, page, page_size }` · item: `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`, `rep_*`.
-
-**미구현(Stage 5 범위 외):** POST/PUT 저장 · §8 payments HTTP.
+| | CURRENT HTTP | TARGET |
+|--|--------------|--------|
+| 목록/상세 응답 | master 컬럼 **미포함** (rep_* 위주) | 경매 CONFIRMED 후 DB에 SA 자동 저장 (DEC-037) · 목록 노출 필요성 **OPEN** |
+| 직접판매 출고 | `ShipConfirmRequest`로 입력 (경매구분 제외) | 경매확정 시 **서버 자동** · 사용자 선택 금지 |
 
 ### 7.2 GET 상세 (Stage6A · read-only · private main · 운영 미배포)
 
-**Core:** `SalesQueryService.get_sale_detail(farm_cd, sales_no)` — SELECT only.
-
-**Path:** `GET /farms/{farm_cd}/sales/{sales_no}`
+**Core:** `SalesQueryService.get_sale_detail` — SELECT only.
 
 **Master:** `sales_no`, `sales_dt`, `custm_id`, `customer`, `order_no`, `sales_status`, `sales_source`, `tot_sales_amt`, `paid_amt`, `unpaid_amt`, `payment_status`.
 
-**수금 SSOT:** 목록(§7.1)과 동일 — `SUM(t_cash_ledger.pay_amt)` · Stage6-0 `compute_payment_status` / `compute_unpaid_amt`. master `tot_paid_amt`/`tot_unpaid_amt`는 조회에 사용하지 않음.
+**Lines:** `t_sales_detail` 원본 행 · `sale_detail_no ASC`. optional schema 방어 유지.
 
-**Lines:** DB `t_sales_detail` 원본 행을 `sale_detail_no ASC`로 반환. optional schema 방어: `crop_nm`, `wh_cd`, `dlvry_tp`, `stock_seq`, `order_detail_id`, `weight` 부재 시에도 200. `item_amt`는 **schema 기준**: `tot_item_amt` 컬럼 존재 시 사용 → 없으면 `item_amt` → 둘 다 없으면 `qty*unit_price`.
-
-**404:** `farm_cd`+`sales_no` 없음 → `SalesQueryNotFoundError` → `EntityNotFoundError` → HTTP 404. 타 farm 격리 필수.
-
-**Mobile UI grouping (API 아님):** FIFO로 분할된 raw N행은 화면에서 `order_detail_id`+`item_cd`+규격+`unit_price`가 같을 때만 qty·item_amt 합산. 첫 등장 위치 유지. `order_detail_id` NULL은 raw 유지.
-
-**미구현(6A 범위 외):** `t_sales_delivery` read-only 표시 · payments PUT · POST/PUT 저장.
-
-PUT: 자식 재INSERT 시 **`order_no` / `sales_status` / `sales_source` 보존**. 재고는 ship/confirm만.  
-DELETE 1차 비공개 (전표 역분개 전).
-
-직접판매 POST: 출고 포함 플래그 시 재고+판매 한 TX (수출/도매).
+**미구현(6A 범위 외):** POST/PUT 저장 · payments PUT.
 
 ---
 
 ## 8. payment — 판매확정 기준 수금/회계
 
-> **Core (개발순서 3):** `SalesPaymentService` — CONFIRMED 추가수금 append · cash SSOT · AccountManager SALE 재사용. **완료 · 운영** (Stage4와 함께).  
-> **Stage6-0:** `get_payment_summary`가 `payment_status` 영문 코드 + `collection_status`(UI label 호환) 반환.  
-> **Stage6C:** payments **POST** append — `SalesPaymentService.add_payment` · `source_order_no=None` · **private main 반영 · 운영 미배포**. PUT/수정/삭제 **미구현**.
+> **Core:** `SalesPaymentService` — CONFIRMED append · cash SSOT · AccountManager SALE 재사용. **완료 · 운영** (Stage4).
+> **Stage6B/6C:** GET/POST payments · **private main · 운영 미배포**.
 
 | method | path | 용도 | 상태 |
 |--------|------|------|------|
-| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 내역 + 판매금액/수금액/미수금/수금상태 | **Stage6B · private main · 운영 미배포** |
-| POST | `/farms/{farm_cd}/sales/{sales_no}/payments` | 신규 일반수금 append | **Stage6C · private main · 운영 미배포** |
+| GET | `/farms/{farm_cd}/sales/{sales_no}/payments` | 수금 내역 + 요약 | Stage6B |
+| POST | `/farms/{farm_cd}/sales/{sales_no}/payments` | 신규 일반수금 append | Stage6C |
 
-### 8.1 GET 수금내역 (Stage6B · read-only)
+**검증:** `sales_status = CONFIRMED`만 write · DRAFT 거부 (DEC-029).
+**단일 TX:** ledger sync → cash append → master paid/unpaid. 실패 시 rollback.
 
-**Core:** `SalesPaymentService.get_payment_summary(farm_cd, sales_no)` — SELECT only. 신규 Payment Query Service 금지.
+`sales_status`는 수금으로 **변경되지 않는다** (DEC-029).
 
-**SSOT:** `t_cash_ledger` **실제 행**. 동일 method/slip 합산 금지. `t_ledger` active 전표를 내역으로 표시 금지.
+### 8.1 GET 수금내역 · 8.2 POST 수금등록
 
-**응답:** `{ sales_no, sales_status, tot_sales_amt, paid_amt, unpaid_amt, payment_status, payments[] }`  
-(`paid_amt`/`unpaid_amt` = Core `tot_paid_amt`/`tot_unpaid_amt`. HTTP에 `collection_status` 필수 아님.)
-
-**payment item:** `paid_detail_no`, `pay_dt`, `pay_method_cd`, `pay_method_nm`, `pay_amt`, `payment_source`, `source_order_no`.
-
-| 필드 | 규칙 |
-|------|------|
-| `payment_source` | `cash.order_no` 실값 있으면 `ORDER_PREPAY`, 없으면 `GENERAL` |
-| `source_order_no` | PREPAY면 `order_no`, GENERAL이면 `null` |
-| `pay_method_nm` | `m_account_code.acct_nm` · 없으면 `pay_method_cd` fallback |
-| `pay_dt` | 실제 cash 수금일 (ISO 표준화 · 파싱 불가 raw fallback) |
-
-**DRAFT:** GET 허용 · `payment_status=null` · legacy cash 행이 있으면 숨기지 않음.
-
-**404:** `PaymentNotFoundError` → `EntityNotFoundError` → HTTP 404.
-
-**검증 (DEC-029 · DEC-030 · Core write · 6C POST):**
-
-| 항목 | 규칙 |
-|------|------|
-| 판매상태 | `sales_status = 'CONFIRMED'`만. **DRAFT 거부** |
-| 수금액 | `> 0`. 미수 = `MAX(0, tot_sales_amt − SUM(cash))`. 초과 write 금지 |
-| 결제수단 | **필수**. `parent_cd=AS0101` · level4 · `use_yn=Y`. 채권 금지 |
-| 수금일 (DEC-030) | **신규 일반 수금 POST만:** `sales_dt ≤ pay_dt ≤ today` · blank → `PAY_DT_INVALID`. Core `add_payment` · `source_order_no=None` 경로. legacy cash는 조회만 · 자동보정 없음 |
-| 수금상태 | 응답 `payment_status`: `UNPAID` / `PARTIAL` / `PAID` / `null`. UI label은 [03 §4.1](./03_data_contract.md) |
-
-**회계 날짜 (Stage6-0 불변):** `t_cash_ledger.pay_dt` = 실제 수금일 · `t_ledger.trans_dt` = `sales_dt`. DEC-030 때문에 `trans_dt`를 `pay_dt`로 바꾸지 않음.
-
-**단일 트랜잭션:** ledger sync → cash append(+동일 method slip 갱신) → master paid/unpaid. 실패 시 전체 rollback.  
-`add_payment_in_tx`는 caller-owned TX (4단계 OrderShip 재사용 예정).
-
-`sales_status`는 수금으로 **변경되지 않는다** (DEC-029).  
-일반 추가수금 `t_cash_ledger.order_no = NULL`. 선입금 자동적용 `order_no = 원 주문번호` (Stage4 **완료 · 운영**).
+§8 상세 규칙(DEC-029 · DEC-030) 유지. Request: `{ pay_dt, pay_amt, pay_method_cd }`.
+**금지:** PUT · 수금 수정/삭제 HTTP.
 
 ---
 
-## 9. 경매확정 — DRAFT→CONFIRMED + 재고출고 단일 TX (DEC-010)
+## 9. History — 경매확정 DEC-010 SUPERSEDED
 
-| method | path |
-|--------|------|
-| POST | `/farms/{farm_cd}/sales/{sales_no}/confirm` |
+> **과거 설계 (현행 정책 아님)**
 
-TX: DRAFT 검증 → 가용 재조회 → out+log → CONFIRMED → 선택 수금/전표 → (DEC-016) 배송.  
-부족 시 전체 rollback.  
-초안 INSERT API는 단계 6에서 결정. 당분간 PC 시세 화면 유지 가능.
+| | |
+|--|--|
+| DEC | **DEC-010 SUPERSEDED** ([07](./07_decisions.md)) |
+| 당시 논리 | `AUCTION_RT` DRAFT → `CONFIRMED` + 재고 OUT **단일 TX** |
+| 문서상 endpoint | `POST /farms/{farm_cd}/sales/{sales_no}/confirm` |
+| **CURRENT 사실** | 위 HTTP **미구현**. FastAPI `sales.py`에 `/confirm` **없음**. Core confirm 서비스 **없음**. |
+| PC CURRENT | `MarketPricePage.save_realtime_auction_draft` → DRAFT INSERT only · **재고 미접촉** |
+
+**승계:** DEC-010 **원자성**(확정+OUT 실패 시 rollback) → **DEC-037**.
+**후계:** DEC-036 경매 출하 · DEC-037 판매확정 (§9A~C).
+
+---
+
+## 9A. 경매 출하 API 논리 (DEC-036)
+
+**APPROVED LOGICAL · endpoint path 미확정 (OPEN).**
+
+흐름: `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정`.
+
+### 9A.1 출하 생성
+
+**사용자 입력(개념):** 출하일 · 시장 · 법인 · 상품별 출하수량(규격집합).
+
+**서버 자동(개념):** farm · 내부 출하 묶음 식별 · 실제 stock row 추적 · 상태 · 감사.
+
+**금지:**
+
+- `stock_seq` 클라이언트 직접 지정 **강제**
+- 사용자 선택 상품 1행 = `stock_seq` 1행 **cardinality 확정**
+- `reserved_qty` / `out_qty` 변경
+- 판매 DRAFT 선행
+
+**TX (원자 · 한 업무 경계):**
+
+1. 최신 가용 재조회 (`§2.3` LOGICAL `available`)
+2. 요청수량 검증
+3. Core FIFO 등으로 **실제 stock row** 결정
+4. 출하 묶음/라인 생성
+5. **유효 출하중** 집계 반영
+6. `reserved_qty` / `out_qty` **변경 없음**
+7. 실패 시 **전체 rollback**
+
+주문 HOLD와 경매 출하가 동일 재고를 동시에 소비하지 못하도록 **가용 재검증 + 출하 반영은 동일 TX**.
+
+### 9A.2 출하 목록
+
+**논리 응답(개념):** 내부 출하 묶음 식별 · 출하일 · 시장/법인명 · 품목 수 · 농장 출하 총수량 · 상태 · 청과 확인 여부.
+
+내부 ID = routing용 가능 · **화면 기본 노출 대상 아님** (DEC-021).
+
+**OPEN:** path · paging · OPEN-SHIP-STATE.
+
+### 9A.3 출하 상세
+
+**논리 표시(개념):** 규격 · 농장 출하수량 · 청과 확인수량 · 차이 · 경매 결과 · 매칭상태.
+
+농장 출하수량 **원본 불변** · 확인수량 **별도**.
+
+**OPEN:** §9B · **OPEN-AUCTION-MATCH-CARDINALITY** · stock row cardinality.
+
+### 9A.4 출하 취소/정정
+
+**OPEN:** endpoint · TX · OPEN-SHIP-STATE 연동. 본 문서에서 확정하지 않음.
+
+---
+
+## 9B. 청과 확인/매칭 API 논리 (DEC-036)
+
+**CURRENT**
+
+- PC: 실시간 경매 (`MarketPriceManager.fetch_real_time_data`) · `market_price_settlement` (스케줄러 적재).
+- PC: `save_realtime_auction_draft` (수동 매핑 → DRAFT).
+- **모바일 경매 매칭 REST 없음.**
+
+**APPROVED LOGICAL — 필요 책임**
+
+1. 해당 출하와 **매칭 가능한** 경매결과 조회
+2. **농장 출하수량** 보존 (UPDATE 덮어쓰기 **금지**)
+3. **청과 확인수량** 별도 보존
+4. 가격/금액 연결
+5. 매칭상태 관리
+
+**자동매칭 API를 근거 없이 확정하지 않는다.**
+
+**OPEN API**
+
+- 조회 endpoint · 데이터 소스(PSIS/정산/실시간) · 자동 vs 수동 · write 방식 · 가격 SSOT
+- **OPEN-AUCTION-MATCH-CARDINALITY** (아래)
+
+### OPEN-AUCTION-MATCH-CARDINALITY
+
+출하 라인 1건 ↔ 청과 경매결과 관계가 **1:1 · 1:N · N:M** 중 무엇인지 **실데이터 확인 전 확정하지 않는다.**
+
+**금지:**
+
+- 출하 라인에 **단가 1개만** 존재한다고 확정
+- 출하 라인 1건 = 청과 결과 1건으로 API shape **고정**
+- `confirmation_qty` · 단가 · 금액을 **단일 필드**로 물리 확정
+
+UI에서 상품별 **합산 표시**는 가능. API/DB cardinality = **OPEN**.
+
+---
+
+## 9C. 경매 판매확정 API (DEC-037)
+
+**APPROVED LOGICAL · endpoint path = OPEN.**
+
+`POST …/sales/{sales_no}/confirm` (DEC-010)을 새 SSOT로 **당연시하지 않는다.**
+
+### 9C.1 논리 TX (실패 시 전체 rollback)
+
+1. 출하 묶음/라인 **유효성** 검증
+2. 청과 확인/매칭 검증
+3. **최종 승인 판매수량** 결정
+4. 판매 **생성** 또는 기존 DRAFT → `CONFIRMED` (**DRAFT 필수 여부 = OPEN**)
+5. `t_sales_detail` ↔ 실제 stock 추적 (cardinality OPEN-DDL)
+6. 최종 승인수량 기준 **`out_qty` 증가**
+7. `t_stock_log` SALE OUT (`ref_type=SALE`)
+8. **S4A 자동** (사용자 SA 선택 **금지**):
+
+| 축 | 코드 |
+|----|------|
+| 판매유형 | `SA010200` (도매) |
+| 판매구분 | `SA020400` (경매판매) |
+| 판매경로 | `SA030300` (경매연동) |
+
+9. **최종 승인수량에 해당하는 출하중 정산** (아래 §9C.2)
+10. (DEC-016 OPEN) `t_sales_delivery` 생성 여부 — **본 DEC에서 확정하지 않음**
+
+### 9C.2 20 출하 / 19 확인 — OPEN-QTY-DIFF
+
+**예:** 농장 출하 20 · 청과 확인 19 · 최종 승인 판매 19.
+
+**확정된 논리:**
+
+- 최종 승인 **19** → 판매 OUT **19** 가능
+- 농장 출하 **20** 원본 유지 · 청과 확인 **19** 별도 유지
+
+**OPEN-QTY-DIFF:** 남은 차이 1을 자동으로 가용복귀 · OUT · 감모 · 반입 · 재고조정 **하지 않는다**.
+
+**표현 (필수):**
+
+> 판매확정 시 **최종 승인수량에 해당하는 출하중 수량을 정산**한다.
+> 출하수량과 최종 승인수량의 **미해결 차이분**이 이후 가용·출하중·조정 중 어디에 귀속되는지는 **OPEN-QTY-DIFF**이며 **임의 처리하지 않는다**.
+
+**금지:** 「판매확정 시 출하중 **전체** 종료」 · 19 OUT = 출하 20 **자동 종료**.
+
+**OPEN:** 차이가 있는 출하의 판매확정 API **허용/거부** · HTTP 거부 여부.
+
+---
+
+## 9D. 시장/법인 API (OPEN)
+
+**CURRENT**
+
+- 모바일 **전용 시장 REST 없음**.
+- `GET …/customers` — `m_customer` (법인/고객 후보 **가능** · 시장 FK **없음**).
+- `GET /common-codes?farm_cd&parent_cd` — 품목/규격 등 · **시장 목록 SSOT 아님**.
+- PC: 시장명은 실시간 API distinct · 일부 **하드코드 맵** (`ANALYSIS_MARKET_CODE_BY_NAME` 등). **신규 API 계약으로 승격 금지**.
+
+**APPROVED LOGICAL (04 UX)**
+
+- 최근 **유효** 시장+법인 조합 자동
+- 시장 변경 시 법인 **유효성 재검증** · 무효 시 법인 초기화
+
+**OPEN API**
+
+- 시장 목록 endpoint
+- 법인 조회/filter · 시장↔법인 **유효조합** 검증
+- 최근 조합 **저장/조회** 위치
 
 ---
 
 ## 10. 트랜잭션 경계
 
-| 유스케이스 | 한 트랜잭션 |
-|------------|-------------|
-| 주문 접수 | order 3테이블. 재고·판매·전표 없음 |
-| 배정 | 줄 allocated + `t_order_alloc` + 지정 stock row reserved + HOLD + 그 row 가용 재검증 |
-| 배정해제 | release ≤ reserved_unshipped. LIFO alloc 감소 + reserved − + allocated − + CANCEL_HOLD |
-| 소매 출고 STOCK | alloc shipped+ / reserved− / out+ / OUT log + **새 판매 1건** + 출고분 배송 + 선입금 순차 적용 + cash/ledger + paid·unpaid (DEC-019 · 설계) |
-| 소매 출고 DIRECT | allocation 없이 가용 FIFO + 판매상세 stock_seq 분할 (DEC-027). Core 후속 |
-| 주문 취소(출고 전) | 상태. 미출고 `t_order_alloc`이 있으면 reserved 복구. 없으면 상태만 |
-| 가락 확정 | status + out/log + 선택 전표 |
-| 수금만 (CONFIRMED 판매) | cash + `AccountManager` + ledger + `tot_paid_amt`/`tot_unpaid_amt`. DRAFT 금지 (DEC-029) |
+| 유스케이스 | 층 | 한 트랜잭션 |
+|------------|-----|-------------|
+| 주문 접수 | CURRENT | order 3테이블. 재고·판매·전표 없음 |
+| 배정 | CURRENT | 줄 allocated + `t_order_alloc` + reserved + HOLD + 가용 재검증 |
+| 배정해제 | CURRENT | LIFO release + reserved − + CANCEL_HOLD |
+| 소매 출고 STOCK | CURRENT | alloc shipped+ / reserved− / out+ / OUT log + 판매 1건 + 배송 + 선입금 + cash/ledger |
+| 소매 출고 DIRECT | CURRENT | 가용 FIFO + 판매 + OUT (DEC-027) |
+| 주문 취소(출고 전) | CURRENT | 상태 + 미출고 alloc reserved 복구 |
+| 수금만 | CURRENT | cash + ledger + paid/unpaid. DRAFT 금지 |
+| ~~가락 확정 (DEC-010)~~ | **SUPERSEDED** | ~~DRAFT + OUT~~ → §9 History |
+| **HARVEST 생산확정** | LOGICAL | 잔량 재검증 → N건 소진 → 상품 전량 IN → 결과 → rollback |
+| **경매 출하** | LOGICAL | 가용 재검증 → 출하 묶음/라인 → active 출하중 → **reserved/out 불변** → rollback |
+| **경매 판매확정** | LOGICAL | 출하/매칭 검증 → 최종 승인수량 → CONFIRMED + OUT + SALE log + SA 자동 + **승인분 출하중 정산** → rollback |
+
+미해결 출하/확인 **차이분** 처리 TX = **OPEN-QTY-DIFF** (본 표에 포함하지 않음).
+
+### 10.1 오류 계약 후보
+
+**패턴 유지:** 400 / 404 / 409 / 422 · `{detail, error_code}`.
+
+**논리 오류 후보 (error_code 문자열 미확정):**
+
+| 후보 | HTTP 후보 | 관련 |
+|------|-----------|------|
+| 수확 사용량 > 잔량 | 409 | §2.2 |
+| 품종/연도 혼합 | 422 | §2.2 |
+| 경매 출하 가용 부족 | 409 | §9A |
+| 시장/법인 조합 오류 | 422 | §9D |
+| 출하 상태 충돌 | 409 | OPEN-SHIP-STATE |
+| 매칭 미완료 | 409 | §9B |
+| 출하/확인 **차이** 존재 시 확정 시도 | 409 또는 422 | **OPEN-QTY-DIFF** |
 
 ---
 
-## 11. FastAPI 현황 (재확인)
+## 11. FastAPI CURRENT 스냅샷
 
-`router.py`: health, farms, observations*, pesticide, smart_spray, work_logs, weather, work_photos, work_schedules(410), google_calendar, notifications, common_codes, **orders, sales(GET 목록), customers, fruit-stock, fruit-stock/adjust, production, shipments**.
+`router.py`: health, farms, observations*, work_logs, weather, common_codes, **orders, sales, customers, fruit-stock, fruit-stock/adjust, production, shipments**, …
 
-**Stage 5 (완료 · 운영):** `GET /farms/{farm_cd}/sales` · `SalesQueryService` · Mobile 판매탭 목록 · 운영 backend `b48ca8b`.
+| 영역 | CURRENT (사실) | LOGICAL | REST |
+|------|------------------|---------|------|
+| harvest-records | **구현** · 원수확만 | 잔량 개념 | 확장 **미구현** |
+| production/confirm | **구현** · HARVEST **단일** | N:M | **미구현** |
+| fruit-stock | **구현** · `real−reserved` | transit 반영 | **미구현** |
+| shipments/confirm | **구현** · 판매+OUT | — | 유지 |
+| sales GET/상세/payments | **구현** (payments private main) | 경매확정 후 재사용 | — |
+| sales POST/PUT/confirm | **미구현** | DEC-037 | **미구현** |
+| PC AUCTION_RT DRAFT | `save_realtime_auction_draft` | 출하 SSOT **아님** | PC only |
+| 경매 출하 | — | DEC-036 | **없음** |
+| 청과 매칭 | PC/DB only | DEC-036 | **없음** |
+| 경매 판매확정 | — | DEC-037 | **없음** |
 
-**Stage6A (완료 · private main · 운영 미배포):** `GET /farms/{farm_cd}/sales/{sales_no}` · `SalesQueryService.get_sale_detail` · Mobile `SalesDetailView` (`/orders/sales/:salesNo`).
+**Stage P (로컬):** harvest-records, raw-stock, production/confirm. PROCESS `juice_item_cd`: `FR010202`/`FR010201`.
 
-### 8.2 POST 수금등록 (Stage6C · append)
+**Stage 5C:** `OrderShipService.confirm()` · Mobile `confirmShipment`.
 
-**Request:** `{ pay_dt, pay_amt, pay_method_cd }` — memo 없음.
+**금지:** 위 LOGICAL 행을 **IMPLEMENTED**로 표기.
 
-**Core:** `SalesPaymentService.add_payment(PaymentAddIn(..., rmk="", source_order_no=None))`.
-
-**Response:** §8.1 `SalesPaymentHistory`와 동일 (성공 후 `get_payment_summary` 결과).
-
-**Header:** `X-User-Id` — 없으면 `MOBILE` (shipment write와 동일).
-
-**금지:** PUT · 수금 수정 · 수금 삭제 · idempotency table.
+판매목록 `rep_*` · Stage6B/C payments · 주문 `pre_pay_method_cd` (DEC-028) · Stage4 선입금 — 기존 §7·§8 상세 유지.
 
 ---
 
-**Stage6C (private main · 운영 미배포):** `POST /farms/{farm_cd}/sales/{sales_no}/payments` · Mobile `SalesDetailView` inline form.
+## 12. CURRENT / TARGET / OPEN 요약
 
-**Stage6B (private main · 운영 미배포):** `GET .../payments` · Mobile 수금내역 section.
-
-판매목록 대표상품(`rep_*`) — optional schema 방어:
-
-| 필드 | 의미 | 비고 |
-|------|------|------|
-| `rep_variety_nm` | 품종 | `m_common_code` 조인 |
-| `rep_size_nm` | 규격(kg·박스 등) | `size_cd` → 공통코드 명칭 |
-| `rep_grade_nm` | 등급 | `grade_cd` → 공통코드 명칭 |
-| `rep_crop_nm` | 과수(예: 16~20과) | `t_sales_detail.crop_nm` 존재 시만; 코드면 공통코드 명칭으로 resolve |
-| `rep_weight` | 레거시 호환 | DB `weight` 컬럼 없으면 `0` (표시용 kg 생성 금지) |
-
-`t_sales_detail.weight` / `crop_nm` 컬럼 부재·대표 detail 없음·코드 미매칭 시에도 GET 200, 가능 필드만 반환.
-
-**Stage 3A (구현 완료):** GET/POST/PUT orders, allocations, GET fruit-stock.
-
-**Stage P (구현 완료 · 로컬):** GET harvest-records, GET raw-stock, POST production/confirm.  
-PROCESS 요청 `juice_item_cd`: `FR010202` 일반배즙(기본) · `FR010201` 도라지배즙. 중분류 `FR010200` 거부. PACK은 해당 필드 무시. 응답 `prefill_lines[].item_nm`. 도라지 원료/BOM 없음.
-
-재고 조정: `POST /farms/{farm_cd}/fruit-stock/adjust` — `io_type` IN/OUT, `reason_cd`(중분류 `AD010100` 하위: 폐기·파손·증정·반품·실사차이·기타). 폐기/파손/증정은 OUT만, 반품은 IN만, 실사차이·기타는 IN/OUT. `t_ledger` 없음. 감액은 가용재고(`in-out-reserved`) 이하.
-
-**Stage 5C Core+HTTP · Stage 6 1차 Mobile:** `OrderShipService.confirm()` · `POST /farms/{farm_cd}/shipments/confirm` · Vue `confirmShipment`. 운영 DDL 미적용.
-
-**미구현:** payments **PUT** · 수금 수정/삭제 HTTP. GET/POST는 Stage6B/6C **private main 반영 · 운영 미배포**.  
-**완료·운영:** 주문 `pre_pay_method_cd` (§3.1 · DEC-028) · Stage4 선입금 자동배분 Core (§6 · `fb413a3`).
+| | |
+|--|--|
+| **CURRENT** | HARVEST 단일 · harvest balance 없음 · `available=real−reserved` · `/shipments/confirm`=판매+OUT · PC `AUCTION_RT`+DRAFT · 경매 confirm FastAPI/Core **없음** · 모바일 경매 출하/매칭 REST **없음** |
+| **TARGET (LOGICAL)** | HARVEST N:M · 서버 잔량 · 정확한 `available_qty` · 경매 출하 생성/목록/상세 · 청과 확인/매칭 · DEC-037 판매확정 |
+| **OPEN** | OPEN-DDL · OPEN-SHIP-STATE · OPEN-QTY-DIFF · OPEN-DONE · **OPEN-AUCTION-MATCH-CARDINALITY** · DEC-016 · DRAFT 필수 · endpoint path · payload 필드명 · 출하 취소/정정 · 차이 시 confirm 허용 · 시장/법인/최근값 API · 자동매칭 · stock/가격 cardinality · **실제 Core 클래스 구조** |

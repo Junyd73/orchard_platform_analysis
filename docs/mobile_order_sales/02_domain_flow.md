@@ -5,8 +5,11 @@
 
 ## 0. 전체 맥락
 
-최상위: `수확 → (생산) → (재고) → 판매 ← (주문)`.  
+최상위: `수확 → (생산) → (재고) → 판매 ← (주문)`.
 본 문서는 **주문·배정·출고·판매** 구간. 생산확정·원물/상품 재고는 **StockPage** (09 §3).
+수확잔량·HARVEST N:M 상세는 [09](./09_production_inventory_flow.md) · [DEC-035](./07_decisions.md) SSOT — 본 문서에 장문 복제하지 않음.
+
+경매는 **출하중([DEC-036](./07_decisions.md))**과 **판매확정([DEC-037](./07_decisions.md))**을 **서로 다른 업무 단계**로 구분한다.
 
 **Stage 3A:** 상품재고가 **이미 있을 때** 주문에 예약. 필수 단계 아님. **운영 반영 완료** (`fd963e0` 계열). *(역사: 로컬 구현 당시 main 미머지)*
 
@@ -22,10 +25,21 @@
 | `reserved_unshipped_qty` | 아직 재고 Hold 중인 배정분 | 계산. `allocated_qty - shipped_qty` |
 | `unallocated_qty` | 아직 배정하지 않은 주문분 | 계산. `qty - allocated_qty` |
 
-정합성: `0 <= allocated_qty <= qty`, `0 <= shipped_qty <= qty`.  
-STOCK 배정해제: `release_qty <= allocated_qty - shipped_qty`.  
-STOCK 출고: `ship_qty <= reserved_unshipped_qty`. 출고 시 `allocated_qty`는 감소하지 않음.  
+정합성: `0 <= allocated_qty <= qty`, `0 <= shipped_qty <= qty`.
+STOCK 배정해제: `release_qty <= allocated_qty - shipped_qty`.
+STOCK 출고: `ship_qty <= reserved_unshipped_qty`. 출고 시 `allocated_qty`는 감소하지 않음.
 DIRECT 출고: allocation/HOLD 없이 가능 (DEC-020). `allocated_qty=0`은 정상.
+
+### 1.1 경매 수량 용어
+
+주문 수량 축과 **별개**. 물리 컬럼명·계산식은 **미확정** ([07 OPEN](./07_decisions.md) · [09 §14.1](./09_production_inventory_flow.md)).
+
+| 용어(개념) | 의미 |
+|------------|------|
+| **농장 출하수량** | 농장에서 실제 보낸 **원본** 수량. 이후 확인수량으로 **덮어쓰기 금지** ([DEC-036](./07_decisions.md)) |
+| **청과 확인수량** | 청과회사 확인 수량. **별도** 보존 |
+| **출하중 수량** | **유효한 출하 라인** 집계. 가용에서 **제외**. `reserved_qty`/`out_qty` **아님** |
+| **최종 승인 판매수량** | 판매확정 및 상품 **OUT** 기준 ([DEC-037](./07_decisions.md)). 차이 처리 = **OPEN-QTY-DIFF** |
 
 ---
 
@@ -37,10 +51,10 @@ DIRECT 출고: allocation/HOLD 없이 가능 (DEC-020). `allocated_qty=0`은 정
 | 배즙(재고) | O | O | 09 §2.6 |
 | 추석/조생 소매 | O | X | DIRECT 출고, 09 §2.4 |
 | 원황/신고 수출 | X | X | 생산→판매, 09 §2.1·2.2 |
-| 가락 | X | X | DRAFT→확정, 09 §2.3 |
+| 가락/경매 | X | X | 상품재고 → 경매출하 → 출하중 → 청과확인/매칭 → 판매확정(+OUT) → 정산. [09 §2.3](./09_production_inventory_flow.md) · [DEC-036](./07_decisions.md)/[037](./07_decisions.md) |
 | 배즙(주문생산) | O | X | PROCESS 후 판매, 09 §2.7 |
 
-아래 §3~는 **주문이 있고 저장재고 출고(STOCK)를 쓰는** 경로 중심.
+아래 §3~는 **주문이 있고 저장재고 출고(STOCK)를 쓰는** 경로 중심. 경매는 §3.2 · §6.
 
 ---
 
@@ -63,17 +77,34 @@ DIRECT 출고: allocation/HOLD 없이 가능 (DEC-020). `allocated_qty=0`은 정
 
 ### 3.2 가락시장
 
+#### 승인된 목표 설계 ([09 §2.3](./09_production_inventory_flow.md) · [DEC-036](./07_decisions.md)/[037](./07_decisions.md))
+
 ```
-포장재고 (FR010100)
- → 실시간 경매 (시세 화면)
- → AUCTION_RT + DRAFT 판매 (재고 미차감 — 현재와 동일)
- → 경매결과 확인
- → 확정 TX: CONFIRMED + 재고 출고 (+ 선택 수금)
+상품재고(가용)
+ → [경매 넘기기]          ← 출하중 시작 (판매 아님)
+ → 출하중                 ← DRAFT 아님 · 가용에서 제외 · reserved/out 아님
+ → 청과 확인/매칭         ← 농장 출하수량 · 청과 확인수량 이중 보존
+ → 판매확정 (DEC-037)     ← 최종 승인 수량 OUT · SA 자동 · 원자 TX
  → 정산
 ```
 
-근거: `market_price_page.py` `save_realtime_auction_draft` (마스터·상세만).  
-확정 함수는 **현재 없음** → PC/core 보완 (DEC-010).
+- **출하중**은 판매가 **아님**. **판매 DRAFT가 아님**.
+- 출하 시 가용에서 제외하되 `reserved_qty` 사용·`out_qty` 선차감 **금지**.
+- 판매확정은 [DEC-037](./07_decisions.md).
+- **OPEN:** 목표 흐름에서 판매 **DRAFT 단계가 필수인지**는 미확정 (현재 코드 사실과 섞지 않음).
+
+#### 현재 코드
+
+근거: `market_price_page.py` `save_realtime_auction_draft` (마스터·상세만).
+
+- `AUCTION_RT` + `DRAFT` 판매 저장 · **재고 미접촉**
+- **출하중 SSOT가 아님** ([09 §2.3.1](./09_production_inventory_flow.md))
+- 경매 **confirm 함수 현재 없음**
+
+#### 역사 (SUPERSEDED)
+
+~~`포장재고 → 실시간 경매 → AUCTION_RT DRAFT → 경매결과 → CONFIRMED+OUT`~~ 만으로 가락 전체를 설명하던 모델.
+[DEC-010](./07_decisions.md) **SUPERSEDED** → 후계 **DEC-036 / DEC-037**.
 
 ### 3.3 수출 / 일반도매
 
@@ -205,36 +236,73 @@ allocation 불필요. 위 STOCK 식을 적용하지 않음.
 
 금지: 재고만 감소 / 판매만 생성 / 전량 완료인데 판매 없음 / 기존 CONFIRMED 판매·전표 수정 / 선입금을 판매금액보다 많이 적용.
 
-**현재 구현 (Stage4 feature):** `OrderShipService.confirm()`이 판매 master/detail/delivery 직후·order status 전에 동일 TX에서 선입금 순차 배분·cash/ledger를 수행한다. main/운영 미반영. 위 10~12는 구현됨.
+**CURRENT (OrderShipService · DEC-027):** `OrderShipService.confirm()` — git `main`에 구현. ops 배포/DDL은 [06](./06_development_progress.md) CURRENT 게이트 참조. 위 1~13·DEC-019 선입금·`reserved`/`out_qty` 갱신은 **Stage 5C 목표 계약**.
 
 출고 시 `allocated_qty` **유지**. stock `reserved_qty -= ship_qty`, `out_qty += ship_qty`.
 
-**현재:** reserved만 증감. out 불변. `stock_status='Y'` 세팅 없음. 판매 저장은 재고 미갱신.
+> **HISTORICAL — legacy PC `sales_page` full-save:** 재고 미갱신 · `out_qty` 불변. **DEC-027 공통 출고확정 SSOT 아님.** 목표 흐름은 위 OrderShip TX.
 
 ---
 
-## 6. 가락 확정 트랜잭션 (DEC-010 APPROVED)
+## 6. 가락 · 경매 (출하중 / 판매확정)
 
-방향: `DRAFT → CONFIRMED` + 재고 출고를 **한 트랜잭션**.
+### 역사 — DEC-010 SUPERSEDED
 
-권장 순서:
+**역사 정책:** `AUCTION_RT DRAFT → CONFIRMED + OUT`를 한 업무 TX로 가락 전체를 설명.
 
-1. 대상이 `AUCTION_RT` + `DRAFT`인지 검증
-2. 줄 수량만큼 **트랜잭션 안**에서 가용(`in-out-reserved`) 재조회
-3. 부족 시 전체 rollback (409)
-4. `out_qty +=`, log `OUT`
-5. `sales_status=CONFIRMED`
-6. 선택 수금 → ledger
-7. 배송행: 초안에 없음 → DEC-016 OPEN. 없으면 확정 후 송장이 비어 운영 공백.
+| | |
+|--|--|
+| 상태 | **SUPERSEDED — 2026-08-27**, 후계 **[DEC-036](./07_decisions.md)** / **[DEC-037](./07_decisions.md)** |
+| 역사 방향 | `DRAFT → CONFIRMED` + 재고 출고를 **한 트랜잭션** |
+| 승계 | **판매확정 + 재고 OUT은 원자적 업무 TX · 실패 시 전체 rollback** — **DEC-037**만 승계 |
+| 폐기 | DRAFT를 **출하중 SSOT**로 쓰던 해석 · 「초안이 reserved를 안 써서 확정 순간 처음 가용 경합」을 **목표 정상 모델**로 읽던 서술 |
 
-현재 구조상 바로 묶기 어려운 점:
+역사 갭 표(참고용, 현 목표가 아님):
 
-| 갭 | 영향 | 보완 |
-|----|------|------|
-| confirm 함수 없음 | DRAFT 재저장해도 전표 스킵 | core `SalesConfirmService` 신설, PC 버튼 연결 |
-| 초안이 reserved를 안 씀 | 확정 순간 재고가 다른 소매 배정과 경합 | TX 내 가용 재검증 필수 |
+| 갭 | 영향 | 당시 보완안 |
+|----|------|-------------|
+| confirm 함수 없음 | DRAFT 재저장해도 전표 스킵 | core confirm 신설 |
+| 초안이 reserved를 안 씀 | 확정 순간 소매 배정과 경합 | TX 내 가용 재검증 |
 | 초안 무배송 | 출고와 송장 분리 | DEC-016 |
 | 주문/`allocated_qty` 없음 | 해당 없음 | 가락은 판매 경로만 |
+
+### 6.1 경매출하 · 출하중 (DEC-036) — 승인된 목표
+
+상세: [09 §2.3.1·§2.3.2](./09_production_inventory_flow.md) · [09 §14.1](./09_production_inventory_flow.md).
+
+- 복수 상품행을 **한 출하 묶음**으로 [경매 넘기기].
+- 출하중 SSOT 개념 = 최소 **출하 묶음 + 출하 라인** (단순 `transit_qty` 단독 SSOT **금지**).
+- **경매 출하 ≠ 판매 DRAFT**. 출하중은 판매가 아님.
+- 출하 시 상품은 **가용에서 제외**. 아직 판매 OUT **아님**.
+- `reserved_qty` = **주문 HOLD 전용** — 경매 **재사용 금지**. 출하 시 `out_qty` **선차감 금지**.
+- **농장 출하수량** 원본 불변 · **청과 확인수량** 별도 보존 · 차이 = 확인 − 출하 ([OPEN-QTY-DIFF](./07_decisions.md)).
+- 실제 상태코드·테이블·컬럼 = **OPEN-SHIP-STATE** · **OPEN-DDL**. 설계 APPROVED ≠ 구현 완료.
+
+### 6.2 경매 판매확정 (DEC-037) — 승인된 목표
+
+상세: [09 §5.3](./09_production_inventory_flow.md) · [DEC-037](./07_decisions.md).
+DEC-036 출하중·청과 확인/매칭 **이후**. 출하 시 OUT하지 않음 → **이중 OUT 금지**.
+
+개념 TX (하나라도 실패 시 **전체 rollback**):
+
+1. 유효 출하/매칭 검증
+2. **최종 승인 판매수량** 검증
+3. **판매 생성 또는 기존 판매초안 확정** → `CONFIRMED` *(목표에서 DRAFT 필수 여부는 OPEN)*
+4. 상품재고 **OUT** (최종 승인 수량 기준)
+5. stock log
+6. 판매분류 자동 (사용자 선택 금지): `SA010200` 도매 · `SA020400` 경매판매 · `SA030300` 경매연동
+7. 실패 시 전체 rollback
+
+**OPEN (확정 금지):** OPEN-QTY-DIFF · OPEN-SHIP-STATE · OPEN-DDL · [DEC-016](./07_decisions.md) (`t_sales_delivery` 생성 여부).
+
+### 6.3 현재 코드 스냅샷
+
+| 항목 | 사실 |
+|------|------|
+| `save_realtime_auction_draft` | `AUCTION_RT` + `DRAFT` · 마스터·상세만 |
+| 재고 | **미접촉** (`reserved`/`out` 변경 없음) |
+| 출하중 | **미구현** — DRAFT ≠ 출하중 SSOT |
+| confirm | **없음** |
 
 ---
 
@@ -321,10 +389,11 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 | 경로 | 생성 시 | 확정 |
 |------|---------|------|
 | 소매 출고 | 출고 TX에서 CONFIRMED + (선입금 적용분이 있으면) 전표 | 출고와 동일 TX |
-| 가락 | 기존 DRAFT+AUCTION_RT | confirm TX (DEC-010) |
+| 가락/경매 | **현재:** `AUCTION_RT`+`DRAFT` 가능(출하 SSOT **아님**). **목표:** 출하중은 [DEC-036](./07_decisions.md) 별축 · 판매확정은 [DEC-037](./07_decisions.md) | DEC-037 원자 TX |
 | 수출/도매 | CONFIRMED (또는 임시 DRAFT — 추가 OPEN 없음, 1차는 CONFIRMED) | 출고 포함 TX |
 
-**금지:** 새 status 문자열(`SHIPPED` 등) 추가. `PAID` / `UNPAID` 등 **수금 의미를 `sales_status`에 넣기**.
+**금지:** 새 `sales_status` 문자열(`SHIPPED` · `TRANSIT` 등) 추가. `PAID` / `UNPAID` 등 **수금 의미를 `sales_status`에 넣기**.
+**출하중은 `sales_status`가 아님** — 경매 출하상태 축은 DEC-036 (상태값 = OPEN-SHIP-STATE).
 
 ### 8.3 수금상태 — 금액 계산값 (컬럼 없음 · Stage6-0)
 
@@ -347,8 +416,10 @@ PC `'10'` 리터럴은 Stage 2 `OrderService` 신규 저장에서 제거. 과거
 | **주문완료** | 주문상태 `ST010400` **AND** `stock_status='Y'` (전 줄 전량 출고) | DEC-011 · DEC-027 |
 | **수금완료** | 그 판매의 `tot_unpaid_amt == 0` | 금액 계산 |
 
-**금지:** 「판매완료 = 수금완료」로 취급 · 판매상태로 미수/수금완료를 표현 · 주문완료를 수금완료로 읽기.  
+**금지:** 「판매완료 = 수금완료」로 취급 · 판매상태로 미수/수금완료를 표현 · 주문완료를 수금완료로 읽기.
 한 주문이 **주문완료**여도 판매별로 미수가 남을 수 있고, 반대로 **수금완료** 판매가 있어도 주문은 잔량 때문에 미완료일 수 있다.
+
+경매 **출하중/청과확인**은 위 3개 완료개념과 **별도 물류 상태**이며 **판매확정이 아니다** ([DEC-036](./07_decisions.md)).
 
 ### 8.5 판매 → 수금 흐름 (요약)
 
@@ -415,6 +486,8 @@ DRAFT도 GET 허용 · `payment_status=null` · legacy cash 숨기지 않음.
 
 **현재 주문 삭제 함수 없음.** 수정 시 CANCEL_HOLD는 주문 `qty` 전량·규격 키만 (`storage_dt` 없음).
 
+경매 출하 취소/정정 세부 TX는 본 절에서 **신설하지 않음** — [OPEN-SHIP-STATE](./07_decisions.md) · [OPEN-DDL](./07_decisions.md) 후속.
+
 ---
 
 ## 10. 배송
@@ -423,10 +496,13 @@ DRAFT도 GET 허용 · `payment_status=null` · legacy cash 숨기지 않음.
 |------|------------------|------|
 | `LO010100` | 방문/직접인도 | 주소 비필수 |
 | `LO010200` | 택배 | 박스 1개씩 `t_sales_delivery` 분할 |
-| `LO010300` | 화물 · 경매 초안 기본 | |
+| `LO010300` | 화물 · **현재** 경매 **판매초안** 기본 `dlvry_tp` | 출하중 SSOT로 **해석 금지** |
 | `LO010400` | 직배 | 주소 레이어 |
 
-주문: `t_order_delivery`. 주석 `t_dlvry_detail`은 **실제 테이블 아님**.  
+**구분:** `t_order_delivery` / `t_sales_delivery` = **고객배송**. 경매 청과시장 **출하**(DEC-036)는 **별도 업무**. 고객배송 테이블을 경매 **출하중 SSOT**로 쓰지 않는다.
+경매 판매확정 시 `t_sales_delivery` 생성 여부 = [DEC-016](./07_decisions.md) **OPEN**.
+
+주문: `t_order_delivery`. 주석 `t_dlvry_detail`은 **실제 테이블 아님**.
 출고예정일: 배송 `planned_dt` 집계. 마스터 전용 컬럼 추가하지 않음.
 
 부분출고 배송 (DEC-017): 각 출고 이벤트 판매에는 그 출고분에 해당하는 배송 데이터만 연결한다. 주문 배송계획 전체를 매번 복사하지 않는다. 한 주문배송 계획이 여러 출고로 나뉠 경우, 실제 출고수량만큼 판매배송행을 생성한다. 상세 알고리즘은 단계 4 구현 전 현재 `t_order_delivery` 구조를 기준으로 재검토하되, 1:N 판매 원칙은 변경하지 않는다.
@@ -522,6 +598,8 @@ UI 용어는 **결제수단 · 수금액 · 미수금 · 수금상태**. 「수�
 
 기존 HOLD → `t_order_alloc` 백필은 DEC-015 **금지 유지**. historical HOLD만으로는 DDL 차단하지 않음.
 
+`reserved_qty`는 **주문 allocation/HOLD 전용**이며, 경매 출하중은 [DEC-036](./07_decisions.md)에 따라 **별도 집계**한다 (FIFO/LIFO·HOLD 규칙 **변경 없음**).
+
 ### 13.2 현재 `t_stock_log` (코드 INSERT — 이력 SSOT로 쓰기 부족)
 
 `t_stock_master` 자연키:  
@@ -608,15 +686,19 @@ PK/UNIQUE는 구현 전 실제 schema와 대조하여 확정.
 
 ---
 
-## 14. 재고가 생기는 시점 (참고)
+## 14. 재고·가용수량이 변하는 시점 (참고)
 
-| 이벤트 | 테이블 | 수량 |
-|--------|--------|------|
+| 이벤트 | 의미 | 수량 축 |
+|--------|------|---------|
 | 원물 입고 (신고 저장) | `FR010300` `in_qty` | 20kg 단위 |
 | 선별 생산 | 상품 `FR010100` `in_qty` +, 원물 `out_qty` + | 박스 |
 | 폐기/실사 | `out_qty` / in·out 재기록 | — |
-| 배정 | 행 `reserved_qty` +, 줄 `allocated_qty` + | 박스 |
+| 주문 배정 | 행 `reserved_qty` +, 줄 `allocated_qty` + | 박스 (주문 HOLD) |
 | 배정 해제 | reserved −, allocated − (미출고분) | 박스 |
-| 출고확정 | reserved −, out + | 박스 (`allocated_qty` 유지, `shipped_qty` 증가) |
+| 소매/주문 출고확정 | reserved −, out + | 박스 (`allocated_qty` 유지, `shipped_qty` 증가) |
+| **경매 출하** (목표 DEC-036) | 가용에서 **출하중 수량 제외** | **`reserved`/`out` 아님** |
+| **경매 판매확정** (목표 DEC-037) | 최종 승인 수량 기준 **out +** · 출하중 종료 | 박스 |
+
+물리 SQL·컬럼·가용 공식은 **미확정** ([09 §14.1](./09_production_inventory_flow.md) · OPEN-DDL).
 
 원황/조생은 원물 입고 없이 상품 `in_qty`만 실사/생산으로 올릴 수 있음 (운영).
