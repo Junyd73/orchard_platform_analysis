@@ -2,7 +2,7 @@
 
 > **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).
 > Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.
-> 수확 N:M (DEC-035): **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING**. 경매 출하·청과·판매확정: [DEC-036/037](./07_decisions.md) — **APPROVED LOGICAL (설계. 미구현).**
+> 수확 N:M (DEC-035): **OPERATIONAL PASS** · **OPS APPLIED**. 경매 출하·청과·판매확정: [DEC-036/037](./07_decisions.md) — **APPROVED LOGICAL (설계. 미구현).**
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.
 > PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
@@ -11,11 +11,11 @@
 | 층 | 의미 |
 |----|------|
 | **CURRENT API** | 현재 FastAPI/Core에 실제 구현된 endpoint · request/response · TX |
-| **IMPLEMENTED API** | git `main` DEC-035 HARVEST N:M 계약 (**ops 배포 전**) |
+| **IMPLEMENTED API** | git `main` DEC-035 HARVEST N:M 계약 (**OPERATIONAL PASS**) |
 | **APPROVED LOGICAL API** | DEC-036/037 등 논리 API 책임 (**미구현**) |
 | **OPEN API** | endpoint path · payload · DDL · 상태코드 · cardinality · 정책 미확정 |
 
-APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다. DEC-035 HARVEST는 **IMPLEMENTED API** (운영 activation = **OPS PENDING**).
+APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다. DEC-035 HARVEST = **IMPLEMENTED API** · **OPERATIONAL PASS** (PC·Lightsail).
 
 기존 패턴: `/api/v1/farms/{farm_cd}/…`, Header `X-User-Id`.
 날짜 요청/응답: **`YYYY-MM-DD`**. 내부 저장 신규도 ISO (DEC-012). 읽기는 YYYYMMDD 호환.
@@ -85,7 +85,7 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 ### 2.1 `GET …/production/harvest-records` (DEC-035)
 
-**IMPLEMENTED API** (git `main` · ops activation **OPS PENDING**)
+**OPERATIONAL API** (git `main` @ `4daae03` · Lightsail **OPS APPLIED**)
 
 - Path: `GET /api/v1/farms/{farm_cd}/production/harvest-records`
 - Core: `ProductionService.list_harvest_records` (`core/production_service.py`).
@@ -103,7 +103,7 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 ### 2.2 `POST …/production/confirm` — HARVEST N:M (DEC-035)
 
-**IMPLEMENTED API** (git `main` · ops activation **OPS PENDING**)
+**OPERATIONAL API** (git `main` @ `4daae03` · Lightsail **OPS APPLIED**)
 
 - Path: `POST /api/v1/farms/{farm_cd}/production/confirm`
 - Core: `ProductionService.confirm` · FastAPI `ProductionApiService`.

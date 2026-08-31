@@ -2,7 +2,7 @@
 
 > 단계 2 **완료/대표 승인**. **판매관리 4탭 Shell**. Stage 6 판매/출고 UX **1차 구현** (`/orders/ship`). Stage 3B 배정 UI **후순위**.
 > UX 원칙: [09 §0](./09_production_inventory_flow.md) · [DEC-021](./07_decisions.md) · ODS · [SCR-030](../../mobile/docs/screens/SCR-030.md)
-> 경매: [02](./02_domain_flow.md) · [03](./03_data_contract.md) · [DEC-036/037](./07_decisions.md) — **설계 TARGET**. DEC-035 HARVEST N:M = **IMPLEMENTED IN GIT** · **OPS PENDING**.
+> 경매: [02](./02_domain_flow.md) · [03](./03_data_contract.md) · [DEC-036/037](./07_decisions.md) — **설계 TARGET**. DEC-035 HARVEST N:M = **OPERATIONAL PASS**.
 
 범례: **CURRENT** = 현재 모바일 코드 사실 · **TARGET** = 승인 UX 목표 · **OPEN** = 미확정
 
@@ -38,7 +38,7 @@
 
 AppBar 톱니 → `/settings`. 목록에 가짜 배정 배지 없음.
 
-**git `main` (IMPLEMENTED IN GIT).** Lightsail PWA는 **`bb8c872` 계열일 수 있음** — **OPS activation pending**. TARGET은 §5B·§6.3~ (경매).
+**git `main` @ `4daae03` · Lightsail PWA N:M 배포 완료** — **OPERATIONAL PASS**. TARGET은 §5B·§6.3~ (경매).
 
 ---
 
@@ -174,9 +174,9 @@ OdsBottomNav  … 판매관리
 
 ---
 
-## 5A. HARVEST N:M 포장 UX (DEC-035) — **IMPLEMENTED IN GIT**
+## 5A. HARVEST N:M 포장 UX (DEC-035) — **OPERATIONAL PASS**
 
-상세: [09 §0.2·§16.4](./09_production_inventory_flow.md). **REHEARSAL PASS** · **OPS activation pending**.
+상세: [09 §0.2·§16.4](./09_production_inventory_flow.md). **OPS APPLIED** · Mobile/PC **실사용 PASS**.
 
 ### IMPLEMENTED (git `main` · `2aa47de`)
 
@@ -210,7 +210,7 @@ OdsBottomNav  … 판매관리
 ### OPEN
 
 - **OPEN-DONE** — HARVEST `DONE` 최종 의미
-- **OPS activation** — operating production HARVEST N:M **비활성** (Lightsail **`bb8c872`**)
+- **PC UI 후속** — PC 생산확정 HARVEST N:M **화면 UI 보완** (모바일 마무리 후 별도 PC 단계 · 기능 장애/blocker **아님**)
 
 **SUPERSEDED:** 단일 HARVEST · 잔량 API 없음 · OPEN-DDL( consumption design ) — pre-C 스냅샷.
 

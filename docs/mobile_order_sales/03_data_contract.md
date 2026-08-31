@@ -10,12 +10,14 @@
 | 층 | 의미 |
 |----|------|
 | **CURRENT PHYSICAL** | 현재 실제 존재하는 테이블/컬럼/코드 계약 |
-| **IMPLEMENTED PHYSICAL CONTRACT** | git `main`에 구현·문서화된 물리 계약 (DEC-035) — **운영 DB 미적용 가능** |
+| **IMPLEMENTED PHYSICAL CONTRACT** | git `main`에 구현·문서화된 물리 계약 (DEC-035) — **OPS APPLIED** |
 | **APPROVED LOGICAL** | DEC-036/037 등 승인 논리 요구 (**미구현일 수 있음**) |
 | **OPEN PHYSICAL** | 경매 출하 등 신규 테이블·상태코드 — **미확정** |
-| **OPS PENDING** | 운영 DB DDL·신규 code 배포 **미적용** |
+| **OPS APPLIED** | PC·Lightsail **운영 DB DDL** + code/deploy **적용 완료** |
+| **OPERATIONAL PASS** | 실제 운영환경 PC/Mobile HARVEST N:M **실사용 확인** |
+| **OPS PENDING** | *(과거)* 운영 미적용 — **DEC-035는 2026-08-31 종료** |
 
-DEC-035 `t_harvest_consumption` · `prod_confirm_id` · production trace = **IMPLEMENTED PHYSICAL CONTRACT**. 운영 적용 = **OPS PENDING**.
+DEC-035 `t_harvest_consumption` · `prod_confirm_id` · production trace = **OPS APPLIED** · **OPERATIONAL PASS**.
 경매 출하중 물리 DDL = **OPEN**. APPROVED LOGICAL을 운영 DB에 이미 있다고 쓰지 않는다.
 
 운영 DB baseline (CURRENT):
@@ -341,7 +343,7 @@ available ≈ real - order_reserved - active_auction_transit
 
 ## 8A. 수확 소진 물리계약 (DEC-035)
 
-상세 업무: [09 §0.2·§16.4](./09_production_inventory_flow.md). **IMPLEMENTED PHYSICAL CONTRACT** · **OPS PENDING**.
+상세 업무: [09 §0.2·§16.4](./09_production_inventory_flow.md). **OPS APPLIED** · **OPERATIONAL PASS**.
 
 ### CURRENT PHYSICAL (수확 원장)
 
@@ -371,7 +373,7 @@ available ≈ real - order_reserved - active_auction_transit
 
 **상품 추적 (production trace):** HARVEST 생산 IN 시 `t_stock_log.ref_type='PRODUCTION'` · `ref_id=prod_confirm_id` (`core/stock_constants.py` · Stage 5C trace DDL).
 
-**OPS PENDING:** PC·Lightsail **운영 DB**에는 `t_harvest_consumption` **없음** (2026-08-28 preflight). copy rehearsal(D1/D2)에서만 DDL 적용 검증.
+**OPS APPLIED (2026-08-31):** PC·Lightsail **운영 DB**에 `t_harvest_consumption` **적용 완료** · integrity **ok** · D1/D2 rehearsal 후 E1/E2 운영 DDL PASS.
 
 ### OPEN (DEC-035)
 
@@ -604,8 +606,8 @@ t_stock_master
 
 | 항목 | 근거 | 상태 |
 |------|------|------|
-| 수확 소진 `t_harvest_consumption` | DEC-035 | **IMPLEMENTED PHYSICAL CONTRACT** · **OPS DDL PENDING** |
-| 생산확정 `prod_confirm_id` + PRODUCTION trace | DEC-035 | **IMPLEMENTED** · **OPS DDL PENDING** |
+| 수확 소진 `t_harvest_consumption` | DEC-035 | **OPS APPLIED** · **OPERATIONAL PASS** |
+| 생산확정 `prod_confirm_id` + PRODUCTION trace | DEC-035 | **OPS APPLIED** · `ref_type='PRODUCTION'` · `ref_id=prod_confirm_id` |
 | 경매 출하 헤더/라인 | DEC-036 | 논리 승인 · **OPEN-DDL** |
 | 출하/확인 수량 두 축 | DEC-036 | 논리 승인 · 물리명 미정 |
 | 출하 상태값 | OPEN-SHIP-STATE | **OPEN** |

@@ -1,6 +1,6 @@
 # 01. Overview — 주문/판매 통합
 
-> **현재 기준 (2026-08-28):** DEC-035 HARVEST N:M — **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS activation pending** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
+> **현재 기준 (2026-08-31):** DEC-035 HARVEST N:M — **APPROVED** · **IMPLEMENTED** · **REHEARSAL PASS** · **OPS APPLIED** · **OPERATIONAL PASS** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
 > Stage 6·Order→Ship·compact 목록 **운영 반영** (`fd963e0`) — DEC-035와 별개.
 > DEC-036/037는 **설계 APPROVED** · 미구현. 생산/재고 SSOT: [09](./09_production_inventory_flow.md). API: [05](./05_api_contract.md).
 > **진행·게이트:** [06](./06_development_progress.md).
@@ -12,12 +12,15 @@
 | **CURRENT** | 지금 FastAPI/Core/PC/모바일에 **실제 있는** 기능·코드 |
 | **IMPLEMENTED IN GIT** | repo `main`에 merge된 구현 (DEC-035 A~C) |
 | **REHEARSAL PASS** | copy DB migration/E2E 검증 완료 (D1/D2) |
-| **OPS PENDING** | 운영 DB DDL·신규 code 배포 **미적용** — operational/current production **아님** |
+| **OPS APPLIED** | PC·Lightsail **운영 DB DDL** + code/deploy **적용 완료** |
+| **OPERATIONAL PASS** | 실제 운영환경에서 PC/Mobile HARVEST N:M **실사용 확인** |
+| **OPS PENDING** | *(과거 표기)* 운영 미적용 — **DEC-035는 해당 없음 (2026-08-31 종료)** |
 | **APPROVED TARGET** | DEC-036/037 등 **설계 승인** · **미구현** |
 | **OPEN** | OPEN-DONE · OPEN-SHIP-STATE · 경매 DDL 등 **미확정** |
 
-`운영 적용 완료` · `production operational` · `deployed`(DEC-035) **금지**.
-필요 시 **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING** · **ops 배포** · **ops DDL**을 **분리** 표기.
+`운영 적용 완료` · `production operational` · `deployed`는 **DEC-035 CURRENT**에 사용 가능.
+DEC-036/037 등 **미구현 설계**에는 **APPROVED TARGET** · **OPEN**만 사용.
+필요 시 **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS APPLIED** · **OPERATIONAL PASS**를 **분리** 표기.
 
 ---
 
@@ -58,7 +61,7 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 
 | 대표 원칙 | |
 |-----------|--|
-| 수확 **N건** → 포장/생산 **1회** · **부분사용** · **잔량** | **IMPLEMENTED IN GIT** · REHEARSAL PASS · OPS PENDING (DEC-035) |
+| 수확 **N건** → 포장/생산 **1회** · **부분사용** · **잔량** | **OPERATIONAL PASS** (DEC-035) |
 | 수확 **저장** ≠ `t_stock_master` IN | CURRENT + DEC-022 |
 | 생산확정 후 상품 **전량 IN** | CURRENT + DEC-023 |
 
@@ -106,7 +109,7 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 | 생산확정 → 상품 **전량 IN** | 023 | APPROVED |
 | **full-set production 금지 · 최소 보완 우선** | 025 | APPROVED |
 | harvest_year = 원료 수확연도 | 026 | APPROVED |
-| **수확잔량 · HARVEST N:M 소진** | **035** | **IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS PENDING** |
+| **수확잔량 · HARVEST N:M 소진** | **035** | **OPERATIONAL PASS** |
 | **`reserved_qty` = 주문 HOLD 전용** | **018, 036** | APPROVED |
 | **경매 출하 ≠ 판매 · ≠ DRAFT · 출하 시 OUT 없음** | **036** | **APPROVED (설계)** |
 | **경매 판매확정 = 최종 승인수량 OUT · 원자 TX** | **037** | **APPROVED (설계)** |
@@ -149,8 +152,8 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 
 | | 대표 |
 |--|------|
-| **CURRENT** | 주문 CRUD · allocation Core/API · Stage H/P 생산·수확(단일 HARVEST) · fruit-stock · **ShipConfirm** 주문/DIRECT 판매+OUT · sales GET/수금(git main 반영 · ops 미배포 — [06](./06_development_progress.md)) · PC **`AUCTION_RT`+DRAFT** · 경매 출하 REST **없음** |
-| **APPROVED TARGET** | HARVEST **N:M** · 수확 **잔량** · 경매 **출하 SSOT** · 가용에서 **출하중 제외** · 청과 **확인/매칭** · DEC-037 **판매확정** |
+| **CURRENT** | 주문 CRUD · allocation Core/API · Stage H/P 생산·수확 **HARVEST N:M** · fruit-stock · **ShipConfirm** 주문/DIRECT 판매+OUT · sales GET/수금(git main 반영 · ops 미배포 — [06](./06_development_progress.md)) · PC **`AUCTION_RT`+DRAFT** · 경매 출하 REST **없음** |
+| **APPROVED TARGET** | 경매 **출하 SSOT** · 가용에서 **출하중 제외** · 청과 **확인/매칭** · DEC-037 **판매확정** |
 | **OPEN** | OPEN-DDL · OPEN-SHIP-STATE · OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY · 시장/법인 API 등 → [§8](#8-주요-open) · [07](./07_decisions.md) |
 
 ---
@@ -171,9 +174,9 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 
 - DEC-036 **최소 경매 출하** 구조
 
-**DEC-035:** **IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS activation pending** — [06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md).
+**DEC-035:** **OPERATIONAL PASS** — PC·Lightsail OPS DDL **APPLIED** · Mobile/PWA N:M **실사용 PASS** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
 
-**정확한 표현:** full production system 신규 구축은 **금지**하되, DEC-035 최소 보완구조는 **git에 구현됨**. 경매 물리 DDL = **OPEN**. DEC-035 운영 DDL = **OPS PENDING**.
+**정확한 표현:** DEC-035 최소 보완구조는 **git 구현 + 운영 적용 완료**. 경매 물리 DDL = **OPEN**. PC 생산확정 HARVEST N:M **화면 UI 보완** = 모바일 마무리 후 **별도 PC 단계** (기능 장애/blocker **아님**).
 
 ### OPEN (01에서는 링크만)
 
@@ -216,8 +219,8 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 | 0 | 설계 / PC 분석 / 업무규칙 | **완료** (설계 이력) |
 | 1 | 모바일 진입·라우팅 | **Core 구현 · git main · ops 과거 반영** — [06](./06_development_progress.md) |
 | 2 | 주문 CRUD·고객·배송 | **Core 구현 · git main · ops 과거 반영** — [06](./06_development_progress.md) |
-| 3 (=H) | 수확기록 (품종·상자) | **Core 구현 · git main** · HARVEST **단일** · N:M = **APPROVED TARGET** · ops/DDL [06](./06_development_progress.md) |
-| 4 (=P) | PACK/PROCESS · IN/OUT | **Core 구현 · git main** · HARVEST **단일** confirm · ops [06](./06_development_progress.md) |
+| 3 (=H) | 수확기록 (품종·상자) · **HARVEST N:M** | **OPERATIONAL PASS** · ops DDL **APPLIED** — [06](./06_development_progress.md) |
+| 4 (=P) | PACK/PROCESS · IN/OUT | **Core 구현 · git main** · HARVEST N:M confirm **OPERATIONAL** · ops [06](./06_development_progress.md) |
 | 5A (=3A) | allocation HOLD/RELEASE | **Core/API 구현 · git main · ops allocation DDL 별도 게이트** — [06](./06_development_progress.md) |
 | 5B | fruit-stock 조회·이력 | **Core 구현 · git main** · ops [06](./06_development_progress.md) |
 | 5C (=S) | ShipConfirm 판매+OUT | **Core+HTTP 구현 · git main** · ops `fd963e0` 계열(과거 기록) — [06](./06_development_progress.md) |
@@ -246,7 +249,7 @@ Stage H/P를 **미완료로 되돌리지 않음** — 위는 **기존 기능 위
 
 | 묶음 | 대표 OPEN |
 |------|-----------|
-| **수확·생산** | OPEN-DONE · **OPS DDL PENDING**(DEC-035 consumption) |
+| **수확·생산** | OPEN-DONE · ~~OPS DDL PENDING(DEC-035)~~ → **DEC-035 OPS APPLIED** |
 | **경매 출하** | OPEN-DDL · OPEN-SHIP-STATE · 출하 취소/정정 |
 | **청과·매칭** | OPEN-AUCTION-MATCH-CARDINALITY · 시장/법인 유효조합·API |
 | **판매확정** | OPEN-QTY-DIFF · 차이 시 confirm 허용 · DRAFT 필수 · **DEC-016** (가락 배송) |

@@ -9,7 +9,8 @@
 **2026-08-21 대표 승인:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**.  
 **2026-08-23 대표 승인:** DEC-030 **신규 APPROVED** (6C write validation 전용).
 **2026-08-27 대표 승인:** DEC-010 **SUPERSEDED** (후계 DEC-036/037) · DEC-035 · DEC-036 · DEC-037 **신규 APPROVED** (설계).
-**2026-08-28 문서 갱신:** DEC-035 — **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING** (DEC-036/037는 설계·미구현).
+**2026-08-28 문서 갱신:** DEC-035 — **IMPLEMENTED IN GIT** · **REHEARSAL PASS** *(과거)*.
+**2026-08-31 문서 갱신:** DEC-035 — **OPS APPLIED** · **OPERATIONAL PASS** (DEC-036/037는 설계·미구현).
 
 ---
 
@@ -49,7 +50,7 @@
 | 대표 ID | 내용 | DEC |
 |---------|------|-----|
 | DEC-010 | **SUPERSEDED** — `AUCTION_RT DRAFT→CONFIRMED+OUT`만으로 가락 출하 전체를 설명하던 정책 폐기. 후계 DEC-036(출하중) / DEC-037(판매확정) | DEC-010 → 036/037 |
-| DEC-035 | 수확잔량 SSOT · HARVEST N:M 부분소진 · `t_harvest_consumption` (**IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS PENDING**) | DEC-035 |
+| DEC-035 | 수확잔량 SSOT · HARVEST N:M 부분소진 · `t_harvest_consumption` (**OPERATIONAL PASS**) | DEC-035 |
 | DEC-036 | 경매 출하 ≠ DRAFT · 출하 묶음+라인 · 출하중 (**설계 APPROVED**) | DEC-036 |
 | DEC-037 | 경매 판매확정 · 최종 승인 수량 OUT · SA 자동분류 · 원자 TX (**설계 APPROVED**) | DEC-037 |
 
@@ -599,7 +600,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | | |
 |--|--|
-| 상태 | **APPROVED** (설계 확정) · **IMPLEMENTED IN GIT** · **REHEARSAL PASS** · **OPS PENDING** — 2026-08-27 설계 · 2026-08-28 구현·rehearsal |
+| 상태 | **APPROVED** (설계 확정) · **IMPLEMENTED** · **REHEARSAL PASS** · **OPS APPLIED** · **OPERATIONAL PASS** — 2026-08-27 설계 · 2026-08-28 구현·rehearsal · 2026-08-31 운영 완료 |
 | 결정 | 아래. |
 
 1. 수확 원장은 **DEC-022**의 `t_work_detail` 유지.
@@ -631,17 +632,19 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | OPEN | 내용 |
 |------|------|
 | HARVEST `DONE` | **잔량 SSOT로 쓰지 않음**만 확정. 폐지/전량소진 등 최종 의미는 **OPEN-DONE** |
-| **OPS DDL APPLY** | PC·Lightsail **운영 DB**에 `t_harvest_consumption` **미적용** |
-| **OPS code deploy** | Lightsail running **`bb8c872`** — DEC-035 code **미배포** |
+| idempotency / cancel-reversal | 멱등 DDL · `is_valid` · guard — **유지** (운영 적용 후에도 동일 · **OPEN** 정책) |
 
-**design/implementation OPEN-DDL → CLOSED.** **OPS DDL APPLY → PENDING.**
+**design/implementation OPEN-DDL → CLOSED.** **PC OPS DDL → APPLIED.** **Lightsail OPS DDL → APPLIED.** **OPS code deploy → APPLIED** (`4daae03`).
 
-| git commits (local `main`, push 0) | |
-|------------------------------------|--|
+| git commits (`main`) | |
+|----------------------|--|
 | `eea8511` | foundation / guard |
 | `21e9de9` | Core/API N:M |
 | `e12bf96` | trace schema / concurrency |
 | `2aa47de` | PC/Mobile N:M |
+| `4daae03` | docs / readiness |
+| `10632eb` | mobile `build:staging` TS6133 fix |
+| `6e9ae87` | dev server API→Vite startup gate |
 
 | 관련 | DEC-021 · **022** · **023** · **025** · **026** · [09 §0.2·§16.4](./09_production_inventory_flow.md) · [03 §8A](./03_data_contract.md) · [05 §2.1·§2.2](./05_api_contract.md) |
 | 승인 | **2026-08-27 대표** (설계) · **2026-08-28** 구현·rehearsal 문서 반영 |
@@ -737,7 +740,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | **OPEN-QTY-DIFF** | **OPEN** | 출하수량 ≠ 청과확인수량일 때 감모·반입·정정·재고조정·회계 처리 |
 | **OPEN-DONE** | **OPEN** | HARVEST `DONE` **최종 의미**. (잔량 SSOT로 쓰지 않음은 DEC-035에서 확정) |
 | **OPEN-SHIP-STATE** | **OPEN** | 경매 출하 상태 **실제 코드/상태값** |
-| **OPEN-DDL** | **OPEN** (경매 출하 헤더/라인 **물리 스키마**). DEC-035 consumption/trace = **design CLOSED** · **OPS DDL PENDING** |
+| **OPEN-DDL** | **OPEN** (경매 출하 헤더/라인 **물리 스키마**). DEC-035 consumption/trace = **design CLOSED** · **OPS APPLIED** |
 | **OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** | 출하라인 ↔ 청과 경매결과 cardinality (1:1 / 1:N / N:M **미확정**). 상세 [05 §9B](./05_api_contract.md) · [DEC-036](#dec-036) 청과 확인/매칭 |
 | **DEC-016** | **OPEN** | 경매 판매확정 시 `t_sales_delivery` 생성 여부 |
 
@@ -751,7 +754,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 |----|------|
 | DEC-001 ~ 009, **011** ~ 014, **017** ~ **027**, **028** ~ **034** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | **DEC-010** | **SUPERSEDED** (2026-08-27) → 후계 **036/037** |
-| **DEC-035** | **IMPLEMENTED IN GIT** · REHEARSAL PASS · **OPS PENDING** |
+| **DEC-035** | **OPERATIONAL PASS** |
 | **DEC-036**, **037** | **APPROVED** (설계. 구현·DDL·IMPLEMENTED **아님**) |
 | DEC-015, **016** | **OPEN** |
 | **OPEN-PROD-01~03** | **CLOSED** |
@@ -759,7 +762,7 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.
 2026-08-26 갱신: **Stage7B-2 private main merge** · DEC-032/033/034 **IMPLEMENTED** · Stage7B PC 수금 공용화 완료 · 운영 미배포 · P1 COMMIT/UI 경계 유지.
-2026-08-28 갱신: **DEC-035 IMPLEMENTED IN GIT** · D1/D2 **REHEARSAL PASS** · design OPEN-DDL **CLOSED** · **OPS DDL/code PENDING** · Lightsail **`bb8c872`**.
+2026-08-31 갱신: **DEC-035 OPERATIONAL PASS** · PC·Lightsail **OPS APPLIED** · design OPEN-DDL **CLOSED** · Lightsail **`4daae03`** · build fix **`10632eb`** · dev race **`6e9ae87`**.
 
 ### 스키마 확인 (2026-08-22)
 
