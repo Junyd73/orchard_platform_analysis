@@ -83,3 +83,12 @@ export function buildStockListEntries(rows: StockItem[], opts: { raw: boolean })
       a.row.size_cd.localeCompare(b.row.size_cd),
   )
 }
+
+/** `재고(0)포함` — 화면 가용수량(entry.row.available_qty)과 동일 기준 */
+export function filterStockEntriesByAvailable(
+  entries: StockListEntry[],
+  includeZero: boolean,
+): StockListEntry[] {
+  if (includeZero) return entries
+  return entries.filter((entry) => Number(entry.row.available_qty) > 0)
+}

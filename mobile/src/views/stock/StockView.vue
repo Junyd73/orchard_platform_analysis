@@ -16,6 +16,7 @@ import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 import { stockSaleSpecKey } from '@/views/sales/shipConfirmModel'
 import {
   buildStockListEntries,
+  filterStockEntriesByAvailable,
   type StockListEntry,
 } from '@/views/stock/stockSaleList'
 import {
@@ -25,6 +26,15 @@ import {
   reasonAllowsIn,
   reasonAllowsOut,
 } from '@/views/stock/stockAdjustConstants'
+import { listAuctionShipments } from '@/api/auctionShipments'
+import type { AuctionShipmentListItem } from '@/types/auctionShipment'
+import AuctionShipConfirmSheet from '@/views/stock/AuctionShipConfirmSheet.vue'
+import {
+  auctionShipmentStatusLabel,
+  MSG_AUCTION_SHIP_OK,
+  MSG_AUCTION_STOCK_REFRESH_FAIL,
+  refreshAuctionShipLines,
+} from '@/views/stock/auctionShipModel'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
 const ITEM_PRODUCT = 'FR010100'
@@ -197,12 +207,13 @@ const listEntries = computed(() =>
 )
 
 const filteredEntries = computed(() => {
+  let entries = filterStockEntriesByAvailable(listEntries.value, includeZero.value)
   const v = appliedVariety.value
   const w = appliedWeight.value
   const s = appliedSize.value
   const g = appliedGrade.value
-  if (!v && !w && !s && !g) return listEntries.value
-  return listEntries.value.filter((entry) => {
+  if (!v && !w && !s && !g) return entries
+  return entries.filter((entry) => {
     const row = entry.row
     if (v && row.variety_cd !== v) return false
     if (w && String(row.weight) !== w) return false
@@ -425,6 +436,95 @@ function openSalesPreview() {
   void router.push({ name: 'sales-preview' })
 }
 
+const auctionSheetOpen = ref(false)
+const auctionOpening = ref(false)
+const auctionRefreshError = ref('')
+const transitOpen = ref(false)
+const transitLoading = ref(false)
+const transitError = ref('')
+const transitShipments = ref<AuctionShipmentListItem[]>([])
+
+function closeAuctionSheet() {
+  auctionSheetOpen.value = false
+}
+
+async function syncAuctionCartFromLatestStock(): Promise<boolean> {
+  if (!farmCd.value || salesPrefill.source !== 'STOCK' || !salesPrefill.shipLines.length) {
+    return false
+  }
+  const latest = await listFruitStock(farmCd.value, {
+    item_cd: ITEM_PRODUCT,
+    include_zero: includeZero.value,
+  })
+  const { lines } = refreshAuctionShipLines(salesPrefill.shipLines, latest)
+  salesPrefill.applyStockLineAvailability(lines)
+  if (stockType.value === ITEM_PRODUCT) {
+    rows.value = latest
+  }
+  return true
+}
+
+async function openAuctionSheet() {
+  if (!canAuctionShip.value || auctionOpening.value) return
+  auctionOpening.value = true
+  auctionRefreshError.value = ''
+  try {
+    await syncAuctionCartFromLatestStock()
+    auctionSheetOpen.value = true
+  } catch {
+    auctionRefreshError.value = MSG_AUCTION_STOCK_REFRESH_FAIL
+  } finally {
+    auctionOpening.value = false
+  }
+}
+
+function clearStockSelection() {
+  if (salesPrefill.source !== 'STOCK') return
+  const keys = salesPrefill.shipLines.map((ln) => stockSaleSpecKey(ln))
+  for (const key of keys) {
+    salesPrefill.removeStockLineByKey(key)
+  }
+  rowQtyByKey.value = {}
+}
+
+async function loadTransitShipments() {
+  if (!farmCd.value) return
+  transitLoading.value = true
+  transitError.value = ''
+  try {
+    const page = await listAuctionShipments(farmCd.value)
+    transitShipments.value = (page.items ?? []).filter(
+      (item) => item.status === 'IN_TRANSIT',
+    )
+  } catch {
+    transitShipments.value = []
+    transitError.value = '출하중 목록을 불러오지 못했습니다.'
+  } finally {
+    transitLoading.value = false
+  }
+}
+
+function onAuctionShipSuccess() {
+  pageSuccess.value = MSG_AUCTION_SHIP_OK
+  clearStockSelection()
+  void load()
+  void loadTransitShipments()
+}
+
+function onAuctionQtyUnavailable() {
+  void (async () => {
+    try {
+      await syncAuctionCartFromLatestStock()
+    } catch {
+      await load()
+    }
+  })()
+}
+
+watch(farmCd, () => {
+  void loadTransitShipments()
+}, { immediate: true })
+
 async function requestAdjust(ioType: 'IN' | 'OUT') {
   const row = logTarget.value
   const entry = adjustEntry.value
@@ -578,21 +678,23 @@ const showSalesActionBar = computed(
 const stockDraftLineCount = computed(() =>
   salesPrefill.source === 'STOCK' ? salesPrefill.shipLines.length : 0,
 )
-const stockDraftBoxSum = computed(() =>
+
+const stockDraftTotalQty = computed(() =>
   salesPrefill.source === 'STOCK' ? salesPrefill.stockDraftTotalQty : 0,
 )
 
-/** transform 조상 회피(Teleport). 가로 70%(−30%) · 가운데 정렬 · 셸 max 480 기준 */
-const SALES_FAB_MAX_PX = Math.round(480 * 0.7) // 336
-const salesFabStyle = {
+const canAuctionShip = computed(
+  () =>
+    showSalesActionBar.value &&
+    stockType.value === ITEM_PRODUCT &&
+    salesPrefill.shipLines.every((ln) => ln.item_cd === ITEM_PRODUCT),
+)
+
+/** 탭 캐러셀 transform 회피(Teleport) · nav 바로 위 viewport dock */
+const stockBatchDockStyle = {
   position: 'fixed',
   left: '50%',
-  right: 'auto',
-  width: '70%',
-  maxWidth: `${SALES_FAB_MAX_PX}px`,
   transform: 'translateX(-50%)',
-  marginLeft: '0',
-  marginRight: '0',
   bottom:
     'calc(var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px))',
   zIndex: 40,
@@ -602,9 +704,10 @@ const salesFabStyle = {
 <template>
   <div
     class="stock-view"
-    :class="{ 'stock-view--with-batch': showSalesActionBar }"
+    :class="{ 'stock-view--with-dock': showSalesActionBar }"
   >
     <p v-if="pageSuccess" class="stock-view__page-ok">{{ pageSuccess }}</p>
+    <p v-if="auctionRefreshError" class="stock-view__error">{{ auctionRefreshError }}</p>
 
     <!-- Level 2: 원물 / 상품 / 배즙 탭 -->
     <div class="stock-view__type-tabs" role="tablist" aria-label="재고 종류">
@@ -621,6 +724,47 @@ const salesFabStyle = {
         {{ t.label }}
       </button>
     </div>
+
+    <!-- 출하중 (경매) — 상품 탭에서만 -->
+    <OdsCard
+      v-if="stockType === ITEM_PRODUCT"
+      class="stock-view__transit"
+      aria-label="출하중"
+      data-testid="auction-transit-section"
+    >
+      <button
+        type="button"
+        class="stock-view__transit-toggle"
+        data-testid="auction-transit-toggle"
+        @click="transitOpen = !transitOpen"
+      >
+        출하중
+        <span v-if="transitLoading"> 불러오는 중…</span>
+        <span v-else>{{ transitShipments.length }}건</span>
+      </button>
+      <p v-if="transitError" class="stock-view__transit-err">{{ transitError }}</p>
+      <ul v-if="transitOpen && transitShipments.length" class="stock-view__transit-list">
+        <li
+          v-for="(ship, idx) in transitShipments"
+          :key="`${ship.ship_dt}-${ship.market_cd}-${ship.reg_dt}-${idx}`"
+          class="stock-view__transit-item"
+          data-testid="auction-transit-item"
+        >
+          <span class="stock-view__transit-main">
+            {{ ship.ship_dt }} · {{ ship.market_name }} · {{ ship.corporation_name }}
+          </span>
+          <span class="stock-view__transit-sub">
+            출하 {{ ship.total_shipped_qty }}박스 · {{ auctionShipmentStatusLabel(ship.status) }}
+          </span>
+        </li>
+      </ul>
+      <p
+        v-else-if="transitOpen && !transitLoading && !transitShipments.length"
+        class="stock-view__transit-empty"
+      >
+        출하중인 건이 없습니다.
+      </p>
+    </OdsCard>
 
     <!-- 필터 바 -->
     <div class="stock-view__filter-bar">
@@ -841,30 +985,54 @@ const salesFabStyle = {
       </div>
     </div>
 
-    <!-- transform 조상(탭 캐러셀) 밖 — 뷰포트 fixed Floating Bar -->
+    <!-- 선택 액션 — viewport 하단 dock (스크롤해도 nav 위 고정) -->
     <Teleport to="body">
       <div
         v-if="showSalesActionBar"
         class="stock-view__batch"
         data-testid="stock-sales-fab"
         role="region"
-        aria-label="판매 미리보기"
-        :style="salesFabStyle"
+        aria-label="재고 선택 액션"
+        :style="stockBatchDockStyle"
       >
-        <span class="stock-view__batch-count">
-          판매예정 {{ stockDraftLineCount }}품목 · {{ stockDraftBoxSum }}박스
+        <span class="stock-view__batch-count" data-testid="stock-batch-count">
+          선택 {{ stockDraftLineCount }}품목 {{ stockDraftTotalQty }}상자
         </span>
-        <OdsButton
-          type="button"
-          :block="false"
-          class="stock-view__preview-btn"
-          data-testid="stock-preview-btn"
-          @click="openSalesPreview"
-        >
-          판매 미리보기
-        </OdsButton>
+        <div class="stock-view__batch-actions">
+          <OdsButton
+            type="button"
+            :block="false"
+            class="stock-view__action-btn"
+            data-testid="stock-direct-sale-btn"
+            @click="openSalesPreview"
+          >
+            직접 판매
+          </OdsButton>
+          <OdsButton
+            v-if="canAuctionShip"
+            type="button"
+            variant="secondary"
+            :block="false"
+            class="stock-view__action-btn"
+            data-testid="stock-auction-btn"
+            :busy="auctionOpening"
+            :disabled="auctionOpening"
+            @click="openAuctionSheet"
+          >
+            경매 넘기기
+          </OdsButton>
+        </div>
       </div>
     </Teleport>
+
+    <AuctionShipConfirmSheet
+      :open="auctionSheetOpen"
+      :farm-cd="farmCd || ''"
+      :lines="salesPrefill.shipLines"
+      @close="closeAuctionSheet"
+      @success="onAuctionShipSuccess"
+      @qty-unavailable="onAuctionQtyUnavailable"
+    />
 
     <!-- 재고 이력 bottom sheet -->
     <Teleport to="body">
@@ -971,21 +1139,17 @@ const salesFabStyle = {
 <style scoped>
 /* ── 전체 컨테이너 ────────────────────────────────────────────────── */
 .stock-view {
-  --stock-bottom-nav-h: calc(
-    var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
+  --stock-batch-dock-h: calc(
+    var(--ods-space-8) + var(--ods-space-8) + 11px * 1.3 + var(--ods-space-12) + 28px + var(--ods-space-8)
   );
-  --stock-batch-bar-h: 50px;
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-12);
   padding: var(--ods-space-12) var(--ods-space-16);
-  min-height: 100%;
   background: var(--ods-color-bg, #FDFBF7);
 }
-.stock-view--with-batch {
-  padding-bottom: calc(
-    var(--stock-bottom-nav-h) + var(--stock-batch-bar-h) + var(--ods-space-16)
-  );
+.stock-view--with-dock {
+  padding-bottom: calc(var(--stock-batch-dock-h) + var(--ods-space-8));
 }
 .stock-view__page-ok {
   margin: 0;
@@ -1311,54 +1475,103 @@ const salesFabStyle = {
 .stock-view__icon-btn--remove {
   color: var(--ods-color-danger, #c53030);
 }
-.stock-view__batch {
-  /* App 탭 캐러셀 transform 밖(body Teleport)에서 viewport 기준 fixed */
-  position: fixed;
-  left: 50%;
-  right: auto;
-  width: min(92vw, 360px);
-  max-width: min(92vw, 360px);
-  transform: translateX(-50%);
-  /* OdsBottomNav: min-height 56 + padding 8+8 + safe-area */
-  bottom: calc(
-    var(--ods-space-56) + var(--ods-space-8) + var(--ods-space-8) + env(safe-area-inset-bottom, 0px)
-  );
-  z-index: 40; /* OdsBottomNav(50) 아래 — 시각적으로는 nav 위에 배치 */
-  margin-left: 0;
-  margin-right: 0;
+.stock-view__transit {
+  margin-bottom: var(--ods-space-8);
+}
+.stock-view__transit-toggle {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  min-height: 40px;
-  box-sizing: border-box;
-  padding: var(--ods-space-4) var(--ods-space-8) var(--ods-space-4) var(--ods-space-12);
-  background: var(--ods-color-primary-subtle, #e8f5ee);
-  border: 1px solid var(--ods-color-secondary, #66bb6a);
+  padding: var(--ods-space-8) var(--ods-space-4);
+  border: none;
+  background: transparent;
+  font: var(--ods-font-body-2);
+  font-weight: 700;
+  color: var(--ods-color-text);
+  cursor: pointer;
+}
+.stock-view__transit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--ods-space-4) var(--ods-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-6);
+}
+.stock-view__transit-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-2);
+  padding: var(--ods-space-8);
   border-radius: var(--ods-radius-card);
-  box-shadow: 0 2px 10px rgba(46, 125, 50, 0.12);
+  background: var(--ods-color-surface-muted, #faf8f4);
+}
+.stock-view__transit-main {
+  font: var(--ods-font-body-2);
+  font-weight: 600;
+}
+.stock-view__transit-sub {
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-secondary);
+}
+.stock-view__transit-err,
+.stock-view__transit-empty {
+  margin: 0;
+  padding: 0 var(--ods-space-4) var(--ods-space-8);
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-secondary);
+}
+.stock-view__transit-err {
+  color: var(--ods-color-danger);
+}
+.stock-view__batch {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: min(74%, 15rem);
+  max-width: 15rem;
+  box-sizing: border-box;
+  padding: var(--ods-space-8);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-elevated);
 }
 .stock-view__batch-count {
+  display: block;
+  width: 100%;
+  padding: 0 var(--ods-space-4);
   font: var(--ods-font-caption);
   font-weight: 700;
   color: var(--ods-color-text);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.3;
   white-space: nowrap;
-  flex: 1 1 auto;
+  text-align: center;
 }
-/* OdsButton 전역(headline/큰 min-height)을 Floating Bar에서만 compact override */
-:deep(button.stock-view__preview-btn.ods-btn) {
-  min-height: 34px;
-  height: 34px;
-  padding: 0 12px;
-  font-size: 13px;
+.stock-view__batch-actions {
+  display: flex;
+  width: 100%;
+  gap: var(--ods-space-6);
+  justify-content: stretch;
+  margin-top: var(--ods-space-12);
+}
+.stock-view__batch-actions > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* Floating panel — compact 버튼 */
+:deep(button.stock-view__action-btn.ods-btn) {
+  min-height: 28px;
+  height: 28px;
+  width: 100%;
+  padding: 0 var(--ods-space-6);
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
-  flex-shrink: 0;
-  margin-left: auto;
 }
 
 /* ── 이력 bottom sheet ────────────────────────────────────────────── */

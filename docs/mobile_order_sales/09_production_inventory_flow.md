@@ -4,7 +4,7 @@
 > 주문/판매 상세는 [02_domain_flow.md](./02_domain_flow.md). 데이터 계약은 [03_data_contract.md](./03_data_contract.md).
 > OPEN-PROD-01~03 **CLOSED**. Stage P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). *(역사 스냅샷의「main 미머지」는 [06](./06_development_progress.md) 역사 절 참고)*.
 >
-> **개정 (2026-08-31):** DEC-035 HARVEST N:M — **OPS APPLIED** · **OPERATIONAL PASS** ([06](./06_development_progress.md)). 경매(DEC-036/037)는 설계·미구현. DEC-035 물리 스키마 = [03 §8A](./03_data_contract.md).
+> **개정 (2026-08-31):** DEC-035 HARVEST N:M — **OPS APPLIED** · **OPERATIONAL PASS**. DEC-036 — **APPROVED PHYSICAL DESIGN** (`t_auction_ship_master`/`detail`) · **NOT IMPLEMENTED**. DEC-037 — 논리 승인 · 미구현.
 
 ---
 
@@ -220,10 +220,9 @@ DEC-025 **유지** (`t_production_*` 풀세트 금지). DEC-035 **최소 소진�
 | 출하 ≠ DRAFT | `t_sales_*` DRAFT는 **판매초안** 의미. **출하 SSOT로 쓰지 않음** |
 | `reserved_qty` | **주문 HOLD 전용**. 경매 출하중 **재사용 금지** |
 | 출하 시 `out_qty` | **선차감 금지**. 아직 판매 OUT 아님 |
-| 출하중 SSOT | 최소 **출하 묶음 + 라인** 개념. 단순 `transit_qty` 컬럼 하나 = SSOT **금지** |
-| 출하중 수량 | **유효한 출하 라인 집계**로 계산 (물리 컬럼명 미정) |
-| 묶음(개념) | 출하일 · 시장 · 법인 · 상태 |
-| 라인(개념) | 상품재고 연결 · 농장 출하수량 · 청과 확인수량 · (이후) 판매 연결 |
+| 출하중 SSOT | **`t_auction_ship_master` + `t_auction_ship_detail`** ([03 §8B](./03_data_contract.md)). `transit_qty` 단독 SSOT **금지** |
+| 출하중 수량 | **`IN_TRANSIT` line**의 `farm_shipped_qty` **SUM** (stock_seq별) |
+| Line cardinality | Mobile **spec row** → Server **FIFO** → **1 line = 1 `stock_seq`** |
 | UX | 내부 출하번호·`stock_seq` **비노출** · 다선택 일괄 |
 
 **판매확정 시 자동 분류 (사용자 선택 없음):**
@@ -239,7 +238,7 @@ DEC-025 **유지** (`t_production_*` 풀세트 금지). DEC-035 **최소 소진�
 | 시점 | 재고 | 판매 |
 |------|------|------|
 | 출하(경매 넘기기) | 가용에서 **출하중 수량 제외** | 판매 생성 **아님** |
-| 판매확정 | 출하중 **종료** · 승인된 **최종 판매수량** 기준 **판매 OUT** | CONFIRMED + 분류 자동 |
+| 판매확정 | **승인분** OUT · shipment **전체 자동종료 금지** ([03 §8B.6](./03_data_contract.md) · OPEN-QTY-DIFF) | CONFIRMED + 분류 자동 |
 
 출하 시 OUT하지 않으므로 **이중 OUT 없음** (DEC-027 판매 OUT 원칙과 정합).
 
@@ -572,15 +571,16 @@ reserved_qty  = t_stock_master.reserved_qty         # 주문 배정 (HOLD) — �
 주문 HOLD(`reserved`)뿐 아니라 **유효한 경매 출하중 수량도 제외**한다.
 
 ```
-available_qty = real_qty - reserved_qty - (유효 출하중 집계)   # 개념식 · 물리 컬럼/SQL 미확정
+available_qty = real_qty - reserved_qty - active_auction_transit_qty
+active_auction_transit_qty = SUM(farm_shipped_qty) from IN_TRANSIT lines per stock_seq
 ```
 
 | 용어 | 의미 |
 |------|------|
-| 현재고 | `real_qty` — HOLD·출하중과 별개로 “창고에 잡힌” 수량 축 |
-| 배정 | `reserved_qty` — **주문** 예약만. **실제 OUT 아님** · **경매 출하중 아님** |
-| 출하중 | 경매 넘기기 후·판매확정 전. **출하 라인 집계** ([§14.1](#141-가용과-출하중)) |
-| 가용재고 | 배정·판매·경매 출하에 새로 쓸 수 있는 수량 |
+| 현재고 | `real_qty` — HOLD·출하중과 별개 |
+| 배정 | `reserved_qty` — **주문** HOLD only |
+| 출하중 | `t_auction_ship_*` · v1 `IN_TRANSIT` |
+| 가용재고 | 위 공식 — **모든 재고소비 경로 SSOT** ([03 §7.1](./03_data_contract.md)) |
 
 배정 예: 현재 30 · HOLD 10 → 배정 10 · (출하중 0이면) 가용 20.
 ~~SUPERSEDED: `available = real − reserved`만으로 충분하다는 기존 암시~~ — [부록](#부록-superseded--현행-코드-스냅샷).
@@ -589,13 +589,14 @@ available_qty = real_qty - reserved_qty - (유효 출하중 집계)   # 개념�
 
 | 규칙 | 내용 |
 |------|------|
-| 출하중 SSOT | **출하 묶음 + 라인** (개념). `transit_qty` 단독 SSOT **금지** |
-| 출하중 수량 | **유효한 출하 라인**의 출하(또는 정책상 집계 기준) 수량 **합** |
-| `reserved_qty` | 주문 HOLD만. 출하중과 **분리** |
-| 출하 시 `out_qty` | **증가시키지 않음** |
-| 판매확정 | 출하중 종료 + **판매 OUT** (`out_qty+`, DEC-027) |
+| 출하중 SSOT | **`t_auction_ship_master` / `t_auction_ship_detail`** |
+| active transit | master `status = 'IN_TRANSIT'` |
+| 집계 | line `farm_shipped_qty` SUM per `stock_seq` |
+| `reserved_qty` | 주문 HOLD only |
+| 출하 시 `out_qty` | **증가 없음** |
+| 판매확정 | **승인분 OUT** — shipment 전체 자동종료 **금지** |
 
-물리 스키마·상태값은 [OPEN-DDL](#23-open-정책) · [OPEN-SHIP-STATE](#23-open-정책).
+물리 DDL = [03 §8B](./03_data_contract.md) **APPROVED** · 코드 **미적용**.
 
 ---
 
@@ -822,11 +823,13 @@ DEC-027의 **판매 OUT**은 **판매확정** 시점. 경매 **출하중**은 OU
 
 | ID | 내용 |
 |----|------|
-| **OPEN-QTY-DIFF** | 출하수량 ≠ 청과확인수량일 때 감모·반입·정정·회계 처리 |
+| **OPEN-QTY-DIFF** | 출하수량 ≠ 청과확인수량 · **잔여 transit 해소** · 감모·반입·정정·회계 |
 | **OPEN-DONE** | HARVEST `DONE`의 최종 의미 (잔량 SSOT로 쓰지 않음은 확정) |
-| **OPEN-SHIP-STATE** | 출하중 / 확인 / 매칭 / 확정 등 **상태값** 목록 |
-| **OPEN-DDL** | **경매** 출하 헤더/라인 **물리 스키마**. DEC-035 consumption = design **CLOSED** · **OPS APPLIED** |
+| **OPEN-SHIP-STATE** | **후속** 완료/취소/차이 종료 (v1 **`IN_TRANSIT` = CLOSED**) |
+| **OPEN-AUCTION-MATCH-CARDINALITY** | 출하line ↔ settlement |
 | **DEC-016** | 경매 확정 시 `t_sales_delivery` 생성 여부 (기존 OPEN 유지 · [07](./07_decisions.md)) |
+
+**CLOSED (DEC-036 physical 2026-08-31):** `t_auction_ship_master`/`detail` · cardinality · available · v1 `IN_TRANSIT` · market/corp MVP SSOT.
 
 > **HISTORY — SUPERSEDED (OPEN 아님):** **DEC-010** — `AUCTION_RT DRAFT→CONFIRMED+OUT` 단일 TX. **2026-08-27** 후계 **DEC-036/037**로 전환 완료.
 

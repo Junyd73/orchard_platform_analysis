@@ -266,17 +266,18 @@ allocation 불필요. 위 STOCK 식을 적용하지 않음.
 | 초안 무배송 | 출고와 송장 분리 | DEC-016 |
 | 주문/`allocated_qty` 없음 | 해당 없음 | 가락은 판매 경로만 |
 
-### 6.1 경매출하 · 출하중 (DEC-036) — 승인된 목표
+### 6.1 경매출하 · 출하중 (DEC-036) — APPROVED PHYSICAL
 
-상세: [09 §2.3.1·§2.3.2](./09_production_inventory_flow.md) · [09 §14.1](./09_production_inventory_flow.md).
+상세: [03 §8B](./03_data_contract.md) · [09 §2.3.1](./09_production_inventory_flow.md) · [05 §9A](./05_api_contract.md).
 
-- 복수 상품행을 **한 출하 묶음**으로 [경매 넘기기].
-- 출하중 SSOT 개념 = 최소 **출하 묶음 + 출하 라인** (단순 `transit_qty` 단독 SSOT **금지**).
-- **경매 출하 ≠ 판매 DRAFT**. 출하중은 판매가 아님.
-- 출하 시 상품은 **가용에서 제외**. 아직 판매 OUT **아님**.
-- `reserved_qty` = **주문 HOLD 전용** — 경매 **재사용 금지**. 출하 시 `out_qty` **선차감 금지**.
-- **농장 출하수량** 원본 불변 · **청과 확인수량** 별도 보존 · 차이 = 확인 − 출하 ([OPEN-QTY-DIFF](./07_decisions.md)).
-- 실제 상태코드·테이블·컬럼 = **OPEN-SHIP-STATE** · **OPEN-DDL**. 설계 APPROVED ≠ 구현 완료.
+**상태:** APPROVED LOGICAL · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED**.
+
+- 복수 **규격 집계 row** [경매 넘기기] → Server **FIFO** → `t_auction_ship_detail` (**1 line = 1 `stock_seq`**).
+- SSOT: **`t_auction_ship_master` / `t_auction_ship_detail`**. v1 `status = IN_TRANSIT`.
+- **경매 출하 ≠ 판매 DRAFT** · 출하 시 `reserved`/`out`/`t_sales_*` **불변**.
+- 가용: `in − out − reserved − active_auction_transit` — **모든 재고소비 경로** ([03 §7.1](./03_data_contract.md)).
+- **농장 출하수량** 원본 · **청과 확인수량** 별도 · 차이 = OPEN-QTY-DIFF.
+- **20→19:** DEC-037 판매확정 시 shipment **전체 자동종료·잔량 자동복귀 금지**.
 
 ### 6.2 경매 판매확정 (DEC-037) — 승인된 목표
 
@@ -293,7 +294,7 @@ DEC-036 출하중·청과 확인/매칭 **이후**. 출하 시 OUT하지 않음 
 6. 판매분류 자동 (사용자 선택 금지): `SA010200` 도매 · `SA020400` 경매판매 · `SA030300` 경매연동
 7. 실패 시 전체 rollback
 
-**OPEN (확정 금지):** OPEN-QTY-DIFF · OPEN-SHIP-STATE · OPEN-DDL · [DEC-016](./07_decisions.md) (`t_sales_delivery` 생성 여부).
+**OPEN (확정 금지):** OPEN-QTY-DIFF · OPEN-SHIP-STATE **(후속)** · OPEN-AUCTION-MATCH-CARDINALITY · [DEC-016](./07_decisions.md) · 출하 취소/정정 · DRAFT 필수 여부.
 
 ### 6.3 현재 코드 스냅샷
 
@@ -486,7 +487,7 @@ DRAFT도 GET 허용 · `payment_status=null` · legacy cash 숨기지 않음.
 
 **현재 주문 삭제 함수 없음.** 수정 시 CANCEL_HOLD는 주문 `qty` 전량·규격 키만 (`storage_dt` 없음).
 
-경매 출하 취소/정정 세부 TX는 본 절에서 **신설하지 않음** — [OPEN-SHIP-STATE](./07_decisions.md) · [OPEN-DDL](./07_decisions.md) 후속.
+경매 출하 취소/정정 세부 TX는 본 절에서 **신설하지 않음** — v1 **CAN-DEFER** ([07 DEC-036](./07_decisions.md)).
 
 ---
 
@@ -697,8 +698,8 @@ PK/UNIQUE는 구현 전 실제 schema와 대조하여 확정.
 | 배정 해제 | reserved −, allocated − (미출고분) | 박스 |
 | 소매/주문 출고확정 | reserved −, out + | 박스 (`allocated_qty` 유지, `shipped_qty` 증가) |
 | **경매 출하** (목표 DEC-036) | 가용에서 **출하중 수량 제외** | **`reserved`/`out` 아님** |
-| **경매 판매확정** (목표 DEC-037) | 최종 승인 수량 기준 **out +** · 출하중 종료 | 박스 |
+| **경매 판매확정** (목표 DEC-037) | 최종 승인 수량 기준 **out +** · shipment **전체 자동종료 금지** | 박스 |
 
-물리 SQL·컬럼·가용 공식은 **미확정** ([09 §14.1](./09_production_inventory_flow.md) · OPEN-DDL).
+**APPROVED PHYSICAL:** `available = in − out − reserved − active_auction_transit` ([03 §7.1](./03_data_contract.md) · [09 §14](./09_production_inventory_flow.md)). **CURRENT 코드**는 transit **미반영**.
 
 원황/조생은 원물 입고 없이 상품 `in_qty`만 실사/생산으로 올릴 수 있음 (운영).

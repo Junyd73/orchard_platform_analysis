@@ -35,6 +35,13 @@ from core.order_alloc_constants import (
 )
 from core.order_constants import ORDER_STATUS_CANCEL_CD, ORDER_STATUS_LOCKED
 from core.order_service import OrderNotFoundError, OrderSaveError, OrderValidationError
+from core.stock_availability import (
+    compute_available_qty,
+    get_active_auction_transit_map,
+    get_active_auction_transit_qty,
+    stock_seq_column_ref,
+    stock_seq_select_sql,
+)
 
 _QTY_EPS = 1e-9
 
@@ -111,8 +118,9 @@ class OrderAllocationService:
         include_zero: bool = False,
     ) -> list[dict[str, Any]]:
         farm = str(farm_cd or "").strip()
-        sql = """
-            SELECT m.farm_cd, m.wh_cd, m.item_cd, m.variety_cd, m.grade_cd, m.size_cd,
+        seq_col = stock_seq_select_sql(self.conn, "m")
+        sql = f"""
+            SELECT {seq_col}, m.farm_cd, m.wh_cd, m.item_cd, m.variety_cd, m.grade_cd, m.size_cd,
                    m.weight, m.harvest_year, m.storage_dt,
                    COALESCE(m.in_qty, 0)       AS in_qty,
                    COALESCE(m.out_qty, 0)      AS out_qty,
@@ -145,32 +153,37 @@ class OrderAllocationService:
         cur = self.conn.cursor()
         try:
             cur.execute(sql, params)
+            transit_map = get_active_auction_transit_map(self.conn, farm)
             rows = []
             for row in cur.fetchall():
-                in_qty   = _as_float(_row_val(row, "in_qty", 9))
-                out_qty  = _as_float(_row_val(row, "out_qty", 10))
-                reserved = _as_float(_row_val(row, "reserved_qty", 11))
+                stock_seq = int(_as_float(_row_val(row, "stock_seq", 0)))
+                in_qty   = _as_float(_row_val(row, "in_qty", 10))
+                out_qty  = _as_float(_row_val(row, "out_qty", 11))
+                reserved = _as_float(_row_val(row, "reserved_qty", 12))
                 real_qty = in_qty - out_qty
+                transit = float(transit_map.get(stock_seq, 0.0))
                 rows.append(
                     {
-                        "farm_cd":    str(_row_val(row, "farm_cd", 0) or ""),
-                        "wh_cd":      str(_row_val(row, "wh_cd", 1) or ""),
-                        "item_cd":    str(_row_val(row, "item_cd", 2) or ""),
-                        "variety_cd": str(_row_val(row, "variety_cd", 3) or ""),
-                        "grade_cd":   str(_row_val(row, "grade_cd", 4) or ""),
-                        "size_cd":    str(_row_val(row, "size_cd", 5) or ""),
-                        "weight":     _as_float(_row_val(row, "weight", 6)),
-                        "harvest_year": int(_as_float(_row_val(row, "harvest_year", 7))),
-                        "storage_dt": str(_row_val(row, "storage_dt", 8) or ""),
+                        "farm_cd":    str(_row_val(row, "farm_cd", 1) or ""),
+                        "wh_cd":      str(_row_val(row, "wh_cd", 2) or ""),
+                        "item_cd":    str(_row_val(row, "item_cd", 3) or ""),
+                        "variety_cd": str(_row_val(row, "variety_cd", 4) or ""),
+                        "grade_cd":   str(_row_val(row, "grade_cd", 5) or ""),
+                        "size_cd":    str(_row_val(row, "size_cd", 6) or ""),
+                        "weight":     _as_float(_row_val(row, "weight", 7)),
+                        "harvest_year": int(_as_float(_row_val(row, "harvest_year", 8))),
+                        "storage_dt": str(_row_val(row, "storage_dt", 9) or ""),
                         "in_qty":       in_qty,
                         "out_qty":      out_qty,
                         "real_qty":     real_qty,
                         "reserved_qty": reserved,
-                        "available_qty": real_qty - reserved,
-                        "item_nm":    str(_row_val(row, "item_nm", 12) or ""),
-                        "variety_nm": str(_row_val(row, "variety_nm", 13) or ""),
-                        "grade_nm":   str(_row_val(row, "grade_nm", 14) or ""),
-                        "size_nm":    str(_row_val(row, "size_nm", 15) or ""),
+                        "available_qty": compute_available_qty(
+                            in_qty, out_qty, reserved, transit,
+                        ),
+                        "item_nm":    str(_row_val(row, "item_nm", 13) or ""),
+                        "variety_nm": str(_row_val(row, "variety_nm", 14) or ""),
+                        "grade_nm":   str(_row_val(row, "grade_nm", 15) or ""),
+                        "size_nm":    str(_row_val(row, "size_nm", 16) or ""),
                     }
                 )
             return rows
@@ -643,9 +656,10 @@ class OrderAllocationService:
     def _fifo_stock_rows(
         self, cur: sqlite3.Cursor, farm: str, detail: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        seq_col = stock_seq_select_sql(self.conn)
         cur.execute(
-            """
-            SELECT wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight,
+            f"""
+            SELECT {seq_col}, wh_cd, item_cd, variety_cd, grade_cd, size_cd, weight,
                    harvest_year, storage_dt,
                    COALESCE(in_qty, 0) AS in_qty,
                    COALESCE(out_qty, 0) AS out_qty,
@@ -673,23 +687,26 @@ class OrderAllocationService:
             ),
         )
         out: list[dict[str, Any]] = []
+        transit_map = get_active_auction_transit_map(self.conn, farm)
         for row in cur.fetchall():
-            in_qty = _as_float(_row_val(row, "in_qty", 8))
-            out_qty = _as_float(_row_val(row, "out_qty", 9))
-            reserved = _as_float(_row_val(row, "reserved_qty", 10))
-            avail = in_qty - out_qty - reserved
+            stock_seq = int(_as_float(_row_val(row, "stock_seq", 0)))
+            in_qty = _as_float(_row_val(row, "in_qty", 9))
+            out_qty = _as_float(_row_val(row, "out_qty", 10))
+            reserved = _as_float(_row_val(row, "reserved_qty", 11))
+            transit = float(transit_map.get(stock_seq, 0.0))
+            avail = compute_available_qty(in_qty, out_qty, reserved, transit)
             if avail <= _QTY_EPS:
                 continue
             key = StockKey(
                 farm_cd=farm,
-                wh_cd=str(_row_val(row, "wh_cd", 0) or ""),
-                item_cd=str(_row_val(row, "item_cd", 1) or ""),
-                variety_cd=str(_row_val(row, "variety_cd", 2) or ""),
-                grade_cd=str(_row_val(row, "grade_cd", 3) or ""),
-                size_cd=str(_row_val(row, "size_cd", 4) or ""),
-                weight=_as_float(_row_val(row, "weight", 5)),
-                harvest_year=int(_as_float(_row_val(row, "harvest_year", 6))),
-                storage_dt=str(_row_val(row, "storage_dt", 7) or ""),
+                wh_cd=str(_row_val(row, "wh_cd", 1) or ""),
+                item_cd=str(_row_val(row, "item_cd", 2) or ""),
+                variety_cd=str(_row_val(row, "variety_cd", 3) or ""),
+                grade_cd=str(_row_val(row, "grade_cd", 4) or ""),
+                size_cd=str(_row_val(row, "size_cd", 5) or ""),
+                weight=_as_float(_row_val(row, "weight", 6)),
+                harvest_year=int(_as_float(_row_val(row, "harvest_year", 7))),
+                storage_dt=str(_row_val(row, "storage_dt", 8) or ""),
             )
             out.append({"key": key, "available": avail})
         return out
@@ -786,10 +803,12 @@ class OrderAllocationService:
         )
         if cur.rowcount != 1:
             raise AllocationConflictError(MSG_ALLOC_INVARIANT)
+        seq_ref = stock_seq_column_ref(self.conn)
         cur.execute(
             f"""
             SELECT COALESCE(reserved_qty, 0),
-                   COALESCE(in_qty, 0) - COALESCE(out_qty, 0)
+                   COALESCE(in_qty, 0) - COALESCE(out_qty, 0),
+                   {seq_ref}
             FROM t_stock_master
             WHERE farm_cd = ? AND wh_cd = ? AND item_cd = ? AND variety_cd = ?
               AND grade_cd = ? AND size_cd = ? AND ABS(weight - ?) < 1e-9
@@ -800,7 +819,11 @@ class OrderAllocationService:
         row = cur.fetchone()
         reserved = _as_float(row[0])
         real_qty = _as_float(row[1])
-        if reserved < -_QTY_EPS or reserved - real_qty > _QTY_EPS:
+        stock_seq = int(_as_float(row[2]))
+        transit = get_active_auction_transit_qty(
+            self.conn, farm_cd=key.farm_cd, stock_seq=stock_seq,
+        )
+        if reserved < -_QTY_EPS or reserved + transit - real_qty > _QTY_EPS:
             raise AllocationConflictError(MSG_ALLOC_INVARIANT)
 
     def _insert_log(

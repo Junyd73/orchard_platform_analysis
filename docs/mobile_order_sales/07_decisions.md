@@ -8,9 +8,10 @@
 승인일 표기: 대표 검토 반영일 **2026-08-17**. 단계 0 **최종승인 완료** (2026-08-17 대표). 단계 0은 다시 열지 않음.  
 **2026-08-21 대표 승인:** DEC-019 **APPROVED** · DEC-028 · DEC-029 **신규 APPROVED**.  
 **2026-08-23 대표 승인:** DEC-030 **신규 APPROVED** (6C write validation 전용).
-**2026-08-27 대표 승인:** DEC-010 **SUPERSEDED** (후계 DEC-036/037) · DEC-035 · DEC-036 · DEC-037 **신규 APPROVED** (설계).
+**2026-08-27 대표 승인:** DEC-010 **SUPERSEDED** (후계 DEC-036/037) · DEC-035 · DEC-036 · DEC-037 **신규 APPROVED** (논리 설계).
+**2026-08-31 대표 승인:** DEC-036 **APPROVED PHYSICAL DESIGN** (`t_auction_ship_master`/`detail`).
 **2026-08-28 문서 갱신:** DEC-035 — **IMPLEMENTED IN GIT** · **REHEARSAL PASS** *(과거)*.
-**2026-08-31 문서 갱신:** DEC-035 — **OPS APPLIED** · **OPERATIONAL PASS** (DEC-036/037는 설계·미구현).
+**2026-08-31 문서 갱신:** DEC-035 — **OPERATIONAL PASS** · DEC-036 — **APPROVED PHYSICAL DESIGN** (`t_auction_ship_master`/`detail`) · DEC-037 논리 승인 · **구현·DDL 미적용**.
 
 ---
 
@@ -653,34 +654,47 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ## DEC-036
 
-**경매 출하는 판매 DRAFT와 분리하고 최소 출하 묶음+라인을 출하중 SSOT로 한다.**
+**경매 출하는 판매 DRAFT와 분리하고 `t_auction_ship_master` / `t_auction_ship_detail`을 출하중 SSOT로 한다.**
 
 | | |
 |--|--|
-| 상태 | **APPROVED** (설계. **구현·DDL 아님**) — **2026-08-27 대표** |
-| 업무 흐름 | `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정` |
+| 상태 | **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** — **2026-08-31 대표** (물리설계 확정) |
+| 업무 흐름 | `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → DEC-037 판매확정` |
+| 물리 | **`t_auction_ship_master`** · **`t_auction_ship_detail`** ([03 §8B](./03_data_contract.md)) |
 | 결정 | 아래. |
 
 1. 경매 출하 ≠ 판매 **DRAFT**. DRAFT는 출하중 SSOT가 **아님** (DEC-010 SUPERSEDED 후계).
-2. 최소 **출하 묶음 + 출하 라인** 개념 필요. 물리 테이블/컬럼명 **미확정** (**OPEN-DDL**).
-3. 묶음(개념): 출하일 · 시장 · 법인 · 업무상태 등.
-4. 라인(개념): 원천 상품재고 연결 · **농장 출하수량** · **청과 확인수량** · 후속 판매 연결.
-5. 농장 출하수량은 **원본 보존** — 확인수량으로 **덮어쓰기 금지**. 확인수량은 **별도** 보존.
-6. 차이 = `확인수량 − 출하수량`. 차이 최종 처리(감모·반입·정정·회계)는 **OPEN-QTY-DIFF**.
-7. 출하중 수량 SSOT = **유효한 출하 라인 집계**. 단순 `transit_qty` 컬럼 하나 = SSOT **금지**.
-8. 출하 시 상품은 **가용재고에서 제외**. 아직 **판매 OUT 아님**.
-9. `reserved_qty` = **주문 HOLD 전용** — 경매 **재사용 금지**. 출하 시 `out_qty` **선차감 금지**.
-10. UX: `stock_seq`·출하 내부키 **비노출**(DEC-021). 여러 상품행 일괄 [경매 넘기기].
+2. 출하 SSOT = **`t_auction_ship_master` + `t_auction_ship_detail`**. `transit_qty` 단독 컬럼 SSOT **금지**.
+3. Header: `shipment_id`(내부) · `farm_cd` · `ship_dt` · `market_cd`/`market_name` · `corporation_name` · `custm_id` nullable · `status` · 감사.
+4. Line: `line_seq` · `shipment_id` · **`stock_seq`** · `farm_shipped_qty` · `company_confirmed_qty` nullable · `reg_dt`.
+5. **Cardinality CLOSED:** Mobile **규격 집계 row** → Server **FIFO** → **1 line = 1 `stock_seq`**. `stock_seq` **비노출**.
+6. 농장 출하수량 **원본 보존** — 확인수량으로 **덮어쓰기 금지**. 차이 처리 = **OPEN-QTY-DIFF**.
+7. **가용 (CLOSED):** `available = in_qty - out_qty - reserved_qty - active_auction_transit_qty`. active = `IN_TRANSIT` line `farm_shipped_qty` SUM. **모든 재고소비 경로 일관 적용** ([03 §7.1](./03_data_contract.md)).
+8. 출하 시 **`reserved_qty`/`out_qty`/`t_sales_*` 불변**. SALE `t_stock_log` **없음**.
+9. v1 생성 상태 **`IN_TRANSIT` only**. `CHECKED`/`COMPLETED`/`CANCELLED` v1 **금지**. 취소/정정 = **CAN-DEFER**.
+10. **20→19:** DEC-037 판매확정 시 shipment **전체 자동종료·잔량 자동가용복귀 금지** ([03 §8B.6](./03_data_contract.md)).
+11. 시장 = `MARKET_CODE_BY_NAME` 재사용. 법인 = `corporation_name` snapshot + `custm_id` nullable. **신규 master 금지**.
+12. UX: `stock_seq`·출하 내부키 **비노출**. 다선택 [경매 넘기기].
+13. `save_realtime_auction_draft` = **legacy 유지** · DEC-036 **재사용 금지**.
+
+| CLOSED (2026-08-31) | 내용 |
+|---------------------|------|
+| Physical structure | `t_auction_ship_master` / `t_auction_ship_detail` |
+| Stock cardinality | Mobile spec → FIFO → `stock_seq` line |
+| Active transit available | §7.1 공식 + SSOT 적용 범위 |
+| v1 `IN_TRANSIT` | 생성 상태 |
+| Market/corporation MVP SSOT | 기존 map + snapshot (REST path = 구현 후속) |
 
 | OPEN | 내용 |
 |------|------|
-| OPEN-SHIP-STATE | 출하중/확인/매칭/확정 등 **실제 상태 코드** |
-| OPEN-DDL | 출하 헤더/라인 물리 스키마 |
-| 출하 취소·정정 | 세부 TX 미정 |
-| OPEN-QTY-DIFF | 출하/확인 차이 최종 처리 |
+| OPEN-SHIP-STATE | **후속** 완료/취소/차이 종료 상태 (v1 생성만 CLOSED) |
+| OPEN-QTY-DIFF | 출하/확인 차이 · 잔여 transit 해소 |
+| OPEN-AUCTION-MATCH-CARDINALITY | 출하line ↔ settlement |
+| 출하 취소·정정 | v1 미구현 |
+| Mobile market/corp REST path | 구현 단계 |
 
-| 관련 | DEC-021 · **025** · **027** · **037** · [09 §2.3.1·§2.3.2·§14.1](./09_production_inventory_flow.md) |
-| 승인 | **2026-08-27 대표** |
+| 관련 | DEC-021 · **025** · **027** · **037** · [09 §2.3.1·§14.1](./09_production_inventory_flow.md) · [03 §8B](./03_data_contract.md) · [05 §9A](./05_api_contract.md) |
+| 승인 | **2026-08-27** 논리 · **2026-08-31** 물리 |
 
 ---
 
@@ -693,8 +707,8 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | 상태 | **APPROVED** (설계. **구현·DDL 아님**) — **2026-08-27 대표** |
 | 결정 | 아래. |
 
-1. **DEC-036** 출하중 이후 청과 확인/매칭을 거쳐 **판매확정**.
-2. 판매확정 시 **출하중 상태 종료**.
+1. **DEC-036** 출하중(`IN_TRANSIT`) 이후 청과 확인/매칭을 거쳐 **판매확정**.
+2. 판매확정 시 **승인분에 대한 출하중 정산**만 허용. shipment **전체 자동 종료 금지** ([DEC-036 §8B.6](./03_data_contract.md) · OPEN-QTY-DIFF).
 3. **최종 승인된 판매수량** 기준으로 상품재고 **OUT**. 출하 시 OUT하지 않음 → **이중 OUT 금지**.
 4. 판매 생성/`CONFIRMED` + 재고 OUT + stock log = **하나의 원자적 업무 TX**. 하나라도 실패하면 **전체 rollback**.
 5. **DEC-010**이 남긴 원칙을 승계: **판매확정 + 재고 OUT은 원자 TX · 실패 시 rollback**.
@@ -737,12 +751,13 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | ID | 상태 | 내용 |
 |----|------|------|
-| **OPEN-QTY-DIFF** | **OPEN** | 출하수량 ≠ 청과확인수량일 때 감모·반입·정정·재고조정·회계 처리 |
+| **OPEN-QTY-DIFF** | **OPEN** | 출하수량 ≠ 청과확인수량 · **잔여 transit 해소** · 감모·반입·정정·재고조정·회계 |
 | **OPEN-DONE** | **OPEN** | HARVEST `DONE` **최종 의미**. (잔량 SSOT로 쓰지 않음은 DEC-035에서 확정) |
-| **OPEN-SHIP-STATE** | **OPEN** | 경매 출하 상태 **실제 코드/상태값** |
-| **OPEN-DDL** | **OPEN** (경매 출하 헤더/라인 **물리 스키마**). DEC-035 consumption/trace = **design CLOSED** · **OPS APPLIED** |
-| **OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** | 출하라인 ↔ 청과 경매결과 cardinality (1:1 / 1:N / N:M **미확정**). 상세 [05 §9B](./05_api_contract.md) · [DEC-036](#dec-036) 청과 확인/매칭 |
+| **OPEN-SHIP-STATE** | **OPEN** (후속) | v1 **`IN_TRANSIT` 생성 = CLOSED**. 완료/취소/차이 종료 상태는 **후속** |
+| **OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** | 출하line ↔ 청과 경매결과 cardinality. 상세 [05 §9B](./05_api_contract.md) |
 | **DEC-016** | **OPEN** | 경매 판매확정 시 `t_sales_delivery` 생성 여부 |
+
+**CLOSED (2026-08-31 — DEC-036 물리):** 경매 출하 **`t_auction_ship_master`/`detail`** · stock cardinality · active transit available · market/corp MVP SSOT · v1 `IN_TRANSIT`. (구 **OPEN-DDL** 해당 항목 **CLOSED**.)
 
 **역사:** 구 「OPEN-DEC-010」(출하중 선행 후 DEC-010 재정의 범위)는 **2026-08-27** DEC-010 **SUPERSEDED** + **DEC-036/037 APPROVED**로 **전환 완료**. 동일 주제를 중복 OPEN으로 남기지 않는다.
 
@@ -755,14 +770,17 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | DEC-001 ~ 009, **011** ~ 014, **017** ~ **027**, **028** ~ **034** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | **DEC-010** | **SUPERSEDED** (2026-08-27) → 후계 **036/037** |
 | **DEC-035** | **OPERATIONAL PASS** |
-| **DEC-036**, **037** | **APPROVED** (설계. 구현·DDL·IMPLEMENTED **아님**) |
+| **DEC-036** | **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** |
+| **DEC-037** | **APPROVED LOGICAL** · **NOT IMPLEMENTED** |
 | DEC-015, **016** | **OPEN** |
 | **OPEN-PROD-01~03** | **CLOSED** |
-| **OPEN-QTY-DIFF · OPEN-DONE · OPEN-SHIP-STATE · OPEN-DDL · OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** |
+| **OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** |
+| **OPEN-SHIP-STATE** | **OPEN** (후속) — v1 `IN_TRANSIT` **CLOSED** |
+| DEC-036 physical (구 OPEN-DDL) | **CLOSED** (2026-08-31) |
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.
 2026-08-26 갱신: **Stage7B-2 private main merge** · DEC-032/033/034 **IMPLEMENTED** · Stage7B PC 수금 공용화 완료 · 운영 미배포 · P1 COMMIT/UI 경계 유지.
-2026-08-31 갱신: **DEC-035 OPERATIONAL PASS** · PC·Lightsail **OPS APPLIED** · design OPEN-DDL **CLOSED** · Lightsail **`4daae03`** · build fix **`10632eb`** · dev race **`6e9ae87`**.
+2026-08-31 갱신: **DEC-035 OPERATIONAL PASS** · **DEC-036 APPROVED PHYSICAL DESIGN** (`t_auction_ship_master`/`detail`) · PC·Lightsail **OPS APPLIED** · Lightsail **`4daae03`** · build fix **`10632eb`** · dev race **`6e9ae87`**.
 
 ### 스키마 확인 (2026-08-22)
 

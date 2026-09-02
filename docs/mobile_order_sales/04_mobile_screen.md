@@ -372,7 +372,7 @@ Stage 5 판매목록에서 추가로 보여줄 필드.
 내부 출하번호 **기본 비노출**.
 
 사용자 라벨 예: **출하 준비** · **출하중** · **확인 완료** · **확인 필요** · **판매확정**
-실제 DB 상태코드 = **OPEN-SHIP-STATE** (라벨과 동일시 금지).
+실제 DB 상태코드 = v1 **`IN_TRANSIT`** (사용자 라벨 「출하중」 — [07 DEC-036](./07_decisions.md)).
 
 ### 6.4 청과확인 · 차이 UX (TARGET)
 
@@ -422,7 +422,7 @@ CTA: **`판매확정`** → 기존 판매 목록/상세 · **수금 UX 재사용
 ~~가락 DRAFT 확정 UI 후속~~ → **SUPERSEDED 표현.** TARGET은 **경매 넘기기 → 출하중 → 청과확인 → 판매확정** ([§5B](#5b-재고-선택--직접판매--경매-넘기기-dec-036--target) · [§6.3~6.5](#63-경매출하-구역-target--dec-036)).
 
 **OPEN (확정 금지 · 구현범위와 섞지 않음):**
-- OPEN-QTY-DIFF · OPEN-DONE · OPEN-SHIP-STATE · OPEN-DDL · DEC-016
+- OPEN-QTY-DIFF · OPEN-DONE · OPEN-SHIP-STATE **(후속)** · OPEN-AUCTION-MATCH-CARDINALITY · DEC-016 · 출하 취소/정정
 - 판매 DRAFT **필수** 여부
 - 경매 출하 **취소/정정** UX
 - HARVEST **잔량 API**

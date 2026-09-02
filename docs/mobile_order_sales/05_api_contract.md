@@ -2,7 +2,7 @@
 
 > **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).
 > Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.
-> 수확 N:M (DEC-035): **OPERATIONAL PASS** · **OPS APPLIED**. 경매 출하·청과·판매확정: [DEC-036/037](./07_decisions.md) — **APPROVED LOGICAL (설계. 미구현).**
+> 수확 N:M (DEC-035): **OPERATIONAL PASS** · **OPS APPLIED**. 경매 출하: [DEC-036](./07_decisions.md) — **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED**. 경매 판매확정: **DEC-037** — **APPROVED LOGICAL** · **NOT IMPLEMENTED**.
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.
 > PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
@@ -12,7 +12,8 @@
 |----|------|
 | **CURRENT API** | 현재 FastAPI/Core에 실제 구현된 endpoint · request/response · TX |
 | **IMPLEMENTED API** | git `main` DEC-035 HARVEST N:M 계약 (**OPERATIONAL PASS**) |
-| **APPROVED LOGICAL API** | DEC-036/037 등 논리 API 책임 (**미구현**) |
+| **APPROVED LOGICAL API** | DEC-037 등 논리 API 책임 (**미구현**) |
+| **APPROVED PHYSICAL API** | DEC-036 A1/A2 **물리계약 승인** · REST path **구현 단계** |
 | **OPEN API** | endpoint path · payload · DDL · 상태코드 · cardinality · 정책 미확정 |
 
 APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다. DEC-035 HARVEST = **IMPLEMENTED API** · **OPERATIONAL PASS** (PC·Lightsail).
@@ -38,7 +39,7 @@ APPROVED LOGICAL을 **IMPLEMENTED**처럼 쓰지 않는다. DEC-035 HARVEST = **
 | 재고 조회 | fruit-stock read | `GET …/fruit-stock` |
 | 생산확정 | PACK/PROCESS · RAW/HARVEST | `POST …/production/confirm` (`ProductionService`) |
 | **수확 소진** | N:M · 잔량 SSOT · `harvest_consumptions[]` | harvest-records · confirm (**IMPLEMENTED**) |
-| **경매 출하** | 출하중 SSOT · 가용 제외 | **LOGICAL · REST 없음** |
+| **경매 출하** | `t_auction_ship_*` · 가용 제외 | **PHYSICAL APPROVED · REST 없음** |
 | **청과 확인/매칭** | 확인수량 별도 · 출하수량 불변 | **LOGICAL · REST 없음** |
 | **경매 판매확정** | CONFIRMED+OUT+SA 자동 · 원자 TX | **LOGICAL · REST 없음** |
 | 판매 조회·수금 | GET sales · payments append | sales (`SalesQueryService`, `SalesPaymentService`) |
@@ -73,7 +74,7 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 | method | path | CURRENT | APPROVED LOGICAL |
 |--------|------|---------|------------------|
-| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B · `available=real−reserved` | `available ≈ real − order_reserved − active_auction_transit` |
+| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B · CURRENT `available=real−reserved` | TARGET `available = real − reserved − active_auction_transit` ([03 §7.1](./03_data_contract.md)) |
 | GET | `/farms/{farm_cd}/fruit-stock/logs` | Stage 5B read-only | 유지 |
 | GET | `/farms/{farm_cd}/production/harvest-records` | + `harvest_year` · `consumed_container_qty` · `remaining_container_qty` | 유지 |
 | GET | `/farms/{farm_cd}/production/raw-stock` | 원물 가용 | 유지 |
@@ -149,20 +150,21 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 - `reserved_qty` = 주문 HOLD (`t_order_alloc` 연계).
 - **클라이언트가 가용재고를 재계산하지 않음** (CURRENT 계약 유지).
 
-**APPROVED LOGICAL API**
+**APPROVED PHYSICAL API** (2026-08-31 — **코드 미적용**)
 
-- 서버가 반환하는 **판매가능 가용** (`available_qty`):
-  - `현재고 − 주문 HOLD − 유효 경매 출하중`
-  - 개념: `available ≈ real − order_reserved − active_auction_transit`
-- **반드시 보장할 API 계약 = `available_qty` 정확성.**
-- `reserved_qty` 의미 **유지** (주문 HOLD 전용). 경매 출하를 `reserved_qty`에 **넣지 않음**.
-- 경매 출하 시 `out_qty` **증가 없음**.
-- `active_auction_transit` = **유효 출하 라인 집계** (DEC-036). `transit_qty` 단독 DB 컬럼 SSOT **금지**.
+```
+available_qty = in_qty - out_qty - reserved_qty - active_auction_transit_qty
+active_auction_transit_qty = SUM(farm_shipped_qty) WHERE status='IN_TRANSIT' per stock_seq
+```
+
+- **동일 공식**을 fruit-stock · allocation HOLD · DIRECT ship · 경매 출하 생성 **모든 재고소비 경로**에 적용 ([03 §7.1](./03_data_contract.md)).
+- `reserved_qty` = 주문 HOLD 전용 · 경매 출하 → `reserved_qty` **변경 없음** · `out_qty` **변경 없음**.
+- `available_qty <= 0` → 경매 출하 **reject** (음수 가용 row — 데이터 품질 이슈, 자동 보정 **금지**).
 
 **OPEN API**
 
-- 출하중 수량을 응답에 **별도 필드로 표시**할지 — **필수 계약 아님** (UI 설명용 **선택 후보**).
-- 집계 SQL · OPEN-DDL · 별도 필드명.
+- 출하중 수량 **별도 response 필드** — UI 선택 후보 (필수 아님).
+- REST path for market lookup — 구현 단계.
 
 ---
 
@@ -410,56 +412,51 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 
 ---
 
-## 9A. 경매 출하 API 논리 (DEC-036)
+## 9A. 경매 출하 API (DEC-036)
 
-**APPROVED LOGICAL · endpoint path 미확정 (OPEN).**
+**APPROVED PHYSICAL · REST path = 구현 단계 확정** (router naming 충돌 검토 후).
 
-흐름: `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정`.
+흐름: `상품 가용 → 경매 넘기기 → IN_TRANSIT → 청과 확인/매칭 → DEC-037 판매확정`.
 
-### 9A.1 출하 생성
+물리: **`t_auction_ship_master`** · **`t_auction_ship_detail`** ([03 §8B](./03_data_contract.md)).
 
-**사용자 입력(개념):** 출하일 · 시장 · 법인 · 상품별 출하수량(규격집합).
+### 9A.1 출하 생성 (A1)
 
-**서버 자동(개념):** farm · 내부 출하 묶음 식별 · 실제 stock row 추적 · 상태 · 감사.
+**사용자 입력:** `ship_dt` · `market_cd`(또는 시장 선택 → server map) · `corporation_name` · **규격집합 + 출하수량** (Mobile `salesPrefill` spec key와 동일 의미).
 
-**금지:**
+**금지 (client):** `stock_seq` 직접 지정 · `reserved_qty`/`out_qty` 변경 요청 · 판매 DRAFT 선행.
 
-- `stock_seq` 클라이언트 직접 지정 **강제**
-- 사용자 선택 상품 1행 = `stock_seq` 1행 **cardinality 확정**
-- `reserved_qty` / `out_qty` 변경
-- 판매 DRAFT 선행
+**서버 (CLOSED):**
 
-**TX (원자 · 한 업무 경계):**
+1. `BEGIN IMMEDIATE`
+2. 요청·시장(`MARKET_CODE_BY_NAME`)·법인 검증
+3. 규격별 **`storage_dt ASC, rowid ASC` FIFO** → `stock_seq` 후보
+4. **active transit 포함** `available_qty` 재검증 (규격 합계 ≤ 가용)
+5. `shipment_id` 생성 → **header INSERT** (`status='IN_TRANSIT'`, snapshot 필드)
+6. **`stock_seq`별 line INSERT** (`farm_shipped_qty`; 1 line = 1 `stock_seq`)
+7. `reserved_qty` / `out_qty` / `t_sales_*` / SALE log **변경 없음**
+8. COMMIT — 실패 시 **전체 rollback**
 
-1. 최신 가용 재조회 (`§2.3` LOGICAL `available`)
-2. 요청수량 검증
-3. Core FIFO 등으로 **실제 stock row** 결정
-4. 출하 묶음/라인 생성
-5. **유효 출하중** 집계 반영
-6. `reserved_qty` / `out_qty` **변경 없음**
-7. 실패 시 **전체 rollback**
+**Cardinality (CLOSED):** Mobile spec row 1 → Server FIFO → detail line **N**.
 
-주문 HOLD와 경매 출하가 동일 재고를 동시에 소비하지 못하도록 **가용 재검증 + 출하 반영은 동일 TX**.
+### 9A.2 출하중 목록 (A2)
 
-### 9A.2 출하 목록
+**논리 응답:** `shipment_id`(routing only) · `ship_dt` · `market_name` · `corporation_name` · 품목 수/총 `farm_shipped_qty` · `status` · `company_confirmed_qty` 입력 여부(파생).
 
-**논리 응답(개념):** 내부 출하 묶음 식별 · 출하일 · 시장/법인명 · 품목 수 · 농장 출하 총수량 · 상태 · 청과 확인 여부.
+- `shipment_id` · `stock_seq` — **사용자 화면 비노출** (DEC-021).
+- **OPEN:** exact path · paging · filter.
 
-내부 ID = routing용 가능 · **화면 기본 노출 대상 아님** (DEC-021).
+### 9A.3 출하 상세 / 청과 확인 (A3)
 
-**OPEN:** path · paging · OPEN-SHIP-STATE.
+**후속 단계** — 본 물리설계에서 **필수 아님**.
 
-### 9A.3 출하 상세
+논리: 규격(join stock) · `farm_shipped_qty` · `company_confirmed_qty` · 차이 · 매칭상태.
 
-**논리 표시(개념):** 규격 · 농장 출하수량 · 청과 확인수량 · 차이 · 경매 결과 · 매칭상태.
-
-농장 출하수량 **원본 불변** · 확인수량 **별도**.
-
-**OPEN:** §9B · **OPEN-AUCTION-MATCH-CARDINALITY** · stock row cardinality.
+**OPEN:** §9B · **OPEN-AUCTION-MATCH-CARDINALITY**.
 
 ### 9A.4 출하 취소/정정
 
-**OPEN:** endpoint · TX · OPEN-SHIP-STATE 연동. 본 문서에서 확정하지 않음.
+**CAN-DEFER** — v1 **미구현**. `CANCELLED` 상태 v1 **금지**.
 
 ---
 
@@ -512,7 +509,7 @@ UI에서 상품별 **합산 표시**는 가능. API/DB cardinality = **OPEN**.
 2. 청과 확인/매칭 검증
 3. **최종 승인 판매수량** 결정
 4. 판매 **생성** 또는 기존 DRAFT → `CONFIRMED` (**DRAFT 필수 여부 = OPEN**)
-5. `t_sales_detail` ↔ 실제 stock 추적 (cardinality OPEN-DDL)
+5. `t_sales_detail` ↔ 실제 stock 추적 (DEC-037 OUT 대상 `stock_seq`)
 6. 최종 승인수량 기준 **`out_qty` 증가**
 7. `t_stock_log` SALE OUT (`ref_type=SALE`)
 8. **S4A 자동** (사용자 SA 선택 **금지**):
@@ -638,5 +635,5 @@ UI에서 상품별 **합산 표시**는 가능. API/DB cardinality = **OPEN**.
 | | |
 |--|--|
 | **CURRENT** | HARVEST 단일 · harvest balance 없음 · `available=real−reserved` · `/shipments/confirm`=판매+OUT · PC `AUCTION_RT`+DRAFT · 경매 confirm FastAPI/Core **없음** · 모바일 경매 출하/매칭 REST **없음** |
-| **TARGET (LOGICAL)** | HARVEST N:M · 서버 잔량 · 정확한 `available_qty` · 경매 출하 생성/목록/상세 · 청과 확인/매칭 · DEC-037 판매확정 |
-| **OPEN** | OPEN-DDL · OPEN-SHIP-STATE · OPEN-QTY-DIFF · OPEN-DONE · **OPEN-AUCTION-MATCH-CARDINALITY** · DEC-016 · DRAFT 필수 · endpoint path · payload 필드명 · 출하 취소/정정 · 차이 시 confirm 허용 · 시장/법인/최근값 API · 자동매칭 · stock/가격 cardinality · **실제 Core 클래스 구조** |
+| **TARGET** | HARVEST N:M · transit 반영 `available_qty` · 경매 A1/A2 · 청과 · DEC-037 |
+| **OPEN** | OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY · OPEN-SHIP-STATE **(후속)** · DEC-016 · DRAFT 필수 · endpoint path · 출하 취소/정정 · 시장/법인 REST · 자동매칭 · Core 클래스 구조 |

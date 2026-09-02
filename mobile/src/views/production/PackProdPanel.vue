@@ -68,7 +68,15 @@ import {
   mapProductionHarvestError,
   validateHarvestSelections,
 } from '@/views/production/harvestSelection'
-import { todayIso } from '@/views/work-log/workLogConstants'
+import {
+  defaultHarvestRecordRange,
+  validateHarvestDateRange,
+} from '@/views/production/harvestRecordLookup'
+import {
+  LABEL_DATE_FROM,
+  LABEL_DATE_TO,
+  LABEL_LOOKUP,
+} from '@/views/orders/ordersConstants'
 import { useAppStore } from '@/composables/stores/app'
 import { useSalesPrefillStore } from '@/composables/stores/salesPrefill'
 
@@ -107,6 +115,8 @@ const varietyCd   = ref('')
 // 원료 rows
 const harvestRows      = ref<HarvestRecord[]>([])
 const harvestUseQtyMap = ref<Record<string, string>>({})
+const harvestFromDate  = ref('')
+const harvestToDate    = ref('')
 const rawRows           = ref<RawStockItem[]>([])
 const selectedRawKey    = ref('')
 // 원물 key → 사용수량 (각 행 독립 관리)
@@ -233,30 +243,54 @@ async function loadMasters() {
 }
 
 // ── 원료 로드 ────────────────────────────────────────────────────────
-async function loadSources() {
+function resetHarvestDateRange() {
+  const range = defaultHarvestRecordRange()
+  harvestFromDate.value = range.from
+  harvestToDate.value = range.to
+}
+
+async function loadHarvestRecords() {
+  const rangeMsg = validateHarvestDateRange(harvestFromDate.value, harvestToDate.value)
+  if (rangeMsg) {
+    harvestLoadError.value = rangeMsg
+    harvestRows.value = []
+    return
+  }
   loading.value = true
-  errorMsg.value = ''
   harvestLoadError.value = ''
-  rawLoadError.value = ''
   try {
-    const farm  = farmCd.value
-    const today = todayIso()
-    if (isHarvest.value) {
-      harvestRows.value = await fetchHarvestRecords(farm, {
-        from_date: today.slice(0, 8) + '01',
-        to_date: today,
-      })
-    } else {
-      rawRows.value = await fetchRawStock(farm)
-    }
+    harvestRows.value = await fetchHarvestRecords(farmCd.value, {
+      from_date: harvestFromDate.value,
+      to_date: harvestToDate.value,
+    })
   } catch {
-    if (isHarvest.value) {
-      harvestRows.value = []
-      harvestLoadError.value = MSG_HARVEST_LOAD_FAIL
-    } else {
-      rawRows.value = []
-      rawLoadError.value = MSG_RAW_LOAD_FAIL
-    }
+    harvestRows.value = []
+    harvestLoadError.value = MSG_HARVEST_LOAD_FAIL
+  } finally {
+    loading.value = false
+  }
+}
+
+function searchHarvestRecords() {
+  errorMsg.value = ''
+  void loadHarvestRecords()
+}
+
+async function loadSources() {
+  errorMsg.value = ''
+  rawLoadError.value = ''
+  if (isHarvest.value) {
+    if (!harvestFromDate.value || !harvestToDate.value) resetHarvestDateRange()
+    await loadHarvestRecords()
+    return
+  }
+  loading.value = true
+  harvestLoadError.value = ''
+  try {
+    rawRows.value = await fetchRawStock(farmCd.value)
+  } catch {
+    rawRows.value = []
+    rawLoadError.value = MSG_RAW_LOAD_FAIL
   } finally {
     loading.value = false
   }
@@ -523,6 +557,7 @@ watch(inputSource, () => {
 })
 
 onMounted(async () => {
+  resetHarvestDateRange()
   await loadMasters()
   await loadSources()
 })
@@ -551,6 +586,34 @@ onMounted(async () => {
     <OdsCard class="pack-prod__section pack-prod__section--compact">
       <template v-if="isHarvest">
         <p class="pack-prod__card-label">{{ LABEL_HARVEST_RECORD }}</p>
+        <div class="pack-prod__harvest-query" data-testid="harvest-record-query">
+          <div class="pack-prod__harvest-dates">
+            <input
+              v-model="harvestFromDate"
+              type="date"
+              class="pack-prod__harvest-date"
+              :aria-label="LABEL_DATE_FROM"
+              :disabled="loading"
+            >
+            <span class="pack-prod__harvest-dates-sep">~</span>
+            <input
+              v-model="harvestToDate"
+              type="date"
+              class="pack-prod__harvest-date"
+              :aria-label="LABEL_DATE_TO"
+              :disabled="loading"
+            >
+          </div>
+          <button
+            type="button"
+            class="pack-prod__harvest-search"
+            data-testid="harvest-record-search"
+            :disabled="loading"
+            @click="searchHarvestRecords"
+          >
+            {{ LABEL_LOOKUP }}
+          </button>
+        </div>
         <div v-if="loading" class="pack-prod__hint">불러오는 중…</div>
         <div v-else-if="harvestLoadError" class="pack-prod__error" role="alert">
           {{ harvestLoadError }}
@@ -829,6 +892,54 @@ onMounted(async () => {
   margin: 0 0 var(--ods-space-4);
   font: var(--ods-font-form-label, var(--ods-font-footnote));
   color: var(--ods-color-text-secondary);
+}
+
+.pack-prod__harvest-query {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  margin-bottom: var(--ods-space-4);
+}
+
+.pack-prod__harvest-dates {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-4);
+  flex: 1;
+  min-width: 0;
+}
+
+.pack-prod__harvest-dates-sep {
+  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-footnote);
+  flex-shrink: 0;
+}
+
+.pack-prod__harvest-date {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: var(--ods-space-4) var(--ods-space-8);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-control);
+  background: var(--ods-color-surface);
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-primary);
+}
+
+.pack-prod__harvest-search {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-control);
+  background: var(--ods-color-surface);
+  font: var(--ods-font-footnote);
+  color: var(--ods-color-text-primary);
+}
+
+.pack-prod__harvest-search:disabled {
+  opacity: 0.6;
 }
 
 .pack-prod__hint {

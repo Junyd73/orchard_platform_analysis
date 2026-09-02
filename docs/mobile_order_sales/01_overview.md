@@ -2,7 +2,7 @@
 
 > **현재 기준 (2026-08-31):** DEC-035 HARVEST N:M — **APPROVED** · **IMPLEMENTED** · **REHEARSAL PASS** · **OPS APPLIED** · **OPERATIONAL PASS** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
 > Stage 6·Order→Ship·compact 목록 **운영 반영** (`fd963e0`) — DEC-035와 별개.
-> DEC-036/037는 **설계 APPROVED** · 미구현. 생산/재고 SSOT: [09](./09_production_inventory_flow.md). API: [05](./05_api_contract.md).
+> DEC-036 — **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED**. DEC-037 — **APPROVED LOGICAL** · **NOT IMPLEMENTED**.
 > **진행·게이트:** [06](./06_development_progress.md).
 
 **표현 4층 (본 문서):**
@@ -15,8 +15,8 @@
 | **OPS APPLIED** | PC·Lightsail **운영 DB DDL** + code/deploy **적용 완료** |
 | **OPERATIONAL PASS** | 실제 운영환경에서 PC/Mobile HARVEST N:M **실사용 확인** |
 | **OPS PENDING** | *(과거 표기)* 운영 미적용 — **DEC-035는 해당 없음 (2026-08-31 종료)** |
-| **APPROVED TARGET** | DEC-036/037 등 **설계 승인** · **미구현** |
-| **OPEN** | OPEN-DONE · OPEN-SHIP-STATE · 경매 DDL 등 **미확정** |
+| **APPROVED PHYSICAL DESIGN** | DEC-036 `t_auction_ship_*` 물리계약 (**DDL·코드 미적용**) |
+| **OPEN** | OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY · OPEN-SHIP-STATE **(후속)** · 시장/법인 REST path 등 → [07](./07_decisions.md) |
 
 `운영 적용 완료` · `production operational` · `deployed`는 **DEC-035 CURRENT**에 사용 가능.
 DEC-036/037 등 **미구현 설계**에는 **APPROVED TARGET** · **OPEN**만 사용.
@@ -153,8 +153,8 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 | | 대표 |
 |--|------|
 | **CURRENT** | 주문 CRUD · allocation Core/API · Stage H/P 생산·수확 **HARVEST N:M** · fruit-stock · **ShipConfirm** 주문/DIRECT 판매+OUT · sales GET/수금(git main 반영 · ops 미배포 — [06](./06_development_progress.md)) · PC **`AUCTION_RT`+DRAFT** · 경매 출하 REST **없음** |
-| **APPROVED TARGET** | 경매 **출하 SSOT** · 가용에서 **출하중 제외** · 청과 **확인/매칭** · DEC-037 **판매확정** |
-| **OPEN** | OPEN-DDL · OPEN-SHIP-STATE · OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY · 시장/법인 API 등 → [§8](#8-주요-open) · [07](./07_decisions.md) |
+| **APPROVED TARGET** | DEC-036 **`t_auction_ship_*`** · transit 가용 공식 · DEC-037 판매확정 |
+| **OPEN** | OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY · OPEN-SHIP-STATE **(후속)** · 시장/법인 REST path · 출하 취소/정정 → [§8](#8-주요-open) · [07](./07_decisions.md) |
 
 ---
 
@@ -172,11 +172,11 @@ PC의 **수확·생산·재고·주문·판매·경매**를 모바일과 **공�
 
 ### 승인된 후속설계 (범위에 가까움 · **미구현**)
 
-- DEC-036 **최소 경매 출하** 구조
+- DEC-036 **`t_auction_ship_master`/`detail`** ([03 §8B](./03_data_contract.md))
 
 **DEC-035:** **OPERATIONAL PASS** — PC·Lightsail OPS DDL **APPLIED** · Mobile/PWA N:M **실사용 PASS** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
 
-**정확한 표현:** DEC-035 최소 보완구조는 **git 구현 + 운영 적용 완료**. 경매 물리 DDL = **OPEN**. PC 생산확정 HARVEST N:M **화면 UI 보완** = 모바일 마무리 후 **별도 PC 단계** (기능 장애/blocker **아님**).
+**정확한 표현:** DEC-035 최소 보완구조는 **git 구현 + 운영 적용 완료**. DEC-036 물리설계 **APPROVED (2026-08-31)** · **구현·DDL 미적용**. PC 생산확정 HARVEST N:M **화면 UI 보완** = 모바일 마무리 후 **별도 PC 단계** (기능 장애/blocker **아님**).
 
 ### OPEN (01에서는 링크만)
 
@@ -250,7 +250,7 @@ Stage H/P를 **미완료로 되돌리지 않음** — 위는 **기존 기능 위
 | 묶음 | 대표 OPEN |
 |------|-----------|
 | **수확·생산** | OPEN-DONE · ~~OPS DDL PENDING(DEC-035)~~ → **DEC-035 OPS APPLIED** |
-| **경매 출하** | OPEN-DDL · OPEN-SHIP-STATE · 출하 취소/정정 |
+| **경매 출하** | ~~OPEN-DDL~~ **CLOSED** (physical) · OPEN-SHIP-STATE **(후속)** · 출하 취소/정정 · REST path |
 | **청과·매칭** | OPEN-AUCTION-MATCH-CARDINALITY · 시장/법인 유효조합·API |
 | **판매확정** | OPEN-QTY-DIFF · 차이 시 confirm 허용 · DRAFT 필수 · **DEC-016** (가락 배송) |
 

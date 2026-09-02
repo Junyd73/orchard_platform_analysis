@@ -156,11 +156,13 @@ git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS AP
 
 ### B. 경매 출하 — DEC-036
 
-**TARGET:** 상품재고 다중선택 · 경매 넘기기 · 출하중 · 가용에서 유효 출하분 제외 · reserved/out **선차감 없음**.
+**상태:** **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** (2026-08-31).
 
-**OPEN:** OPEN-DDL · OPEN-SHIP-STATE · stock cardinality · 가용 구현
+**TARGET:** 상품재고 다중선택 · 경매 넘기기 · `IN_TRANSIT` · `t_auction_ship_*` · 가용 transit 차감 · reserved/out/sales **불변**.
 
-**경계:** Stage 5C `OrderShipService` / ShipConfirm = **주문·직접판매 OUT**. 경매 출하 **포함 아님**.
+**CLOSED:** physical DDL · stock cardinality · available 공식 · v1 `IN_TRANSIT` · market/corp MVP SSOT.
+
+**OPEN:** OPEN-QTY-DIFF · OPEN-AUCTION-MATCH-CARDINALITY · OPEN-SHIP-STATE **(후속)** · REST path · 출하 취소/정정 · A3 상세/매칭.
 
 ### C. 청과 확인/매칭
 
@@ -195,9 +197,9 @@ git main 반영 · ops 미배포: 6A~7B · S4A 등 — ops SHA · 필요 DDL · 
 
 ### 신규 구현 순서 후보
 
-1. ~~DEC-035 물리설계~~ · ~~HARVEST N:M Core/API/Mobile~~ · ~~OPS activation~~ — **OPERATIONAL PASS**
-2. DEC-036 물리설계
-3. 경매 출하 Core/API/Mobile
+1. ~~DEC-035 …~~ · ~~DEC-036 물리설계~~ — **APPROVED PHYSICAL (2026-08-31)**
+2. DEC-036 구현 1단계 — 로컬/테스트 DDL + Core 출하 생성 TX
+3. 경매 출하 API/Mobile
 4. 시장/법인 + 청과결과 read/매칭
 5. OPEN-AUCTION-MATCH-CARDINALITY 실데이터 검증
 6. OPEN-QTY-DIFF 정책
@@ -227,12 +229,14 @@ git main 반영 · ops 미배포: 6A~7B · S4A 등 — ops SHA · 필요 DDL · 
 | 생산확정 `prod_confirm_id` (design) | **CLOSED** | DEC-035-B |
 | **OPS consumption DDL apply** | **PENDING** | PC·Lightsail maintenance |
 | OPEN-DONE | **CAN-DEFER** | N:M 1차 — **유지 OPEN** |
-| 경매 출하 최소 DDL | **BLOCKER** | 경매 출하 구현 전 |
-| OPEN-SHIP-STATE | **BLOCKER** | 경매 출하 구현 전 |
-| 가용 집계 방식 | **BLOCKER** | 경매 출하/fruit-stock |
-| stock cardinality | **BLOCKER** | 출하 생성 |
-| OPEN-AUCTION-MATCH-CARDINALITY | **BLOCKER** | 매칭 write 확정 전 |
-| 시장/법인 SSOT/API | **BLOCKER** | 모바일 경매 UX |
+| 경매 출하 최소 DDL | **CLOSED** | `t_auction_ship_master`/`detail` — **2026-08-31** |
+| OPEN-SHIP-STATE (v1 `IN_TRANSIT`) | **CLOSED** | 생성 상태 |
+| OPEN-SHIP-STATE (후속) | **OPEN** | 완료/취소/차이 종료 |
+| 가용 집계 방식 | **CLOSED** | §03/05/09 공식 |
+| stock cardinality | **CLOSED** | Mobile spec → FIFO → line |
+| 시장/법인 MVP SSOT | **CLOSED** | map + snapshot |
+| 시장/법인 REST path | **OPEN** | 모바일 UX |
+| OPEN-AUCTION-MATCH-CARDINALITY | **OPEN** | 매칭 write 확정 전 |
 | OPEN-QTY-DIFF | **BLOCKER** | 경매 판매확정 전 |
 | 차이 시 confirm 정책 | **BLOCKER** | DEC-037 구현 전 |
 | DRAFT 필수 여부 | **CAN-DEFER** | 구체 API 설계까지 |

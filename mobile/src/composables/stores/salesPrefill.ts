@@ -323,6 +323,17 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     )
   }
 
+  /** 경매 확인 직전 — available_qty 스냅샷만 갱신(qty·규격 유지) */
+  function applyStockLineAvailability(refreshedLines: ShipDraftLine[]) {
+    if (source.value !== 'STOCK' || !refreshedLines.length) return
+    const byKey = new Map(refreshedLines.map((ln) => [stockSaleSpecKey(ln), ln]))
+    shipLines.value = shipLines.value.map((ln) => {
+      const next = byKey.get(stockSaleSpecKey(ln))
+      if (!next) return ln
+      return { ...ln, available_qty: next.available_qty }
+    })
+  }
+
   function removeStockLineByKey(key: string) {
     shipLines.value = shipLines.value.filter((ln) => stockSaleSpecKey(ln) !== key)
   }
@@ -482,6 +493,7 @@ export const useSalesPrefillStore = defineStore('salesPrefill', () => {
     hasStockLine,
     addStockLine,
     updateStockLineQty,
+    applyStockLineAvailability,
     removeStockLineByKey,
     removeShipLine,
     updateShipLine,

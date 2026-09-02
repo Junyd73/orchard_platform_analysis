@@ -12,6 +12,7 @@
 | **CURRENT PHYSICAL** | 현재 실제 존재하는 테이블/컬럼/코드 계약 |
 | **IMPLEMENTED PHYSICAL CONTRACT** | git `main`에 구현·문서화된 물리 계약 (DEC-035) — **OPS APPLIED** |
 | **APPROVED LOGICAL** | DEC-036/037 등 승인 논리 요구 (**미구현일 수 있음**) |
+| **APPROVED PHYSICAL DESIGN** | DEC-036 경매 출하 header/line **물리계약 확정** (**DDL·코드 미적용**) |
 | **OPEN PHYSICAL** | 경매 출하 등 신규 테이블·상태코드 — **미확정** |
 | **OPS APPLIED** | PC·Lightsail **운영 DB DDL** + code/deploy **적용 완료** |
 | **OPERATIONAL PASS** | 실제 운영환경 PC/Mobile HARVEST N:M **실사용 확인** |
@@ -230,7 +231,7 @@ legacy `sales_tp` / `sales_source`는 **임의 폐기하지 않음**.
 - 경매 **출하 라인을 `t_sales_detail`로 선행 생성하지 않는다**.
 - 농장 출하수량·청과 확인수량을 `qty` **하나로 덮어쓰지 않는다** — 원본은 출하 원장(DEC-036).
 - 판매확정 시 `t_sales_detail.qty` = **최종 승인 판매수량** 축 (DEC-037).
-- 출하 원천 상품재고는 **추적 가능**해야 한다. 실제 `stock_seq` 분할·사용자 상품행↔라인↔stock cardinality는 **OPEN-DDL** (화면 1행=라인 1행=`stock_seq` 1개로 **조기 확정 금지**).
+- 출하 원천 상품재고는 **`stock_seq` 단위 line**으로 추적한다. Mobile은 **규격 집계 row** 선택 · Server는 **FIFO 분할** ([§8B](#8b-경매-출하-물리계약-dec-036)).
 
 ---
 
@@ -287,21 +288,31 @@ available_qty = real_qty - reserved_qty
 
 Core/API가 위 식으로 표시·배정 검증.
 
-**APPROVED LOGICAL ([DEC-036](./07_decisions.md) · [09 §14.1](./09_production_inventory_flow.md) · [02 §14](./02_domain_flow.md)):**
-
-판매·배정·경매 넘기기에 쓸 수 있는 가용은 개념적으로:
+**APPROVED PHYSICAL DESIGN ([DEC-036](./07_decisions.md) · [09 §14.1](./09_production_inventory_flow.md) · [02 §14](./02_domain_flow.md) · **2026-08-31 대표 승인**):**
 
 ```
-available ≈ real - order_reserved - active_auction_transit
+real_qty                   = in_qty - out_qty
+active_auction_transit_qty = SUM(farm_shipped_qty)   -- status=IN_TRANSIT shipment line only
+available_qty              = real_qty - reserved_qty - active_auction_transit_qty
 ```
 
-- `order_reserved` = 기존 `reserved_qty` (**주문 HOLD 전용** 의미 유지).
-- `active_auction_transit` = **유효한 경매 출하 라인 집계** (논리 용어). **실제 컬럼명·SQL·뷰명 아님**.
-- 경매 출하 시 `out_qty` **증가 금지**. 단순 `transit_qty` 컬럼 하나 = SSOT **금지**.
+- `reserved_qty` = **주문 HOLD 전용** (의미·컬럼 **변경 없음**).
+- `active_auction_transit_qty` = `t_auction_ship_detail` ↔ `t_auction_ship_master` **집계** ([§8B](#8b-경매-출하-물리계약-dec-036)). `t_stock_master.transit_qty` **추가 금지**.
+- 경매 출하 시 `out_qty` **증가 금지** · `t_sales_*` **생성 금지**.
 
-**OPEN PHYSICAL:** 집계 SQL·컬럼·뷰 · TX `BEGIN` 방식.
+**SSOT 적용 범위 (구현 시 일관 필수 — 화면표시만 수정 금지):**
 
-**동시성 불변 (APPROVED LOGICAL):** 경매 출하 생성 시 (1) 현재 가용 재검증 (2) 유효 출하라인 생성 (3) 출하중 집계 반영이 **하나의 업무 TX 경계**에서 정합되어야 한다. 주문 HOLD와 경매 출하가 같은 가용을 **중복 소비**하지 못하게 한다. 실제 SQL은 OPEN PHYSICAL.
+- `GET …/fruit-stock` 조회
+- 주문 allocation/HOLD 가용검증 (`OrderAllocationService`)
+- DIRECT 판매/출고 가용검증 (`OrderShipService`)
+- 경매 출하 생성 가용검증
+- 기타 **실제 상품재고 소비** 경로
+
+한 경로에서 transit 집계를 **무시**하면 동일 재고 **이중사용** 가능 → **금지**. 구현 시 공통 helper 또는 **동등한 단일 책임** 지점 우선 (helper **이름은 구현 단계에서 확정**).
+
+**동시성 (APPROVED PHYSICAL):** 경매 출하 생성 = `BEGIN IMMEDIATE` → 가용 재검증 → header/line INSERT → COMMIT. 실패 시 **전체 rollback**. `reserved_qty` / `out_qty` / `t_sales_*` / SALE `t_stock_log` **변경 없음**.
+
+**데이터 품질 (CURRENT 관찰 · DEC-036 범위 밖):** 일부 row에서 `out_qty > in_qty`로 **음수 가용** 가능. **자동 보정·clamp·DB 수정 금지**. 구현 시 `available_qty <= 0` → 경매 선택 불가 · 서버 출하 **reject**. 정리는 **별도 작업**.
 
 ---
 
@@ -384,32 +395,139 @@ available ≈ real - order_reserved - active_auction_transit
 
 ---
 
-## 8B. 경매 출하 논리계약 (DEC-036)
+## 8B. 경매 출하 물리계약 (DEC-036)
 
-상세: [09 §2.3.1·§2.3.2](./09_production_inventory_flow.md) · [02 §6.1](./02_domain_flow.md). **설계 APPROVED · 구현·DDL 아님.**
+상세: [09 §2.3.1·§2.3.2](./09_production_inventory_flow.md) · [02 §6.1](./02_domain_flow.md) · [05 §9A](./05_api_contract.md).
 
-흐름: `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정`.
+**상태:** **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** (**2026-08-31 대표 승인**).
+
+흐름: `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → DEC-037 판매확정`.
 
 ### CURRENT PHYSICAL
 
-전용 출하 헤더/라인 **없음**. `AUCTION_RT`+`DRAFT` 판매만 (`save_realtime_auction_draft`) · 재고 미접촉 · **출하중 SSOT 아님**.
+전용 출하 테이블 **없음**. `AUCTION_RT`+`DRAFT` 판매만 (`save_realtime_auction_draft`) · 재고 미접촉 · **출하중 SSOT 아님** ([§8B.4](#8b4-legacy-auction_rt-draft)).
 
-### APPROVED LOGICAL
+### APPROVED PHYSICAL DESIGN — 테이블
 
-**헤더(개념) 최소:** 내부 묶음식별 · farm · 출하일 · 시장 · 법인/거래처 · 업무상태 · 감사정보.
+프로젝트 **master/detail** 네이밍(`t_sales_master` / `t_sales_detail` 등)에 맞춘 물리명:
 
-**라인(개념) 최소:** 소속 묶음 · 원천 상품재고 **추적 가능성** · **농장 출하수량**(원본 불변) · **청과 확인수량**(별도) · 차이 파생 · 후속 판매 연결 · 감사정보.
+| 논리 | 물리 테이블 |
+|------|-------------|
+| Auction Shipment Header | **`t_auction_ship_master`** |
+| Auction Shipment Line | **`t_auction_ship_detail`** |
 
-규격/품종/중량 등은 기존 stock join으로 복원 가능하면 **중복 최소화**.
+**DDL·migration·운영 ALTER는 본 문서 승인만으로 실행하지 않는다** (로컬/테스트용은 별도 구현 지시).
+
+#### `t_auction_ship_master` (Header)
+
+| 컬럼 | 타입 | 의미 |
+|------|------|------|
+| `shipment_id` | TEXT **PK** | 서버 생성 **내부키**. 사용자 입력·화면 노출 **금지** |
+| `farm_cd` | TEXT NOT NULL | 농장 |
+| `ship_dt` | TEXT NOT NULL | 출하일 (YYYY-MM-DD) |
+| `market_cd` | TEXT NOT NULL | 시장 코드 — [§8B.5](#8b5-시장청과회사-ssot) |
+| `market_name` | TEXT NOT NULL | 출하 시점 **시장 표시 snapshot** |
+| `corporation_name` | TEXT NOT NULL | 출하 시점 **청과회사(법인) 표시 snapshot** |
+| `custm_id` | TEXT NULL | `m_customer` 매핑 있을 때만. **nullable** |
+| `status` | TEXT NOT NULL | v1 생성값 **`IN_TRANSIT`** ([§8B.3](#8b3-v1-상태)) |
+| `reg_id` | TEXT | 등록자 |
+| `reg_dt` | TEXT NOT NULL | 등록 시각 |
+| `mod_id` | TEXT NULL | (선택) 감사 — 기존 테이블 패턴 |
+| `mod_dt` | TEXT NULL | (선택) 감사 |
+
+#### `t_auction_ship_detail` (Line)
+
+| 컬럼 | 타입 | 의미 |
+|------|------|------|
+| `line_seq` | INTEGER **PK** AUTOINCREMENT | 라인 내부 식별 |
+| `shipment_id` | TEXT NOT NULL | → `t_auction_ship_master.shipment_id` |
+| `stock_seq` | INTEGER NOT NULL | → `t_stock_master.stock_seq`. **1 line = 1 stock row** |
+| `farm_shipped_qty` | REAL NOT NULL CHECK > 0 | 농장 출하수량 **원본** (UPDATE 덮어쓰기 **금지**) |
+| `company_confirmed_qty` | REAL NULL | 청과 확인수량 (nullable). 존재 여부로 확인 진행 표현 가능 |
+| `reg_dt` | TEXT NOT NULL | 등록 시각 |
+
+**v1에서 넣지 않음 (OPEN 후속):** `match_ref` · `sale_ref` · line `status` · settlement FK · qty diff 자동처리 필드 · `transit_qty` 누적.
+
+규격/품종/등급/중량 등은 **`stock_seq` → `t_stock_master` join**으로 복원 (중복 최소화).
+
+**권장 index (구현 시):** master (`farm_cd`, `status`); detail (`shipment_id`); detail (`stock_seq`) — active transit 집계용.
+
+### 8B.1 Stock cardinality (CLOSED)
+
+| 계층 | 계약 |
+|------|------|
+| **Mobile / 사용자** | **규격 단위 집계 row** 선택 · `stock_seq` **비노출** · 출하수량만 입력 |
+| **Server / Core** | 동일 규격에 stock row **여러 개**면 **`storage_dt ASC, rowid ASC` FIFO** 분할 ([`OrderAllocationService._fifo_stock_rows`](../../core/order_allocation_service.py) · [`OrderShipService`](../../core/order_ship_service.py)와 **동일 ordering**) |
+| **물리 line** | **1 shipment line = 1 `stock_seq`** |
+| **분할** | 사용자 규격 선택 1건 → shipment line **N건** 가능 |
+
+```
+Mobile spec row 1  →  Server FIFO  →  t_auction_ship_detail × N (각 stock_seq 1)
+```
+
+### 8B.2 Active transit 집계 (CLOSED)
+
+```
+active_auction_transit_qty(stock_seq) =
+  SUM(d.farm_shipped_qty)
+  FROM t_auction_ship_detail d
+  JOIN t_auction_ship_master m ON d.shipment_id = m.shipment_id
+  WHERE m.farm_cd = :farm
+    AND m.status = 'IN_TRANSIT'
+    AND d.stock_seq = :stock_seq
+```
+
+- v1 **active** = master `status = 'IN_TRANSIT'` line만.
+- `reserved_qty` / `out_qty` **미사용**.
+
+### 8B.3 v1 상태 (CLOSED — 생성)
+
+| 코드 | v1 | 의미 |
+|------|:--:|------|
+| **`IN_TRANSIT`** | **생성 시 설정** | 농장→시장 출하중 · active transit · 가용 제외 · 판매 아님 · reserved/out **불변** |
+
+**v1 비필수 / 금지:**
+
+- `CHECKED` 등 **별도 상태 전이 필수 아님** — `company_confirmed_qty` 입력만으로 확인 진행 표현 가능
+- `COMPLETED` · **`CANCELLED`** — v1 **구현 금지** (출하 취소/정정 = **CAN-DEFER**)
+
+**OPEN (후속):** 판매확정 후 잔여 transit 해소 · 취소/정정 · 확인/매칭 완료 상태 — [OPEN-SHIP-STATE](./07_decisions.md) **후속 OPEN**.
+
+### 8B.4 Legacy `AUCTION_RT` DRAFT
+
+`save_realtime_auction_draft` ([PC `market_price_page.py`](../../ui/pages/market_price_page.py)):
+
+- **CURRENT legacy** · 판매 DRAFT 저장 · 재고 **미접촉**
+- DEC-036 출하 SSOT **아님** · DEC-036에서 **재사용 금지**
+- **삭제하지 않음** · DEC-010 = **SUPERSEDED HISTORY**
+
+### 8B.5 시장·청과회사 SSOT (MVP CLOSED)
+
+| 항목 | SSOT | 비고 |
+|------|------|------|
+| 시장 코드 | `core/market_price_manager.py` **`MARKET_CODE_BY_NAME`** | 신규 market master **금지** |
+| Header 저장 | `market_cd` + `market_name` **snapshot** | |
+| 청과회사 표시 | `corporation_name` **필수 snapshot** | 전용 corporation master **금지** |
+| 거래처 연결 | `m_customer.custm_id` **nullable** | PC 법인→custm_id 매핑 패턴 재사용 |
+| 후보 목록 | `market_price_settlement.corporation` · `m_customer` | |
+| Mobile REST | **미구현** — 기존 map **read-only 노출** 우선 (path = 구현 단계) |
+
+매핑 없이 출하를 **막을지**는 API 구현 단계에서 조사.
+
+### 8B.6 DEC-037 경계 — 20 출하 / 19 확인
+
+DEC-037에서 **19**를 판매확정해도 DEC-036 shipment **전체 자동 종료 금지**.
+
+**금지:** 남은 **1** 자동 가용복귀 · 자동 폐기 · 자동 OUT · 자동 재고조정 · 「확정 = 출하 20 전체 종료」.
+
+잔여 transit 해소 = **OPEN-QTY-DIFF** + **DEC-037** 별도 확정. DEC-036 v1은 **판매확정 이전 active transit**까지 책임.
+
+### APPROVED LOGICAL (유지)
 
 - 출하 ≠ 판매 DRAFT · 출하중 ≠ `sales_status`.
-- `reserved_qty` 재사용 금지 · 출하 시 `out_qty` 선차감 금지.
-- 출하중 수량 = **유효 출하 라인 집계**. 취소/정정 라인은 active 집계에서 **제외 가능**해야 함.
+- `reserved_qty` 재사용 금지 · 출하 시 `out_qty` 선차감 금지 · `t_sales_master/detail` 생성 **금지**.
 - 단순 `transit_qty` 단독 SSOT **금지**.
-
-### OPEN PHYSICAL
-
-테이블명 · 컬럼명 · stock_seq 분할 cardinality · 상태코드(**OPEN-SHIP-STATE**) · 취소/정정 TX · PK/FK · **OPEN-DDL**.
+- 출하 시 `t_stock_log` **임의 추가 금지** (감사 필요성 확인 전).
 
 ---
 
@@ -422,7 +540,7 @@ available ≈ real - order_reserved - active_auction_transit
 1. 출하/매칭 원장 확인
 2. **최종 승인 판매수량** 확인
 3. **판매 생성 또는 기존 DRAFT 확정** → `CONFIRMED` *(목표에서 DRAFT 필수 여부 = OPEN)*
-4. `t_sales_detail` ↔ stock 추적 (`stock_seq` 등 · cardinality OPEN-DDL)
+4. `t_sales_detail` ↔ stock 추적 (`stock_seq` — DEC-036 line과 **별도** DEC-037 OUT 대상)
 5. `t_stock_master.out_qty` 증가 (최종 승인 수량)
 6. `t_stock_log` SALE OUT (`OUT` + `ref_type='SALE'`)
 7. S4A 자동분류 (`SA010200` / `SA020400` / `SA030300`)
@@ -553,7 +671,7 @@ t_stock_log                  =  HOLD / CANCEL_HOLD / OUT 이력 (현재상태 SS
 t_order_master.stock_status  =  전량 출고 시만 Y
 ```
 
-**APPROVED LOGICAL 추가 (물리 FK/테이블명 = OPEN-DDL):**
+**APPROVED PHYSICAL (DEC-036 — [§8B](#8b-경매-출하-물리계약-dec-036)):**
 
 ```
 [수확 DEC-035]
@@ -608,10 +726,12 @@ t_stock_master
 |------|------|------|
 | 수확 소진 `t_harvest_consumption` | DEC-035 | **OPS APPLIED** · **OPERATIONAL PASS** |
 | 생산확정 `prod_confirm_id` + PRODUCTION trace | DEC-035 | **OPS APPLIED** · `ref_type='PRODUCTION'` · `ref_id=prod_confirm_id` |
-| 경매 출하 헤더/라인 | DEC-036 | 논리 승인 · **OPEN-DDL** |
-| 출하/확인 수량 두 축 | DEC-036 | 논리 승인 · 물리명 미정 |
-| 출하 상태값 | OPEN-SHIP-STATE | **OPEN** |
-| 가용에서 출하중 제외 집계 | DEC-036 · §7.1 | 논리 승인 · SQL **OPEN** |
+| 경매 출하 `t_auction_ship_master` / `t_auction_ship_detail` | DEC-036 | **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** |
+| 출하/확인 수량 두 축 | DEC-036 | **APPROVED** (`farm_shipped_qty` / `company_confirmed_qty`) |
+| v1 출하 생성 상태 `IN_TRANSIT` | DEC-036 | **CLOSED** |
+| 출하 후속 상태(완료/취소/차이 종료) | OPEN-SHIP-STATE | **OPEN** (v1 생성 상태만 CLOSED) |
+| stock cardinality Mobile→FIFO→line | DEC-036 | **CLOSED** |
+| 가용에서 출하중 제외 집계 | DEC-036 · §7.1 | **APPROVED PHYSICAL** · 코드 **미적용** |
 
 ### 하지 않음
 
@@ -679,7 +799,7 @@ UNIQUE (farm_cd, order_detail_id, wh_cd, item_cd, variety_cd,
 17. 가용계산에 유효 출하중 미반영 시 과대계상.
 18. 주문 HOLD와 경매 출하 동시 요청 시 가용 중복 소비 위험 (§7.1).
 19. OPEN-QTY-DIFF 확정 전 차이수량 임의 재고조정 위험.
-20. 사용자 상품행과 `stock_seq` cardinality 조기 고정 위험 (OPEN-DDL).
+20. ~~사용자 상품행과 `stock_seq` cardinality 조기 고정~~ → **CLOSED** Mobile spec / Server FIFO / line=`stock_seq` ([§8B.1](#8b1-stock-cardinality-closed)).
 
 **원칙:** 배정·출고·(목표) 경매 출하 서비스는 BEGIN(가능하면 IMMEDIATE) 후 가용/배정수량을 **다시 SELECT** 하고 조건 불일치 시 rollback.
 
