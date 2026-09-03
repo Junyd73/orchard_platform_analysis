@@ -37,8 +37,6 @@ from core.order_constants import ORDER_STATUS_CANCEL_CD, ORDER_STATUS_LOCKED
 from core.order_service import OrderNotFoundError, OrderSaveError, OrderValidationError
 from core.stock_availability import (
     compute_available_qty,
-    get_active_auction_transit_map,
-    get_active_auction_transit_qty,
     stock_seq_column_ref,
     stock_seq_select_sql,
 )
@@ -153,15 +151,12 @@ class OrderAllocationService:
         cur = self.conn.cursor()
         try:
             cur.execute(sql, params)
-            transit_map = get_active_auction_transit_map(self.conn, farm)
             rows = []
             for row in cur.fetchall():
-                stock_seq = int(_as_float(_row_val(row, "stock_seq", 0)))
                 in_qty   = _as_float(_row_val(row, "in_qty", 10))
                 out_qty  = _as_float(_row_val(row, "out_qty", 11))
                 reserved = _as_float(_row_val(row, "reserved_qty", 12))
                 real_qty = in_qty - out_qty
-                transit = float(transit_map.get(stock_seq, 0.0))
                 rows.append(
                     {
                         "farm_cd":    str(_row_val(row, "farm_cd", 1) or ""),
@@ -178,7 +173,7 @@ class OrderAllocationService:
                         "real_qty":     real_qty,
                         "reserved_qty": reserved,
                         "available_qty": compute_available_qty(
-                            in_qty, out_qty, reserved, transit,
+                            in_qty, out_qty, reserved,
                         ),
                         "item_nm":    str(_row_val(row, "item_nm", 13) or ""),
                         "variety_nm": str(_row_val(row, "variety_nm", 14) or ""),
@@ -687,14 +682,11 @@ class OrderAllocationService:
             ),
         )
         out: list[dict[str, Any]] = []
-        transit_map = get_active_auction_transit_map(self.conn, farm)
         for row in cur.fetchall():
-            stock_seq = int(_as_float(_row_val(row, "stock_seq", 0)))
             in_qty = _as_float(_row_val(row, "in_qty", 9))
             out_qty = _as_float(_row_val(row, "out_qty", 10))
             reserved = _as_float(_row_val(row, "reserved_qty", 11))
-            transit = float(transit_map.get(stock_seq, 0.0))
-            avail = compute_available_qty(in_qty, out_qty, reserved, transit)
+            avail = compute_available_qty(in_qty, out_qty, reserved)
             if avail <= _QTY_EPS:
                 continue
             key = StockKey(
@@ -819,11 +811,7 @@ class OrderAllocationService:
         row = cur.fetchone()
         reserved = _as_float(row[0])
         real_qty = _as_float(row[1])
-        stock_seq = int(_as_float(row[2]))
-        transit = get_active_auction_transit_qty(
-            self.conn, farm_cd=key.farm_cd, stock_seq=stock_seq,
-        )
-        if reserved < -_QTY_EPS or reserved + transit - real_qty > _QTY_EPS:
+        if reserved < -_QTY_EPS or reserved - real_qty > _QTY_EPS:
             raise AllocationConflictError(MSG_ALLOC_INVARIANT)
 
     def _insert_log(

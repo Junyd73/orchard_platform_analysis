@@ -374,11 +374,24 @@ Stage 5 판매목록에서 추가로 보여줄 필드.
 사용자 라벨 예: **출하 준비** · **출하중** · **확인 완료** · **확인 필요** · **판매확정**
 실제 DB 상태코드 = v1 **`IN_TRANSIT`** (사용자 라벨 「출하중」 — [07 DEC-036](./07_decisions.md)).
 
-### 6.4 청과확인 · 차이 UX (TARGET)
+### 6.4 청과확인 · 차이 UX (TARGET · DEC-037 Stage E IMPLEMENTED)
+
+Mobile 재고 출하중 accordion → **[경락가 가져오기]**. 별도 메뉴/라우트 없음.
+
+흐름: 출하건 선택 → 경락가 가져오기 → 후보선택 → 수량확인 → 차이처리 → 최종확인 → 판매완료.
+
+- 기본 경락일자 `ship_dt-1` (단일 date). 기간 from~to 없음. 날짜 변경 시 선택/차이 초기화 후 재조회.
+- SETTLEMENT=정산자료, REALTIME=실시간 경락자료. katSale/katRealTime 비노출.
+- 후보 0건: 「선택한 날짜에 조건에 맞는 경락자료가 없습니다.」 (오류 아님).
+- source 장애: 자료 없음으로 위장 금지. 재시도 가능.
+- 복수 선택 · N단가 행 유지. REALTIME만 출하 규격에 있는 등급 선택. SETTLEMENT 등급 재선택 없음.
+- 규격 비교 `차이 = 경락 − 출하`. diff=0 정상(처리유형 없음). diff≠0 수량오류/반품처리/파손폐기/기타.
+- RETURN: 반품수량=abs(diff) 확인. stock_seq 선택 없음.
+- finalize 성공 후 COMPLETED. [경락가 가져오기] 비활성. `[경락매칭 정정]`은 `reopen_allowed=true`일 때만 (§6.6).
 
 출하 묶음 상세 — 상품별:
 
-`규격 | 출하 20 | 확인 19 | 차이 −1 | 경매단가/금액`
+`규격 | 출하 20 | 경락 19 | 차이 −1`
 
 | 원칙 | 내용 |
 |------|------|
@@ -389,12 +402,28 @@ Stage 5 판매목록에서 추가로 보여줄 필드.
 **차이 없음:** 판매확정으로 이어지는 UX **제안 가능**.
 **차이 있음:** **`확인 필요`**로 명확히. **판매확정 버튼 활성/비활성은 OPEN** (「출하 20/확인 19 → 바로 확정 가능」으로 **읽히게 쓰지 않음**).
 
-### 6.5 경매 판매확정 UX (TARGET · DEC-037)
+### 6.5 경매 판매확정 UX (DEC-037 Stage E IMPLEMENTED)
 
-요약: 시장/법인 · 상품 · **최종 승인수량** · 판매금액 · **차이 존재 여부**.
+최종확인: 경락일자 · 시장 · 청과회사 · 선택 건수 · 총 경락수량 · 예상 매출(표시만) · 규격별 차이/처리.
+CTA: **경락매칭 완료**. qty/price/amount는 서버로 보내지 않음. 판매 SSOT는 finalize 응답.
+stale candidate: 경락정보를 다시 불러와 주세요. 자동 재시도 금지.
+IN_TRANSIT 카드에서 경매출하 취소(확인 후, `cancel_allowed`만 — status 문자열로 버튼을 켜지 않음). COMPLETED 취소 없음. 정정 후 IN_TRANSIT은 `cancel_allowed=false`로 취소 숨김, [경락가 가져오기]는 유지. COMPLETED `[경락매칭 정정]`은 §6.6.
 자동(코드 **비노출**): 도매 · 경매판매 · 경매연동 (`SA010200` / `SA020400` / `SA030300`).
-CTA: **`판매확정`** → 기존 판매 목록/상세 · **수금 UX 재사용**.
-판매 DRAFT **필수 경유 UI는 미확정(OPEN)**.
+
+### 6.6 경락매칭 정정 UX (DEC-037 Stage F-3 IMPLEMENTED)
+
+COMPLETED + `reopen_allowed=true` → **[경락매칭 정정]**. 클릭 즉시 POST 금지. ODS confirm:
+
+- 현재 판매내역은 취소되고 다시 경락가를 선택해야 함
+- 경매출하·재고수량은 변경되지 않음
+- 정정 메모(선택) 1개. 미입력도 정상 (`remark` optional)
+- 확인 → `POST …/reopen`. 취소 → 변경 없음
+
+성공: dialog 닫기 · 후보 선택 초기화 · list 재조회 · `IN_TRANSIT` · `cancel_allowed=false` · [경락가 가져오기]로 기존 Stage E 재진입. AuctionMatchSheet 자동 오픈 없음. 과거 `cancelled_sales_no` 카드 상시 노출 없음. 안내: 「다시 경락가를 선택해 주세요.」
+
+차단(기술 code 비노출): 반품 `AUCTION_CORRECTION_RETURN` · 수금 `AUCTION_CORRECTION_PAYMENT` · 상태변경 `AUCTION_CORRECTION_STATUS` · MATCH/SALES fallback · 404. `reopen_allowed=false`면 정정 버튼 숨김(반품/수금 추측 문구 금지). CANCELLED는 경락가·취소·정정 없음.
+
+반품 IN 자동 reversal · 수금 취소는 **F-4 deferred**.
 
 ---
 
@@ -422,9 +451,9 @@ CTA: **`판매확정`** → 기존 판매 목록/상세 · **수금 UX 재사용
 ~~가락 DRAFT 확정 UI 후속~~ → **SUPERSEDED 표현.** TARGET은 **경매 넘기기 → 출하중 → 청과확인 → 판매확정** ([§5B](#5b-재고-선택--직접판매--경매-넘기기-dec-036--target) · [§6.3~6.5](#63-경매출하-구역-target--dec-036)).
 
 **OPEN (확정 금지 · 구현범위와 섞지 않음):**
-- OPEN-QTY-DIFF · OPEN-DONE · OPEN-SHIP-STATE **(후속)** · OPEN-AUCTION-MATCH-CARDINALITY · DEC-016 · 출하 취소/정정
+- OPEN-QTY-DIFF · OPEN-DONE · OPEN-SHIP-STATE **(후속)** · OPEN-AUCTION-MATCH-CARDINALITY · DEC-016 · 출하 정정(Stage F)
 - 판매 DRAFT **필수** 여부
-- 경매 출하 **취소/정정** UX
+- 경매 출하 **정정** UX (취소는 Stage E IMPLEMENTED)
 - HARVEST **잔량 API**
 - **차이 발생 시 판매확정 CTA** 활성/비활성 정책
 

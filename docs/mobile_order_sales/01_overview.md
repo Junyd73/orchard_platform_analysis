@@ -2,7 +2,7 @@
 
 > **현재 기준 (2026-08-31):** DEC-035 HARVEST N:M — **APPROVED** · **IMPLEMENTED** · **REHEARSAL PASS** · **OPS APPLIED** · **OPERATIONAL PASS** ([06](./06_development_progress.md) · [07 DEC-035](./07_decisions.md)).
 > Stage 6·Order→Ship·compact 목록 **운영 반영** (`fd963e0`) — DEC-035와 별개.
-> DEC-036 — **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED**. DEC-037 — **APPROVED LOGICAL** · **NOT IMPLEMENTED**.
+> DEC-036 — **Stage A IMPLEMENTED** (즉시 OUT). DEC-037 — **Stage B/C/D/E IMPLEMENTED** · **Stage F-1 Core** · **Stage F-2 REST** · **Stage F-3 Mobile IMPLEMENTED**. F-4 반품/수금 reverse pending.
 > **진행·게이트:** [06](./06_development_progress.md).
 
 **표현 4층 (본 문서):**

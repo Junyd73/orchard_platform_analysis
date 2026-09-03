@@ -156,27 +156,36 @@ git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS AP
 
 ### B. 경매 출하 — DEC-036
 
-**상태:** **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** (2026-08-31).
+**상태:** **APPROVED LOGICAL** · **APPROVED PHYSICAL** · **Stage A IMPLEMENTED** (2026-09-02).
 
-**TARGET:** 상품재고 다중선택 · 경매 넘기기 · `IN_TRANSIT` · `t_auction_ship_*` · 가용 transit 차감 · reserved/out/sales **불변**.
+**CURRENT:** 상품재고 다중선택 · 경매 넘기기 · `IN_TRANSIT` · 즉시 `out_qty` + `AUCTION_SHIP` log · available = in−out−reserved · Core 취소 `CANCELLED` · match 이력 있으면 취소 금지.
 
-**CLOSED:** physical DDL · stock cardinality · available 공식 · v1 `IN_TRANSIT` · market/corp MVP SSOT.
+**SUPERSEDED:** 출하 시 out 불변 · transit 가용차감.
 
-**OPEN:** OPEN-QTY-DIFF · OPEN-AUCTION-MATCH-CARDINALITY · OPEN-SHIP-STATE **(후속)** · REST path · 출하 취소/정정 · A3 상세/매칭.
+**OPEN:** 없음 (Stage A 유지).
 
 ### C. 청과 확인/매칭
 
-**TARGET:** 농장 출하수량 유지 · 청과 확인수량 별도 · 가격/경매결과 연결.
+**CURRENT (Stage B API + Stage E Mobile):** `GET /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}/auction-candidates?trade_dt=YYYY-MM-DD`.
+정산 API 원본 우선 → 유효 후보 0이면 realtime fallback. 기본 조회일 `ship_dt-1`. 사용자 최종 선택 · REALTIME 등급 · N행 유지. 0건은 empty UX.
 
-**OPEN:** OPEN-AUCTION-MATCH-CARDINALITY · 시장/법인 SSOT/API · 데이터 source · 자동/수동 매칭
+**OPEN:** 없음 (Stage E 재사용).
 
 ### D. 경매 판매확정 — DEC-037
 
-**TARGET:** 최종 승인수량 OUT · CONFIRMED · SALE stock log · 도매/경매판매/경매연동 자동 · 원자 TX.
+**CURRENT (Stage C Core):** 경락 원본 snapshot · spec별 `diff_qty = matched − farm_shipped` · discrepancy 필수(차이 시) · RETURN만 역FIFO IN · `sales_source=AUCTION` · `sales_dt=trade_dt` · `stock_seq=NULL` · gross 금액 · 추가 OUT/SALE log 없음 · `COMPLETED`. 클라이언트 qty/price/amount 미신뢰.
 
-**OPEN:** OPEN-QTY-DIFF · 차이 시 confirm 정책 · DRAFT 필수 여부 · DEC-016
+**CURRENT (Stage D REST):** shipment detail · list `status` · cancel · finalize. Core 호출만. 내부키 비노출. stale 409 · source error 502.
 
-**20→19 진행계획 (06 수준):** 최종 승인수량 = 판매 OUT · 차이 = OPEN-QTY-DIFF · 차이 **자동가용복귀/자동감모/출하 전체 자동종료 금지** · 차이 confirm 허용/차단 **결정 전 구현 금지**. 세부는 [07](./07_decisions.md) · [05](./05_api_contract.md).
+**CURRENT (Stage E Mobile):** 출하중 → 경락가 가져오기 → 후보선택 → 수량확인 → 차이처리 → 최종확인 → 판매완료. COMPLETED에서 경락가 가져오기 비활성. stale candidate UX. 정정은 F-3.
+
+**CURRENT (Stage F-1 Core):** `AuctionCorrectionService.reopen`. COMPLETED 경락매칭을 무효화하고 `IN_TRANSIT`으로 재매칭. 재고/`AUCTION_SHIP` OUT 불변. 기존 AUCTION 판매 `sales_status=CANCELLED`(DELETE 금지, detail 보존). match/discrepancy `is_valid=0`. 반품 IN·실수금 있으면 reject. match 이력이 있으면 경매출하 취소 영구 금지. CANCELLED는 활성 목록/매출/미수에서 제외. 새 finalize는 새 `sales_no`.
+
+**CURRENT (Stage F-2 REST):** `POST …/reopen` → Core `reopen`만. detail/list `cancel_allowed`/`reopen_allowed`. 반품/수금 409. 두 번째 reopen 409. 정정 후 IN_TRANSIT은 cancel 불가. 내부키 비노출.
+
+**CURRENT (Stage F-3 Mobile):** COMPLETED `[경락매칭 정정]` (`reopen_allowed`). confirm · optional remark · reopen POST. 성공 시 재고 불변 · `IN_TRANSIT` · `cancel_allowed=false` · 기존 Stage E 재매칭. 버튼은 서버 flags. CANCELLED 액션 없음. 반품/수금/STATUS/MATCH/SALES/404 한글 안내(code 비노출).
+
+**OPEN:** F-4 반품/수금 reverse · DEC-016.
 
 **CURRENT legacy:** PC `AUCTION_RT + DRAFT` 저장 경로는 **존재 가능** — **경매 출하 SSOT 아님**. DEC-010 = [HISTORY](#dec-010--draftconfirmed--history).
 
@@ -236,9 +245,9 @@ git main 반영 · ops 미배포: 6A~7B · S4A 등 — ops SHA · 필요 DDL · 
 | stock cardinality | **CLOSED** | Mobile spec → FIFO → line |
 | 시장/법인 MVP SSOT | **CLOSED** | map + snapshot |
 | 시장/법인 REST path | **OPEN** | 모바일 UX |
-| OPEN-AUCTION-MATCH-CARDINALITY | **OPEN** | 매칭 write 확정 전 |
-| OPEN-QTY-DIFF | **BLOCKER** | 경매 판매확정 전 |
-| 차이 시 confirm 정책 | **BLOCKER** | DEC-037 구현 전 |
+| OPEN-AUCTION-MATCH-CARDINALITY | **CLOSED (Core)** | 매칭 write 확정 전 |
+| OPEN-QTY-DIFF | **CLOSED (Core 처리유형)** | 경매 판매확정 전 |
+| 차이 시 confirm 정책 | **CLOSED (Core)** | DEC-037 구현 전 |
 | DRAFT 필수 여부 | **CAN-DEFER** | 구체 API 설계까지 |
 | DEC-016 | **CAN-DEFER** | 경매 confirm MVP와 분리 가능 |
 | 출하 취소/정정 | **CAN-DEFER** | 출하 v1 이후 |

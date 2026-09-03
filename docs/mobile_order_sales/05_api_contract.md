@@ -2,7 +2,7 @@
 
 > **범위:** 주문/판매/재고 조회 API. Stage 3A/5A allocation · Stage P 생산 · Stage 5B fruit-stock **구현 완료** (운영 DDL 미적용).
 > Stage 5C Core `OrderShipService.confirm()` **구현**. FastAPI `shipments` **마운트**. Mobile client `confirmShipment`. DEC-020 = **출고방식 축**.
-> 수확 N:M (DEC-035): **OPERATIONAL PASS** · **OPS APPLIED**. 경매 출하: [DEC-036](./07_decisions.md) — **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED**. 경매 판매확정: **DEC-037** — **APPROVED LOGICAL** · **NOT IMPLEMENTED**.
+> 수확 N:M (DEC-035): **OPERATIONAL PASS** · **OPS APPLIED**. 경매 출하: [DEC-036](./07_decisions.md) Stage A. 경매 판매확정: **DEC-037** Stage B/C Core · Stage D REST · Stage E Mobile UX **IMPLEMENTED**. Stage F-1 Core **IMPLEMENTED**. Stage F-2 reopen REST **IMPLEMENTED**. Stage F-3 Mobile UX **IMPLEMENTED**. F-4 반품/수금 reverse pending.
 > 마운트: `server/app/main.py` → `/api/v1` + `router.py`.
 > PC와 FastAPI가 SQL을 복제하지 않음. `core.order_service.OrderService` (DEC-007).
 
@@ -74,7 +74,7 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 
 | method | path | CURRENT | APPROVED LOGICAL |
 |--------|------|---------|------------------|
-| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B · CURRENT `available=real−reserved` | TARGET `available = real − reserved − active_auction_transit` ([03 §7.1](./03_data_contract.md)) |
+| GET | `/farms/{farm_cd}/fruit-stock` | Stage 5B · **Stage A** `available = in − out − reserved` |
 | GET | `/farms/{farm_cd}/fruit-stock/logs` | Stage 5B read-only | 유지 |
 | GET | `/farms/{farm_cd}/production/harvest-records` | + `harvest_year` · `consumed_container_qty` · `remaining_container_qty` | 유지 |
 | GET | `/farms/{farm_cd}/production/raw-stock` | 원물 가용 | 유지 |
@@ -153,8 +153,8 @@ Stage 2: 목록 GET + 신규 POST. 고객 테이블은 `m_customer`만.
 **APPROVED PHYSICAL API** (2026-08-31 — **코드 미적용**)
 
 ```
-available_qty = in_qty - out_qty - reserved_qty - active_auction_transit_qty
-active_auction_transit_qty = SUM(farm_shipped_qty) WHERE status='IN_TRANSIT' per stock_seq
+available_qty = in_qty - out_qty - reserved_qty
+# 경매보내기 시 out_qty 즉시 증가. active_auction_transit은 available에서 차감하지 않음.
 ```
 
 - **동일 공식**을 fruit-stock · allocation HOLD · DIRECT ship · 경매 출하 생성 **모든 재고소비 경로**에 적용 ([03 §7.1](./03_data_contract.md)).
@@ -431,11 +431,12 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 1. `BEGIN IMMEDIATE`
 2. 요청·시장(`MARKET_CODE_BY_NAME`)·법인 검증
 3. 규격별 **`storage_dt ASC, rowid ASC` FIFO** → `stock_seq` 후보
-4. **active transit 포함** `available_qty` 재검증 (규격 합계 ≤ 가용)
+4. `available_qty` 재검증 (`in - out - reserved`, transit **미차감**)
 5. `shipment_id` 생성 → **header INSERT** (`status='IN_TRANSIT'`, snapshot 필드)
 6. **`stock_seq`별 line INSERT** (`farm_shipped_qty`; 1 line = 1 `stock_seq`)
-7. `reserved_qty` / `out_qty` / `t_sales_*` / SALE log **변경 없음**
-8. COMMIT — 실패 시 **전체 rollback**
+7. 같은 TX: `out_qty += farm_shipped_qty` · `t_stock_log` OUT `ref_type=AUCTION_SHIP` `ref_id=shipment_id`
+8. `reserved_qty` / `t_sales_*` / SALE log **변경 없음**
+9. COMMIT — 실패 시 **전체 rollback**
 
 **Cardinality (CLOSED):** Mobile spec row 1 → Server FIFO → detail line **N**.
 
@@ -446,27 +447,43 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 - `shipment_id` · `stock_seq` — **사용자 화면 비노출** (DEC-021).
 - **OPEN:** exact path · paging · filter.
 
-### 9A.3 출하 상세 / 청과 확인 (A3)
+### 9A.3 출하 상세
 
-**후속 단계** — 본 물리설계에서 **필수 아님**.
+**CURRENT:** `GET /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}` — 상태 무관. business spec만 (`stock_seq`/`match_seq` 등 내부키 금지). COMPLETED이면 matched/diff/discrepancy_reason/gross 요약. `cancel_allowed` / `reopen_allowed` boolean (Core `get_action_permissions`, FastAPI SQL 복제 없음).
 
-논리: 규격(join stock) · `farm_shipped_qty` · `company_confirmed_qty` · 차이 · 매칭상태.
-
-**OPEN:** §9B · **OPEN-AUCTION-MATCH-CARDINALITY**.
+목록: `GET …/auction-shipments` default `status=IN_TRANSIT`. `COMPLETED`/`CANCELLED`만 추가 허용. `status=ALL` 없음. list 항목에도 동일 boolean — F-3이 IN_TRANSIT 카드에서 never-matched vs 정정 후를 N+1 detail 없이 구분.
 
 ### 9A.4 출하 취소/정정
 
-**CAN-DEFER** — v1 **미구현**. `CANCELLED` 상태 v1 **금지**.
+**CAN-DEFER REST** — ~~Stage D~~ **IMPLEMENTED**. Stage A **Core** `cancel_shipment`: `IN_TRANSIT` → `CANCELLED` + 재고 복구. DELETE 금지.
+
+`POST /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}/cancel` → Core `AuctionShipService.cancel_shipment`. `IN_TRANSIT`만. match 이력이 한 번이라도 있으면 거부(`AUCTION_SHIP_CANCEL_MATCHED`). 정정 후 IN_TRANSIT도 동일. 중복/COMPLETED = 409. `stock_seq` 미노출. `restored_qty`만.
+
+**Stage F-1 Core / F-2 REST (IMPLEMENTED):** `POST …/auction-shipments/{shipment_id}/reopen` → Core `AuctionCorrectionService.reopen`만. FastAPI write 금지. body `remark` optional (`AuctionReopenRequest`). 성공 `IN_TRANSIT` · `sales_no`/`match_trade_dt` null · `cancelled_sales_no`. 재고/`AUCTION_SHIP` OUT 불변. DELETE · `/correct` 금지.
+
+- 404: shipment 없음 / 다른 farm (`AUCTION_SHIP_NOT_FOUND`)
+- 409: 미완료·이미 reopen (`AUCTION_CORRECTION_STATUS`) · active match 없음 (`AUCTION_CORRECTION_MATCH`) · AUCTION+CONFIRMED 아님 (`AUCTION_CORRECTION_SALES`) · 반품 (`AUCTION_CORRECTION_RETURN`) · 실수금·부분수금 (`AUCTION_CORRECTION_PAYMENT`)
+- 두 번째 reopen = 409. boolean은 UX 보조. POST 시 Core가 재검증.
 
 ---
 
-## 9B. 청과 확인/매칭 API 논리 (DEC-036)
+## 9B. 청과 확인/매칭 API (DEC-037)
 
-**CURRENT**
+**CURRENT — Stage B 후보 조회**
 
-- PC: 실시간 경매 (`MarketPriceManager.fetch_real_time_data`) · `market_price_settlement` (스케줄러 적재).
-- PC: `save_realtime_auction_draft` (수동 매핑 → DRAFT).
-- **모바일 경매 매칭 REST 없음.**
+- `GET /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}/auction-candidates?trade_dt=YYYY-MM-DD` (필수 단일일).
+- UX 기본 날짜 계약: `ship_dt - 1일` (Mobile Stage E). API는 전달된 `trade_dt`를 바꾸지 않음.
+- source: 정산 외부 API (`MarketSettlementManager.fetch_settlement_data` / katSale) 우선. 유효 후보 0건이면 realtime (`MarketPriceManager.fetch_real_time_data`).
+- 두 source 혼합 금지. local `market_price_settlement`는 matching SSOT **아님**.
+- 자동필터: farm 소재지(시/군) · shipment `corporation_name` · variety · kg. 최종 행 선택은 사용자 (Stage E IMPLEMENTED).
+- REALTIME: `grade_cd`/`grade_name` = null, `requires_grade_input=true`. SETTLEMENT 등급은 원본 보존.
+- N원본행 유지 (평균가 GROUP BY 금지). `source_key` = SHA-256 fingerprint. `stock_seq` 미노출.
+- 저장/판매/재고 변경 없음. 정산 장애 ≠ 0건(realtime 위장 금지).
+
+**CURRENT PC legacy**
+
+- PC: 실시간 경매 · `market_price_settlement` (스케줄러 적재) · `save_realtime_auction_draft`.
+- **매칭 저장**은 Stage D `POST …/finalize` (아래 9C). Stage B GET은 조회만.
 
 **APPROVED LOGICAL — 필요 책임**
 
@@ -499,19 +516,33 @@ UI에서 상품별 **합산 표시**는 가능. API/DB cardinality = **OPEN**.
 
 ## 9C. 경매 판매확정 API (DEC-037)
 
-**APPROVED LOGICAL · endpoint path = OPEN.**
+**CURRENT — Stage D REST IMPLEMENTED (2026-09-02).**
+
+- `GET …/auction-shipments/{shipment_id}` 상세 (상태 무관)
+- `GET …/auction-shipments?status=IN_TRANSIT|COMPLETED|CANCELLED` (생략 시 IN_TRANSIT)
+- `POST …/auction-shipments/{shipment_id}/cancel` → Core `cancel_shipment`
+- `POST …/auction-shipments/{shipment_id}/finalize` → Core `AuctionFinalizeService.finalize`
+- `POST …/auction-shipments/{shipment_id}/reopen` → Core `AuctionCorrectionService.reopen` (F-2)
+- request: `trade_dt` + `selected_candidates.source_key` (+ REALTIME `user_grade_cd`) + discrepancy business spec. **qty/unit_price/amount 미수신**
+- 서버 candidate 재조회 SSOT. stale → 409 `AUCTION_CANDIDATE_STALE`
+- 정산/실시간 source error → 502 (`SETTLEMENT_SOURCE_ERROR` / `REALTIME_SOURCE_ERROR`)
+- 활성 `source_key` 전역 UNIQUE 유지. 다른 farm 동일 key → 409
+- 내부키 비노출. AUCTION 판매조회는 기존 `SalesQueryService` (stock_seq=NULL 호환). 대표중량 0은 후속.
+- Stage E Mobile UX **IMPLEMENTED**. Stage F-1 Core **IMPLEMENTED**. Stage F-2 reopen REST **IMPLEMENTED**. Stage F-3 Mobile UX **IMPLEMENTED**. F-4 deferred.
+
+`AuctionFinalizeService.finalize`: 서버 candidate 재조회 · client amount 미신뢰 · match snapshot · discrepancy · RETURN 역FIFO IN · `sales_source=AUCTION` · `stock_seq=NULL` · 추가 OUT/SALE log 0 · `COMPLETED`.
 
 `POST …/sales/{sales_no}/confirm` (DEC-010)을 새 SSOT로 **당연시하지 않는다.**
 
 ### 9C.1 논리 TX (실패 시 전체 rollback)
 
-1. 출하 묶음/라인 **유효성** 검증
-2. 청과 확인/매칭 검증
-3. **최종 승인 판매수량** 결정
-4. 판매 **생성** 또는 기존 DRAFT → `CONFIRMED` (**DRAFT 필수 여부 = OPEN**)
-5. `t_sales_detail` ↔ 실제 stock 추적 (DEC-037 OUT 대상 `stock_seq`)
-6. 최종 승인수량 기준 **`out_qty` 증가**
-7. `t_stock_log` SALE OUT (`ref_type=SALE`)
+1. 출하 `IN_TRANSIT` · `sales_no` NULL 검증
+2. 동일 `trade_dt` candidate 서버 재조회 · selected `source_key` 존재/중복 검증
+3. candidate → shipment spec 유일 매핑 (0/모호 reject)
+4. spec별 `diff_qty = matched − farm_shipped` · discrepancy completeness
+5. RETURN이면 원 `stock_seq` 역FIFO IN (`ref_type=AUCTION_SHIP`, remark `경매반품`)
+6. 판매 생성 `CONFIRMED` + `sales_source=AUCTION` · `sales_dt=trade_dt` · 1 match = 1 detail · `stock_seq=NULL`
+7. **추가 `out_qty`/SALE log 없음**
 8. **S4A 자동** (사용자 SA 선택 **금지**):
 
 | 축 | 코드 |
@@ -520,8 +551,9 @@ UI에서 상품별 **합산 표시**는 가능. API/DB cardinality = **OPEN**.
 | 판매구분 | `SA020400` (경매판매) |
 | 판매경로 | `SA030300` (경매연동) |
 
-9. **최종 승인수량에 해당하는 출하중 정산** (아래 §9C.2)
+9. shipment `COMPLETED` + `sales_no` + `match_trade_dt`
 10. (DEC-016 OPEN) `t_sales_delivery` 생성 여부 — **본 DEC에서 확정하지 않음**
+11. 정정 Core는 Stage F-1 (`reopen`). REST는 F-2 `POST …/reopen`. Mobile `[경락매칭 정정]`은 F-3 (`reopen_allowed`, confirm 후 reopen). COMPLETED 출하취소 불가. match 이력 있으면 IN_TRANSIT이어도 출하취소 불가. 반품/수금 reverse는 F-4.
 
 ### 9C.2 20 출하 / 19 확인 — OPEN-QTY-DIFF
 
@@ -616,9 +648,10 @@ UI에서 상품별 **합산 표시**는 가능. API/DB cardinality = **OPEN**.
 | sales GET/상세/payments | **구현** (payments private main) | 경매확정 후 재사용 | — |
 | sales POST/PUT/confirm | **미구현** | DEC-037 | **미구현** |
 | PC AUCTION_RT DRAFT | `save_realtime_auction_draft` | 출하 SSOT **아님** | PC only |
-| 경매 출하 | — | DEC-036 | **없음** |
-| 청과 매칭 | PC/DB only | DEC-036 | **없음** |
-| 경매 판매확정 | — | DEC-037 | **없음** |
+| 경매 출하 | CREATE + list/detail/cancel | DEC-036 | **IMPLEMENTED** (D) |
+| 청과 매칭 | candidate GET | DEC-037 B | **IMPLEMENTED** |
+| 경매 판매확정 | Core `finalize` + REST | DEC-037 Stage D | **IMPLEMENTED** |
+| 경락매칭 정정 | Core `reopen` + REST + Mobile UX | DEC-037 Stage F-2/F-3 | **IMPLEMENTED** (F-4 반품/수금 reverse pending) |
 
 **Stage P (로컬):** harvest-records, raw-stock, production/confirm. PROCESS `juice_item_cd`: `FR010202`/`FR010201`.
 

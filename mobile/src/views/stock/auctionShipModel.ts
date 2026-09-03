@@ -7,6 +7,8 @@ import type {
 } from '@/types/auctionShipment'
 
 export const AUCTION_STATUS_IN_TRANSIT = 'IN_TRANSIT'
+export const AUCTION_STATUS_COMPLETED = 'COMPLETED'
+export const AUCTION_STATUS_CANCELLED = 'CANCELLED'
 
 /** core/stock_constants.py FR010100 — 경매 출하 대상 상품 */
 export const ITEM_CD_PRODUCT = 'FR010100'
@@ -121,7 +123,21 @@ export function isAuctionQtyUnavailableError(err: unknown): boolean {
 /** DB status → 사용자 표시 */
 export function auctionShipmentStatusLabel(status: string): string {
   if (status === AUCTION_STATUS_IN_TRANSIT) return '출하중'
+  if (status === AUCTION_STATUS_COMPLETED) return '판매완료'
+  if (status === AUCTION_STATUS_CANCELLED) return '취소'
   return '처리중'
+}
+
+export function isAuctionCancelAllowed(ship: { cancel_allowed?: boolean }): boolean {
+  return ship.cancel_allowed === true
+}
+
+export function isAuctionReopenAllowed(ship: { reopen_allowed?: boolean }): boolean {
+  return ship.reopen_allowed === true
+}
+
+export function isAuctionMatchFetchAllowed(ship: { status: string }): boolean {
+  return String(ship.status || '').trim() === AUCTION_STATUS_IN_TRANSIT
 }
 
 export function shipDraftLinesToAuctionLines(

@@ -122,6 +122,18 @@ class AuctionShipApiTests(unittest.TestCase):
         self.assertAlmostEqual(body["total_shipped_qty"], 10.0)
         self.assertEqual(body["spec_count"], 1)
         self.assertNotIn("stock_seq", body)
+        out_qty = self.conn.execute(
+            "SELECT COALESCE(SUM(out_qty),0) FROM t_stock_master"
+        ).fetchone()[0]
+        self.assertAlmostEqual(float(out_qty), 10.0)
+        log = self.conn.execute(
+            "SELECT ref_type, io_type, ref_id, qty FROM t_stock_log WHERE ref_type='AUCTION_SHIP'"
+        ).fetchone()
+        self.assertIsNotNone(log)
+        self.assertEqual(str(log[0]), "AUCTION_SHIP")
+        self.assertEqual(str(log[1]), "OUT")
+        self.assertEqual(str(log[2]), body["shipment_id"])
+        self.assertAlmostEqual(float(log[3]), 10.0)
         reg_id = self.conn.execute(
             f"SELECT reg_id FROM {TABLE_AUCTION_SHIP_MASTER} LIMIT 1"
         ).fetchone()[0]
@@ -169,6 +181,10 @@ class AuctionShipApiTests(unittest.TestCase):
         self.assertEqual(body["spec_count"], 1)
         self.assertEqual(body["total_line_count"], 2)
         self.assertNotIn("stock_seq", json.dumps(body))
+        out_qty = self.conn.execute(
+            "SELECT COALESCE(SUM(out_qty),0) FROM t_stock_master"
+        ).fetchone()[0]
+        self.assertAlmostEqual(float(out_qty), 8.0)
         rows = self.conn.execute(
             f"SELECT stock_seq, farm_shipped_qty FROM {TABLE_AUCTION_SHIP_DETAIL} ORDER BY line_seq"
         ).fetchall()

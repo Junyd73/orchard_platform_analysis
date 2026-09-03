@@ -27,7 +27,7 @@ from core.sales_query_service import (  # noqa: E402
     SalesQueryValidationError,
     compute_payment_status,
 )
-from core.order_ship_constants import SALES_STATUS_CONFIRMED  # noqa: E402
+from core.order_ship_constants import SALES_STATUS_CANCELLED, SALES_STATUS_CONFIRMED  # noqa: E402
 from core.sales_payment_constants import SALES_STATUS_DRAFT  # noqa: E402
 
 FARM_A = "OR001"
@@ -246,6 +246,20 @@ class SalesQueryServiceTests(unittest.TestCase):
         self.assertEqual(res["total"], 2)
         statuses = {row["sales_status"] for row in res["items"]}
         self.assertEqual(statuses, {SALES_STATUS_CONFIRMED, SALES_STATUS_DRAFT})
+
+    def test_cancelled_excluded_from_default_list(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="C-01", sales_status=SALES_STATUS_CONFIRMED)
+        _insert_sale(cur, sales_no="X-01", sales_status=SALES_STATUS_CANCELLED, tot=99999)
+        self.conn.commit()
+        res = self.svc.list_sales(FARM_A)
+        nos = {row["sales_no"] for row in res["items"]}
+        self.assertIn("C-01", nos)
+        self.assertNotIn("X-01", nos)
+        detail = self.svc.get_sale_detail(FARM_A, "X-01")
+        self.assertEqual(detail["sales_status"], SALES_STATUS_CANCELLED)
+        self.assertAlmostEqual(self.svc.sum_active_unpaid_amt(FARM_A), 100000)
+        self.assertAlmostEqual(self.svc.sum_active_sales_amt(FARM_A, sales_dt="2026-08-22"), 100000)
 
     def test_sales_status_filter(self) -> None:
         cur = self.conn.cursor()

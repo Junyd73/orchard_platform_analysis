@@ -20,7 +20,7 @@ for p in (_SERVER, _ROOT):
 
 from core.account_manager import AccountManager  # noqa: E402
 from core.ops_biz_date import today_ops_iso  # noqa: E402
-from core.order_ship_constants import SALES_STATUS_CONFIRMED  # noqa: E402
+from core.order_ship_constants import SALES_STATUS_CANCELLED, SALES_STATUS_CONFIRMED  # noqa: E402
 from core.sales_payment_constants import (  # noqa: E402
     COLLECTION_STATUS_PAID,
     COLLECTION_STATUS_PARTIAL,
@@ -36,6 +36,7 @@ from core.sales_payment_constants import (  # noqa: E402
     MSG_PAY_METHOD_INVALID,
     MSG_SALES_DRAFT_PAYMENT_FORBIDDEN,
     MSG_SALES_NOT_FOUND,
+    MSG_SALES_STATUS_PAYMENT_FORBIDDEN,
     MSG_SOURCE_ORDER_MISMATCH,
     PAYMENT_STATUS_PAID,
     PAYMENT_STATUS_PARTIAL,
@@ -221,6 +222,15 @@ class SalesPaymentServiceTests(unittest.TestCase):
         with self.assertRaises(PaymentValidationError) as ctx:
             self._add(1000)
         self.assertIn(MSG_SALES_DRAFT_PAYMENT_FORBIDDEN, str(ctx.exception))
+        self.assertEqual(len(self._cash_rows()), 0)
+        self.assertEqual(len(self._ledger_active()), 0)
+
+    def test_cancelled_forbidden(self):
+        _insert_sales(self.conn.cursor(), status=SALES_STATUS_CANCELLED)
+        self.conn.commit()
+        with self.assertRaises(PaymentValidationError) as ctx:
+            self._add(1000)
+        self.assertIn(MSG_SALES_STATUS_PAYMENT_FORBIDDEN, str(ctx.exception))
         self.assertEqual(len(self._cash_rows()), 0)
         self.assertEqual(len(self._ledger_active()), 0)
 

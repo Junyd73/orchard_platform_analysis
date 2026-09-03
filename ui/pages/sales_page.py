@@ -10,6 +10,7 @@ from PyQt6.QtGui import QBrush, QColor, QRegularExpressionValidator
 from core.code_manager import CodeManager
 from core.stock_constants import ITEM_JUICE, JUICE_STOCK_ITEM_CDS, PARENT_PEAR_VARIETY
 from core.ops_biz_date import now_ops_str, today_ops
+from core.sales_query_constants import sales_status_not_cancelled_sql
 from ui.styles import MainStyles
 from core.account_manager import AccountManager
 from core.pc_sales_provenance import (
@@ -975,6 +976,7 @@ class SalesSearchDialog(QDialog):
                     M.rmk
                 FROM t_sales_master M
                 WHERE M.farm_cd = ? AND {sales_dt_norm} = ?
+                  AND {active_status}
             """
             params = [self.farm_cd, search_date]
 
@@ -984,7 +986,13 @@ class SalesSearchDialog(QDialog):
 
             query += " ORDER BY M.sales_no DESC"
 
-            cur.execute(query.format(sales_dt_norm=sales_dt_norm), params)
+            cur.execute(
+                query.format(
+                    sales_dt_norm=sales_dt_norm,
+                    active_status=sales_status_not_cancelled_sql("M"),
+                ),
+                params,
+            )
             rows = cur.fetchall()
 
             self.table.setRowCount(0)

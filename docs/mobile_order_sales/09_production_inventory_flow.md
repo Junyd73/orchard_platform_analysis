@@ -4,7 +4,7 @@
 > 주문/판매 상세는 [02_domain_flow.md](./02_domain_flow.md). 데이터 계약은 [03_data_contract.md](./03_data_contract.md).
 > OPEN-PROD-01~03 **CLOSED**. Stage P/5B/5C·출고 UX **운영 반영** (`fd963e0` 계열). *(역사 스냅샷의「main 미머지」는 [06](./06_development_progress.md) 역사 절 참고)*.
 >
-> **개정 (2026-08-31):** DEC-035 HARVEST N:M — **OPS APPLIED** · **OPERATIONAL PASS**. DEC-036 — **APPROVED PHYSICAL DESIGN** (`t_auction_ship_master`/`detail`) · **NOT IMPLEMENTED**. DEC-037 — 논리 승인 · 미구현.
+> **개정 (2026-09-03):** DEC-036 Stage A · DEC-037 Stage B/C Core · Stage D REST · Stage E Mobile · Stage F-1 Core · Stage F-2 REST · Stage F-3 Mobile IMPLEMENTED. F-4 반품/수금 reverse pending.
 
 ---
 
@@ -219,7 +219,7 @@ DEC-025 **유지** (`t_production_*` 풀세트 금지). DEC-035 **최소 소진�
 |------|------|
 | 출하 ≠ DRAFT | `t_sales_*` DRAFT는 **판매초안** 의미. **출하 SSOT로 쓰지 않음** |
 | `reserved_qty` | **주문 HOLD 전용**. 경매 출하중 **재사용 금지** |
-| 출하 시 `out_qty` | **선차감 금지**. 아직 판매 OUT 아님 |
+| 출하 시 `out_qty` | **즉시 증가** (Stage A). 경락매칭 추가 OUT 없음 |
 | 출하중 SSOT | **`t_auction_ship_master` + `t_auction_ship_detail`** ([03 §8B](./03_data_contract.md)). `transit_qty` 단독 SSOT **금지** |
 | 출하중 수량 | **`IN_TRANSIT` line**의 `farm_shipped_qty` **SUM** (stock_seq별) |
 | Line cardinality | Mobile **spec row** → Server **FIFO** → **1 line = 1 `stock_seq`** |
@@ -237,10 +237,10 @@ DEC-025 **유지** (`t_production_*` 풀세트 금지). DEC-035 **최소 소진�
 
 | 시점 | 재고 | 판매 |
 |------|------|------|
-| 출하(경매 넘기기) | 가용에서 **출하중 수량 제외** | 판매 생성 **아님** |
-| 판매확정 | **승인분** OUT · shipment **전체 자동종료 금지** ([03 §8B.6](./03_data_contract.md) · OPEN-QTY-DIFF) | CONFIRMED + 분류 자동 |
+| 출하(경매 넘기기) | **즉시 OUT** (`AUCTION_SHIP` log). available = in−out−reserved | 판매 생성 **아님** |
+| 판매확정 | **추가 OUT 없음** · shipment **전체 자동종료 금지** ([03 §8B.6](./03_data_contract.md) · OPEN-QTY-DIFF) | CONFIRMED + 분류 자동 |
 
-출하 시 OUT하지 않으므로 **이중 OUT 없음** (DEC-027 판매 OUT 원칙과 정합).
+재고 OUT은 경매보내기 시점에만 한다. 경락매칭에서 추가 OUT하지 않으므로 **이중 OUT 없음**.
 
 기존 `save_realtime_auction_draft`는 **판매 DRAFT 저장**일 뿐이며, 본 절의 **출하중 SSOT가 아니다**.
 
@@ -568,11 +568,10 @@ reserved_qty  = t_stock_master.reserved_qty         # 주문 배정 (HOLD) — �
 ```
 
 **가용재고(개념):** 새로 배정·판매·경매 넘기기에 쓸 수 있는 수량.
-주문 HOLD(`reserved`)뿐 아니라 **유효한 경매 출하중 수량도 제외**한다.
+주문 HOLD(`reserved`)만 제외한다. 경매 출하중은 `out_qty`에 이미 포함.
 
 ```
-available_qty = real_qty - reserved_qty - active_auction_transit_qty
-active_auction_transit_qty = SUM(farm_shipped_qty) from IN_TRANSIT lines per stock_seq
+available_qty = real_qty - reserved_qty
 ```
 
 | 용어 | 의미 |
@@ -582,8 +581,8 @@ active_auction_transit_qty = SUM(farm_shipped_qty) from IN_TRANSIT lines per sto
 | 출하중 | `t_auction_ship_*` · v1 `IN_TRANSIT` |
 | 가용재고 | 위 공식 — **모든 재고소비 경로 SSOT** ([03 §7.1](./03_data_contract.md)) |
 
-배정 예: 현재 30 · HOLD 10 → 배정 10 · (출하중 0이면) 가용 20.
-~~SUPERSEDED: `available = real − reserved`만으로 충분하다는 기존 암시~~ — [부록](#부록-superseded--현행-코드-스냅샷).
+배정 예: 현재 30 · HOLD 10 → 배정 10 · 가용 20. 경매출하 후 out에 이미 포함되므로 transit을 다시 빼지 않는다.
+~~SUPERSEDED: available에서 `active_auction_transit` 추가 차감~~ — [부록](#부록-superseded--현행-코드-스냅샷).
 
 ### 14.1 가용과 출하중
 
@@ -593,10 +592,10 @@ active_auction_transit_qty = SUM(farm_shipped_qty) from IN_TRANSIT lines per sto
 | active transit | master `status = 'IN_TRANSIT'` |
 | 집계 | line `farm_shipped_qty` SUM per `stock_seq` |
 | `reserved_qty` | 주문 HOLD only |
-| 출하 시 `out_qty` | **증가 없음** |
-| 판매확정 | **승인분 OUT** — shipment 전체 자동종료 **금지** |
+| 출하 시 `out_qty` | **즉시 증가** (AUCTION_SHIP log) |
+| 판매확정 | **추가 OUT 없음** — Stage C 매출만 |
 
-물리 DDL = [03 §8B](./03_data_contract.md) **APPROVED** · 코드 **미적용**.
+물리 DDL = [03 §8B](./03_data_contract.md) **APPROVED** · Stage A **코드 적용**.
 
 ---
 
@@ -797,7 +796,7 @@ consume: `shipped_qty +=` (allocated 유지) + `reserved −` + `out +` 동일 T
 `OrderShipService.confirm()` **구현**. HTTP `POST /api/v1/farms/{farm_cd}/shipments/confirm`. `stock_seq`는 Client가 고르지 않음.
 
 **경매와의 분리:**
-DEC-027의 **판매 OUT**은 **판매확정** 시점. 경매 **출하중**은 OUT/`reserved`가 아니다 ([§2.3.1](#231-경매출하--출하중)). 경매 판매확정 TX = **[DEC-037](./07_decisions.md)** (DEC-010 SUPERSEDED · 원자성 승계).
+DEC-027의 **판매 OUT**은 소매 출고확정 시점. 경매는 **보내기 시 OUT** (`AUCTION_SHIP`)이며 경락매칭에서 추가 OUT하지 않는다 ([§2.3.1](#231-경매출하--출하중)). 경매 판매확정 TX = **[DEC-037](./07_decisions.md)** (판매·매칭 원자성).
 
 ---
 
@@ -813,7 +812,7 @@ DEC-027의 **판매 OUT**은 **판매확정** 시점. 경매 **출하중**은 OU
 | **DEC-026** | **유지** — 동일 품종 / harvest_year |
 | **DEC-025** | **보완 DEC 검토 후보** — `t_production_*` 풀세트 금지는 유지. **최소 소진이력·최소 출하 묶음/라인** |
 | **DEC-010** | **SUPERSEDED** — DRAFT→CONFIRMED+OUT 단일 TX. 후계 **DEC-036**(출하) / **DEC-037**(판매확정+OUT 원자성) |
-| **DEC-027** | **유지 + 분리** — 판매확정 OUT. 출하중≠out/reserved |
+| **DEC-027** | **유지 + 분리** — 소매 판매확정 OUT. 경매 OUT은 보내기 시점 (`AUCTION_SHIP`) |
 
 ---
 

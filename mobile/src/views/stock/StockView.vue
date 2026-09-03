@@ -26,15 +26,35 @@ import {
   reasonAllowsIn,
   reasonAllowsOut,
 } from '@/views/stock/stockAdjustConstants'
-import { listAuctionShipments } from '@/api/auctionShipments'
+import { cancelAuctionShipment, listAuctionShipments } from '@/api/auctionShipments'
 import type { AuctionShipmentListItem } from '@/types/auctionShipment'
 import AuctionShipConfirmSheet from '@/views/stock/AuctionShipConfirmSheet.vue'
+import AuctionMatchSheet from '@/views/stock/AuctionMatchSheet.vue'
+import AuctionReopenConfirmSheet from '@/views/stock/AuctionReopenConfirmSheet.vue'
 import {
   auctionShipmentStatusLabel,
+  AUCTION_STATUS_CANCELLED,
+  AUCTION_STATUS_COMPLETED,
+  AUCTION_STATUS_IN_TRANSIT,
+  isAuctionCancelAllowed,
+  isAuctionMatchFetchAllowed,
+  isAuctionReopenAllowed,
   MSG_AUCTION_SHIP_OK,
   MSG_AUCTION_STOCK_REFRESH_FAIL,
   refreshAuctionShipLines,
 } from '@/views/stock/auctionShipModel'
+import {
+  auctionMatchUserMessage,
+  formatWon,
+  isStatusConflictError,
+  mergeShipmentLists,
+  MSG_AUCTION_CANCEL_CONFIRM,
+  MSG_AUCTION_CANCEL_OK,
+  MSG_AUCTION_REOPEN_NOT_FOUND,
+  MSG_AUCTION_REOPEN_OK,
+  MSG_AUCTION_REOPEN_STATUS,
+  sortAuctionShipments,
+} from '@/views/stock/auctionMatchModel'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
 const ITEM_PRODUCT = 'FR010100'
@@ -443,6 +463,11 @@ const transitOpen = ref(false)
 const transitLoading = ref(false)
 const transitError = ref('')
 const transitShipments = ref<AuctionShipmentListItem[]>([])
+const transitCancelBusy = ref(false)
+const matchSheetOpen = ref(false)
+const matchShipmentId = ref('')
+const reopenSheetOpen = ref(false)
+const reopenShipmentId = ref('')
 
 function closeAuctionSheet() {
   auctionSheetOpen.value = false
@@ -492,15 +517,98 @@ async function loadTransitShipments() {
   transitLoading.value = true
   transitError.value = ''
   try {
-    const page = await listAuctionShipments(farmCd.value)
-    transitShipments.value = (page.items ?? []).filter(
-      (item) => item.status === 'IN_TRANSIT',
-    )
+    const pages = await Promise.all([
+      listAuctionShipments(farmCd.value, { status: AUCTION_STATUS_IN_TRANSIT }),
+      listAuctionShipments(farmCd.value, { status: AUCTION_STATUS_COMPLETED }),
+      listAuctionShipments(farmCd.value, { status: AUCTION_STATUS_CANCELLED }),
+    ])
+    transitShipments.value = sortAuctionShipments(mergeShipmentLists(pages))
   } catch {
     transitShipments.value = []
     transitError.value = '출하중 목록을 불러오지 못했습니다.'
   } finally {
     transitLoading.value = false
+  }
+}
+
+function openAuctionMatch(ship: AuctionShipmentListItem) {
+  if (!isAuctionMatchFetchAllowed(ship) || transitCancelBusy.value || reopenSheetOpen.value) return
+  matchShipmentId.value = ship.shipment_id
+  matchSheetOpen.value = true
+}
+
+function closeAuctionMatch() {
+  matchSheetOpen.value = false
+  matchShipmentId.value = ''
+}
+
+function openAuctionReopen(ship: AuctionShipmentListItem) {
+  if (!isAuctionReopenAllowed(ship) || transitCancelBusy.value || reopenSheetOpen.value) return
+  reopenShipmentId.value = ship.shipment_id
+  reopenSheetOpen.value = true
+}
+
+function closeAuctionReopen() {
+  reopenSheetOpen.value = false
+  reopenShipmentId.value = ''
+}
+
+function onAuctionReopenSuccess() {
+  reopenSheetOpen.value = false
+  reopenShipmentId.value = ''
+  closeAuctionMatch()
+  pageSuccess.value = MSG_AUCTION_REOPEN_OK
+  void load()
+  void loadTransitShipments()
+}
+
+function onAuctionReopenSettled() {
+  void loadTransitShipments()
+}
+
+function onAuctionReopenStatusConflict() {
+  transitError.value = MSG_AUCTION_REOPEN_STATUS
+}
+
+function onAuctionReopenNotFound() {
+  closeAuctionMatch()
+  transitError.value = MSG_AUCTION_REOPEN_NOT_FOUND
+}
+
+function onAuctionMatchSuccess() {
+  void load()
+  void loadTransitShipments()
+}
+
+function onAuctionMatchStatusConflict() {
+  pageSuccess.value = ''
+  closeAuctionMatch()
+  void load()
+  void loadTransitShipments()
+}
+
+async function cancelTransitShipment(ship: AuctionShipmentListItem) {
+  if (
+    !isAuctionCancelAllowed(ship)
+    || transitCancelBusy.value
+    || reopenSheetOpen.value
+    || !farmCd.value
+  ) return
+  if (!window.confirm(MSG_AUCTION_CANCEL_CONFIRM)) return
+  transitCancelBusy.value = true
+  transitError.value = ''
+  try {
+    await cancelAuctionShipment(farmCd.value, ship.shipment_id)
+    pageSuccess.value = MSG_AUCTION_CANCEL_OK
+    void load()
+    void loadTransitShipments()
+  } catch (err) {
+    transitError.value = auctionMatchUserMessage(err)
+    if (isStatusConflictError(err)) {
+      void loadTransitShipments()
+    }
+  } finally {
+    transitCancelBusy.value = false
   }
 }
 
@@ -745,8 +853,8 @@ const stockBatchDockStyle = {
       <p v-if="transitError" class="stock-view__transit-err">{{ transitError }}</p>
       <ul v-if="transitOpen && transitShipments.length" class="stock-view__transit-list">
         <li
-          v-for="(ship, idx) in transitShipments"
-          :key="`${ship.ship_dt}-${ship.market_cd}-${ship.reg_dt}-${idx}`"
+          v-for="ship in transitShipments"
+          :key="ship.shipment_id"
           class="stock-view__transit-item"
           data-testid="auction-transit-item"
         >
@@ -755,7 +863,45 @@ const stockBatchDockStyle = {
           </span>
           <span class="stock-view__transit-sub">
             출하 {{ ship.total_shipped_qty }}박스 · {{ auctionShipmentStatusLabel(ship.status) }}
+            <template v-if="ship.status === AUCTION_STATUS_COMPLETED && ship.gross_sales_amount">
+              · {{ formatWon(ship.gross_sales_amount) }}
+            </template>
           </span>
+          <div class="stock-view__transit-actions">
+            <OdsButton
+              v-if="ship.status !== AUCTION_STATUS_CANCELLED"
+              type="button"
+              :block="false"
+              :disabled="!isAuctionMatchFetchAllowed(ship) || transitCancelBusy || reopenSheetOpen"
+              data-testid="auction-match-open"
+              @click="openAuctionMatch(ship)"
+            >
+              경락가 가져오기
+            </OdsButton>
+            <OdsButton
+              v-if="isAuctionCancelAllowed(ship)"
+              type="button"
+              variant="secondary"
+              :block="false"
+              :busy="transitCancelBusy"
+              :disabled="transitCancelBusy || matchSheetOpen || reopenSheetOpen"
+              data-testid="auction-ship-cancel"
+              @click="cancelTransitShipment(ship)"
+            >
+              경매출하 취소
+            </OdsButton>
+            <OdsButton
+              v-if="isAuctionReopenAllowed(ship)"
+              type="button"
+              variant="secondary"
+              :block="false"
+              :disabled="transitCancelBusy || matchSheetOpen || reopenSheetOpen"
+              data-testid="auction-reopen-open"
+              @click="openAuctionReopen(ship)"
+            >
+              경락매칭 정정
+            </OdsButton>
+          </div>
         </li>
       </ul>
       <p
@@ -1032,6 +1178,24 @@ const stockBatchDockStyle = {
       @close="closeAuctionSheet"
       @success="onAuctionShipSuccess"
       @qty-unavailable="onAuctionQtyUnavailable"
+    />
+    <AuctionMatchSheet
+      :open="matchSheetOpen"
+      :farm-cd="farmCd || ''"
+      :shipment-id="matchShipmentId"
+      @close="closeAuctionMatch"
+      @success="onAuctionMatchSuccess"
+      @status-conflict="onAuctionMatchStatusConflict"
+    />
+    <AuctionReopenConfirmSheet
+      :open="reopenSheetOpen"
+      :farm-cd="farmCd || ''"
+      :shipment-id="reopenShipmentId"
+      @close="closeAuctionReopen"
+      @success="onAuctionReopenSuccess"
+      @settled="onAuctionReopenSettled"
+      @status-conflict="onAuctionReopenStatusConflict"
+      @not-found="onAuctionReopenNotFound"
     />
 
     <!-- 재고 이력 bottom sheet -->
@@ -1515,6 +1679,13 @@ const stockBatchDockStyle = {
 .stock-view__transit-sub {
   font: var(--ods-font-footnote);
   color: var(--ods-color-text-secondary);
+}
+.stock-view__transit-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ods-space-6);
+  margin-top: var(--ods-space-6);
 }
 .stock-view__transit-err,
 .stock-view__transit-empty {

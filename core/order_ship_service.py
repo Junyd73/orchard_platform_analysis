@@ -18,11 +18,7 @@ from core.order_constants import (
     WAREHOUSE_CD_DEFAULT,
 )
 from core.order_service import OrderNotFoundError, OrderSaveError
-from core.stock_availability import (
-    compute_available_qty,
-    get_active_auction_transit_map,
-    stock_row_available_qty,
-)
+from core.stock_availability import compute_available_qty
 from core.order_ship_constants import (
     CODE_DIRECT_SALES_CATEGORY_INVALID,
     CODE_DIRECT_SALES_CATEGORY_REQUIRED,
@@ -1156,12 +1152,10 @@ class OrderShipService:
             ),
         )
         out: list[dict[str, Any]] = []
-        transit_map = get_active_auction_transit_map(self.conn, farm)
         for row in cur.fetchall():
             stock = self._stock_dict(row)
-            transit = float(transit_map.get(int(stock["stock_seq"]), 0.0))
             avail = compute_available_qty(
-                stock["in_qty"], stock["out_qty"], stock["reserved_qty"], transit,
+                stock["in_qty"], stock["out_qty"], stock["reserved_qty"],
             )
             if avail <= _QTY_EPS:
                 continue

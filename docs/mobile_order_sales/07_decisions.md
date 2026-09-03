@@ -658,8 +658,8 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | | |
 |--|--|
-| 상태 | **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** — **2026-08-31 대표** (물리설계 확정) |
-| 업무 흐름 | `상품 가용 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → DEC-037 판매확정` |
+| 상태 | **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **Stage A IMPLEMENTED** (즉시 OUT) — **2026-09-02** |
+| 업무 흐름 | `상품 가용 → 경매 넘기기(즉시 OUT) → 출하중 IN_TRANSIT → 청과 확인/매칭 → DEC-037 판매확정(추가 OUT 없음)` |
 | 물리 | **`t_auction_ship_master`** · **`t_auction_ship_detail`** ([03 §8B](./03_data_contract.md)) |
 | 결정 | 아래. |
 
@@ -668,30 +668,39 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 3. Header: `shipment_id`(내부) · `farm_cd` · `ship_dt` · `market_cd`/`market_name` · `corporation_name` · `custm_id` nullable · `status` · 감사.
 4. Line: `line_seq` · `shipment_id` · **`stock_seq`** · `farm_shipped_qty` · `company_confirmed_qty` nullable · `reg_dt`.
 5. **Cardinality CLOSED:** Mobile **규격 집계 row** → Server **FIFO** → **1 line = 1 `stock_seq`**. `stock_seq` **비노출**.
-6. 농장 출하수량 **원본 보존** — 확인수량으로 **덮어쓰기 금지**. 차이 처리 = **OPEN-QTY-DIFF**.
-7. **가용 (CLOSED):** `available = in_qty - out_qty - reserved_qty - active_auction_transit_qty`. active = `IN_TRANSIT` line `farm_shipped_qty` SUM. **모든 재고소비 경로 일관 적용** ([03 §7.1](./03_data_contract.md)).
-8. 출하 시 **`reserved_qty`/`out_qty`/`t_sales_*` 불변**. SALE `t_stock_log` **없음**.
-9. v1 생성 상태 **`IN_TRANSIT` only**. `CHECKED`/`COMPLETED`/`CANCELLED` v1 **금지**. 취소/정정 = **CAN-DEFER**.
-10. **20→19:** DEC-037 판매확정 시 shipment **전체 자동종료·잔량 자동가용복귀 금지** ([03 §8B.6](./03_data_contract.md)).
+6. 농장 출하수량 **원본 보존** — 확인수량으로 **덮어쓰기 금지**. 차이 처리 = **OPEN-QTY-DIFF** (재고 추가 OUT 없음 · Stage C discrepancy).
+7. **가용 (Stage A SUPERSEDE):** `available = in_qty - out_qty - reserved_qty`. `active_auction_transit`는 **available 차감 금지** (출하중 업무 표시용만). `reserved_qty` = 주문 HOLD 전용.
+8. **경매보내기 즉시 OUT (Stage A SUPERSEDE):** 같은 TX에서 `out_qty` 증가 + `t_stock_log` `io_type=OUT` · `ref_type=AUCTION_SHIP` · `ref_id=shipment_id`. `reserved_qty`/`t_sales_*`/SALE log **불변**.
+9. 생성 상태 **`IN_TRANSIT`**. 매칭 전 취소 → Core `CANCELLED` + 재고 복구(IN 로그). `COMPLETED` = Stage C. REST cancel = Stage D.
+10. **경락매칭/판매완료 시 추가 OUT 금지** (이미 출하 시 OUT). 반품만 추후 IN.
 11. 시장 = `MARKET_CODE_BY_NAME` 재사용. 법인 = `corporation_name` snapshot + `custm_id` nullable. **신규 master 금지**.
 12. UX: `stock_seq`·출하 내부키 **비노출**. 다선택 [경매 넘기기].
 13. `save_realtime_auction_draft` = **legacy 유지** · DEC-036 **재사용 금지**.
+
+**Stage A SUPERSEDE (2026-09-02):** 출하 시 `out_qty` 불변 · available에서 active transit 차감 · 출하중은 out 아님 → **폐기**.
+
+**향후 계약 (Stage B/C, 본 Stage 미구현):**
+
+- local `market_price_settlement`는 경락매칭 SSOT **아님** (origin 없음 · N단가 UNIQUE 붕괴). Stage B는 정산 **API 원본** 우선, 없으면 realtime fallback.
+- 신규 경매판매 `sales_source=AUCTION` (`AUCTION_RT` 재사용 금지).
+- 경매 `t_sales_detail.stock_seq` = **NULL**. 재고 추적 SSOT = shipment_detail.stock_seq.
+- Mobile TEST는 pre-auction **clean baseline** (`AUC20260831-001` 127박스 legacy 사용 금지).
 
 | CLOSED (2026-08-31) | 내용 |
 |---------------------|------|
 | Physical structure | `t_auction_ship_master` / `t_auction_ship_detail` |
 | Stock cardinality | Mobile spec → FIFO → `stock_seq` line |
-| Active transit available | §7.1 공식 + SSOT 적용 범위 |
+| Active transit available | **SUPERSEDED Stage A** — available에서 제외. 출하중 표시용 helper만 유지 |
 | v1 `IN_TRANSIT` | 생성 상태 |
 | Market/corporation MVP SSOT | 기존 map + snapshot (REST path = 구현 후속) |
 
 | OPEN | 내용 |
 |------|------|
-| OPEN-SHIP-STATE | **후속** 완료/취소/차이 종료 상태 (v1 생성만 CLOSED) |
-| OPEN-QTY-DIFF | 출하/확인 차이 · 잔여 transit 해소 |
-| OPEN-AUCTION-MATCH-CARDINALITY | 출하line ↔ settlement |
-| 출하 취소·정정 | v1 미구현 |
-| Mobile market/corp REST path | 구현 단계 |
+| OPEN-QTY-DIFF | 출하/경락 수량차이 · Stage C discrepancy (재고 추가 OUT 없음) |
+| OPEN-AUCTION-MATCH-CARDINALITY | 출하 규격 ↔ N 경락행 (Stage C) |
+| OPEN-SHIP-STATE | **후속** `COMPLETED` (Stage C). Stage A: `IN_TRANSIT` + Core `CANCELLED` |
+| 출하 취소 REST | **IMPLEMENTED** (Stage D). Core cancel = Stage A |
+| Mobile market/corp REST path | 구현됨 (C1). 경락 후보 GET = Stage B IMPLEMENTED |
 
 | 관련 | DEC-021 · **025** · **027** · **037** · [09 §2.3.1·§14.1](./09_production_inventory_flow.md) · [03 §8B](./03_data_contract.md) · [05 §9A](./05_api_contract.md) |
 | 승인 | **2026-08-27** 논리 · **2026-08-31** 물리 |
@@ -700,18 +709,32 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 ## DEC-037
 
-**경매 판매확정은 최종 승인수량을 기준으로 판매·재고 OUT을 원자적으로 처리하고 판매분류를 자동 설정한다.**
+**경매 판매확정은 경락 원본·수량차이·판매를 원자적으로 처리하고 판매분류를 자동 설정한다. 재고 추가 OUT은 하지 않는다.**
 
 | | |
 |--|--|
-| 상태 | **APPROVED** (설계. **구현·DDL 아님**) — **2026-08-27 대표** |
+| 상태 | **APPROVED** (설계) · **Stage B/C/D/E IMPLEMENTED** · **Stage F-1 Core IMPLEMENTED** · **Stage F-2 REST IMPLEMENTED** · **Stage F-3 Mobile IMPLEMENTED** (2026-09-03) — F-4 반품/수금 reverse pending |
 | 결정 | 아래. |
 
 1. **DEC-036** 출하중(`IN_TRANSIT`) 이후 청과 확인/매칭을 거쳐 **판매확정**.
-2. 판매확정 시 **승인분에 대한 출하중 정산**만 허용. shipment **전체 자동 종료 금지** ([DEC-036 §8B.6](./03_data_contract.md) · OPEN-QTY-DIFF).
-3. **최종 승인된 판매수량** 기준으로 상품재고 **OUT**. 출하 시 OUT하지 않음 → **이중 OUT 금지**.
-4. 판매 생성/`CONFIRMED` + 재고 OUT + stock log = **하나의 원자적 업무 TX**. 하나라도 실패하면 **전체 rollback**.
-5. **DEC-010**이 남긴 원칙을 승계: **판매확정 + 재고 OUT은 원자 TX · 실패 시 rollback**.
+2. 판매확정 시 shipment를 **판매완료(`COMPLETED`)** 처리할 수 있다 (Stage C). 재고 **추가 OUT 금지**.
+3. **Stage A SUPERSEDE:** 재고 OUT은 경매보내기 시점. 경락매칭에서 `out_qty`/SALE stock OUT **하지 않음**. 반품만 IN.
+4. 판매 생성/`CONFIRMED` = **원자적 업무 TX** (match + sales). 하나라도 실패하면 **전체 rollback**. 재고 OUT은 이 TX에 포함하지 않음.
+5. **DEC-010** 원자성 중 **판매확정 rollback**만 승계. 재고 OUT 원자 결합은 Stage A에서 출하 TX로 이동.
+
+**Stage B (2026-09-02 IMPLEMENTED):** 경락후보 조회만. 특정일 `trade_dt` · 정산 API 원본 우선 · 유효 0건 시 realtime · local settlement table 미사용 · farm 시/군·법인·품종·kg 자동필터 · 최종 선택은 사용자 · realtime 등급 입력 필요 · N행 보존 · 저장/재고 변경 없음.
+
+**Stage C (2026-09-02 IMPLEMENTED, Core only):** `AuctionFinalizeService`. 서버 candidate 재조회 후 selected `source_key` snapshot. 클라이언트 qty/price/amount 미신뢰. stale key reject. `(source_key) WHERE is_valid=1` 전역 활성 UNIQUE. 같은 외부 경락 원본행은 농장이 달라도 두 shipment에 매칭 불가. 내부 spec(`spec_*_cd`)과 외부 `source_grade_*` 분리. 비교단위 = shipment spec (variety+grade+size+weight), 1 spec ↔ N match. SETTLEMENT는 등급/크기 **이름** normalize, REALTIME은 사용자 `grade_cd` + size name. `diff_qty = matched_qty − farm_shipped_qty`. diff=0이면 discrepancy 없음(보내면 reject). diff≠0이면 spec당 활성 discrepancy 1건 필수 (`QTY_ERROR`/`RETURN`/`DAMAGE`/`OTHER`). RETURN만 `in_qty` 역FIFO IN + `AUCTION_SHIP` IN log (`경매반품`). 판매 `sales_source=AUCTION` · `sales_dt=trade_dt` · 1 match = 1 sales_detail · `stock_seq=NULL` · gross(수수료/운송 차감 0) · 추가 OUT/SALE log 0 · shipment `COMPLETED` + `sales_no`/`match_trade_dt`. 중복 finalize 거부. 정정은 Stage F.
+
+**Stage D (2026-09-02 IMPLEMENTED, REST):** shipment 상세 GET · list `status=IN_TRANSIT|COMPLETED|CANCELLED` (default IN_TRANSIT) · cancel REST → Core `cancel_shipment` · finalize REST → Core `finalize`. client qty/price 미수신. stale `AUCTION_CANDIDATE_STALE` 409. 외부 source 502. 전역 source_key unique 유지. 내부키 비노출. AUCTION 판매조회 기존 query 재사용 (`stock_seq=NULL`).
+
+**Stage E (2026-09-02 IMPLEMENTED, Mobile UX):** 출하중 accordion에서 반자동 경락매칭. 기본 `trade_dt=ship_dt-1` (단일 날짜). 정산자료/실시간 경락자료 표시(API명 비노출). 후보 0건은 정상 empty UX. source 장애는 자료 없음으로 위장하지 않음. 복수 후보 선택 · REALTIME은 출하 규격 등급만 선택 · SETTLEMENT 등급 재선택 없음. 규격별 `diff=matched−shipped`. diff=0 discrepancy 없음. diff≠0이면 수량오류/반품/파손/기타. RETURN은 반품수량 확인. finalize는 `source_key`(+등급)만 전송(qty/price/amount/내부키 금지). stale 시 선택 초기화·날짜 유지·자동 재시도 금지. COMPLETED에서 경락가 가져오기 비활성. 정정은 F-2 REST + F-3 Mobile.
+
+**Stage F-1 (2026-09-02 IMPLEMENTED, Core):** 경락매칭 정정은 재고업무가 아님. 최초 `AUCTION_SHIP` OUT 불변. `AuctionCorrectionService.reopen`: COMPLETED + active match + AUCTION CONFIRMED 판매 + 반품없음 + 실수금없음. 기존 sales soft `CANCELLED`(detail/history 보존, rmk에 `경락매칭 정정` append). match/discrepancy `is_valid=0`(DELETE 금지). shipment `IN_TRANSIT` + `sales_no`/`match_trade_dt` NULL. 이후 기존 finalize → 새 `sales_no`. match 이력 있으면 `cancel_shipment` 영구 거부. CANCELLED는 활성 판매목록/매출/미수에서 제외. F-4 반품/수금 reverse **pending**. DDL 0.
+
+**Stage F-2 (2026-09-02 IMPLEMENTED, REST):** `POST …/auction-shipments/{shipment_id}/reopen` → Core `reopen`만. FastAPI write 금지. `remark` optional. 성공 `IN_TRANSIT` · `sales_no`/`match_trade_dt` null · `cancelled_sales_no`. 반품 `AUCTION_CORRECTION_RETURN` 409 · 실수금 `AUCTION_CORRECTION_PAYMENT` 409 · 두 번째 reopen `AUCTION_CORRECTION_STATUS` 409. detail/list `cancel_allowed`/`reopen_allowed` (Core `get_action_permissions`). 정정 후 IN_TRANSIT은 cancel 불가·never-matched는 cancel 가능. 내부키 비노출.
+
+**Stage F-3 (2026-09-03 IMPLEMENTED, Mobile UX):** COMPLETED `[경락매칭 정정]` (`reopen_allowed`). ODS confirm · 재고 불변 안내 · optional remark · reopen POST. 성공 후 `IN_TRANSIT` · `cancel_allowed=false` · 후보 초기화 · 기존 Stage E [경락가 가져오기] 재사용(시트 자동오픈 없음). 버튼은 서버 flags(status 단독 금지). CANCELLED 액션 없음. RETURN/PAYMENT/STATUS/MATCH/SALES/404 한글 안내(code 비노출). 반품 IN reversal·수금 취소는 **F-4 deferred**.
 
 **경매 판매분류 자동** (사용자 선택 **금지**):
 
@@ -751,10 +774,10 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 
 | ID | 상태 | 내용 |
 |----|------|------|
-| **OPEN-QTY-DIFF** | **OPEN** | 출하수량 ≠ 청과확인수량 · **잔여 transit 해소** · 감모·반입·정정·재고조정·회계 |
+| **OPEN-QTY-DIFF** | **CLOSED (Core)** | spec별 discrepancy 유형 확정. 회계/정정은 Stage F · REST는 D |
 | **OPEN-DONE** | **OPEN** | HARVEST `DONE` **최종 의미**. (잔량 SSOT로 쓰지 않음은 DEC-035에서 확정) |
-| **OPEN-SHIP-STATE** | **OPEN** (후속) | v1 **`IN_TRANSIT` 생성 = CLOSED**. 완료/취소/차이 종료 상태는 **후속** |
-| **OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** | 출하line ↔ 청과 경매결과 cardinality. 상세 [05 §9B](./05_api_contract.md) |
+| **OPEN-SHIP-STATE** | **CLOSED (Core COMPLETED + Stage D REST)** | `IN_TRANSIT`/`CANCELLED`/`COMPLETED`. list `status` filter |
+| **OPEN-AUCTION-MATCH-CARDINALITY** | **CLOSED (Core + Stage D REST)** | 1 shipment spec ↔ N match_detail |
 | **DEC-016** | **OPEN** | 경매 판매확정 시 `t_sales_delivery` 생성 여부 |
 
 **CLOSED (2026-08-31 — DEC-036 물리):** 경매 출하 **`t_auction_ship_master`/`detail`** · stock cardinality · active transit available · market/corp MVP SSOT · v1 `IN_TRANSIT`. (구 **OPEN-DDL** 해당 항목 **CLOSED**.)
@@ -770,12 +793,12 @@ DDL: `core/sales_stock_trace_schema.ensure_sales_stock_trace_schema`. 운영 자
 | DEC-001 ~ 009, **011** ~ 014, **017** ~ **027**, **028** ~ **034** | APPROVED 또는 CLOSED. 020 **저장 필드**만 OPEN |
 | **DEC-010** | **SUPERSEDED** (2026-08-27) → 후계 **036/037** |
 | **DEC-035** | **OPERATIONAL PASS** |
-| **DEC-036** | **APPROVED LOGICAL** · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED** |
-| **DEC-037** | **APPROVED LOGICAL** · **NOT IMPLEMENTED** |
+| **DEC-036** | **APPROVED LOGICAL** · **APPROVED PHYSICAL** · **Stage A IMPLEMENTED** (즉시 OUT · transit 가용차감 제거 · Core 취소) |
+| **DEC-037** | **APPROVED LOGICAL** · **Stage B/C/D/E IMPLEMENTED** · **Stage F-1 Core IMPLEMENTED** · **Stage F-2 REST IMPLEMENTED** · **Stage F-3 Mobile IMPLEMENTED**. F-4 반품/수금 reverse pending. **판매확정 시 추가 OUT 없음** |
 | DEC-015, **016** | **OPEN** |
 | **OPEN-PROD-01~03** | **CLOSED** |
-| **OPEN-QTY-DIFF · OPEN-DONE · OPEN-AUCTION-MATCH-CARDINALITY** | **OPEN** |
-| **OPEN-SHIP-STATE** | **OPEN** (후속) — v1 `IN_TRANSIT` **CLOSED** |
+| **OPEN-QTY-DIFF · OPEN-AUCTION-MATCH-CARDINALITY · OPEN-SHIP-STATE(Core)** | **CLOSED (Stage C Core)** — F-4 반품/수금 reverse deferred |
+| **OPEN-DONE** | **OPEN** |
 | DEC-036 physical (구 OPEN-DDL) | **CLOSED** (2026-08-31) |
 
 2026-08-21 갱신: **DEC-019 APPROVED**(선입금 순차 배분) · **DEC-028 신규 APPROVED**(주문 선입금 결제수단) · **DEC-029 신규 APPROVED**(판매상태 ≠ 수금상태). DEC-016은 계속 OPEN이며 이번에 승인하지 않았다.

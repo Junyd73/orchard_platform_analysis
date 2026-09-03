@@ -142,7 +142,7 @@ migration 직전 운영 점검 필수 → §15.
 |------|------|------|------|
 | sales_dt | YYYY-MM-DD | 판매화면 ISO / **주문경로 YYYYMMDD** | 신규 ISO (DEC-012). 과거 변환 없음 |
 | sales_tp | RETAIL/WHOLE | 주문 `'NORMAL'` | 정리 제안, 1차 비범위 가능. **임의 폐기 금지** |
-| sales_status / sales_source | 문서 없음 | ALTER 후 사용 | **`DRAFT`/`CONFIRMED` 두 값만** (DEC-029). ORDER/AUCTION_RT **호환 유지** |
+| sales_status / sales_source | 문서 없음 | ALTER 후 사용 | **`DRAFT`/`CONFIRMED`/`CANCELLED`** (DEC-029 + F-1). `AUCTION_CANCELLED` 금지. ORDER/AUCTION/AUCTION_RT **호환 유지** |
 | sales_type_cd / sales_category_cd / sales_route_cd | — | S4A canonical (**CURRENT PHYSICAL**) | 아래 §4.2. 경매 확정 자동값은 [DEC-037](./07_decisions.md) |
 | tot_sales_amt / tot_paid_amt / tot_unpaid_amt | 있음 | 판매금액 / 수금액 / 미수금 | **수금 SSOT는 `t_cash_ledger` SUM.** master `tot_paid_amt`/`tot_unpaid_amt`는 동기화·조회용 (개발순서 3 `SalesPaymentService`) |
 | order_no | 문서 없음 | 주문 INSERT만. **재저장 시 누락**. UNIQUE 없음 | 출고마다 동일 `order_no` 가능 → **주문 1:N 판매 SSOT** (DEC-017). 재저장 보존 |
@@ -154,7 +154,8 @@ migration 직전 운영 점검 필수 → §15.
 - **출하중은 `sales_status`가 아님** ([DEC-036](./07_decisions.md) · [02 §8.2](./02_domain_flow.md)).
 - `SHIPPED` / `TRANSIT` 등 **신규 `sales_status` 금지**.
 - **CURRENT:** `AUCTION_RT`+`DRAFT` 존재 가능. **출하중 SSOT가 아님**.
-- 경매 **판매확정** = [DEC-037](./07_decisions.md) (`CONFIRMED` + OUT 원자 TX).
+- 경매 **판매확정** = [DEC-037](./07_decisions.md) (`CONFIRMED` + 추가 OUT 없음).
+- 경매 **정정** = 기존 AUCTION 판매 `CANCELLED`(soft, DELETE 금지) + 새 finalize `sales_no`. 활성 집계에서 CANCELLED 제외.
 
 ### 4.1 수금상태는 계산값 (DEC-029 APPROVED · Stage6-0 통일)
 
@@ -262,7 +263,7 @@ surrogate PK `stock_seq` — **추적키만** (DEC-027). 업무키를 대체하�
 | 컬럼 | 의미 | PC / 설계 |
 |------|------|-----------|
 | in_qty | 입고 누적 | 원물등록·**생산확정 상품 IN** |
-| out_qty | 출고·폐기·**생산 원물 OUT** | `save_production_log` 원물 차감. **경매 출하 시 증가 금지** (DEC-036) |
+| out_qty | 출고·폐기·생산 원물 OUT · **경매보내기 즉시 OUT (Stage A)** | `save_production_log` 원물 차감. 경락매칭 추가 OUT **금지** |
 | reserved_qty | Hold | Stage 5A **주문 배정만**. **OUT 아님** · **경매 출하중 아님** |
 | real_qty | 계산 (컬럼 아님) | `in_qty - out_qty` **현재고**. Mobile 재계산 금지 |
 | available_qty | 계산 (컬럼 아님) | 아래 CURRENT / APPROVED LOGICAL |
@@ -279,38 +280,23 @@ Hold UPDATE WHERE에 `item_cd`/`weight`/`wh_cd` 누락 (2933행) — P0.
 
 ### 7.1 가용과 경매 출하중
 
-**CURRENT PHYSICAL:**
+**CURRENT PHYSICAL (Stage A · 2026-09-02 SUPERSEDE):**
 
 ```
 real_qty      = in_qty - out_qty
 available_qty = real_qty - reserved_qty
 ```
 
-Core/API가 위 식으로 표시·배정 검증.
+경매보내기 시 `out_qty`가 즉시 증가하므로 available에서 `active_auction_transit`을 **빼지 않는다** (이중차감 금지).
 
-**APPROVED PHYSICAL DESIGN ([DEC-036](./07_decisions.md) · [09 §14.1](./09_production_inventory_flow.md) · [02 §14](./02_domain_flow.md) · **2026-08-31 대표 승인**):**
+`active_auction_transit_qty` = IN_TRANSIT line SUM — **출하중 업무 표시용**. available 인자 **금지**. `t_stock_master.transit_qty` **추가 금지**.
 
-```
-real_qty                   = in_qty - out_qty
-active_auction_transit_qty = SUM(farm_shipped_qty)   -- status=IN_TRANSIT shipment line only
-available_qty              = real_qty - reserved_qty - active_auction_transit_qty
-```
+- `reserved_qty` = **주문 HOLD 전용**.
+- 경매 출하 시 `out_qty` **증가** · `t_sales_*` **생성 금지** · SALE log **금지** · `ref_type=AUCTION_SHIP` OUT log **필수**.
 
-- `reserved_qty` = **주문 HOLD 전용** (의미·컬럼 **변경 없음**).
-- `active_auction_transit_qty` = `t_auction_ship_detail` ↔ `t_auction_ship_master` **집계** ([§8B](#8b-경매-출하-물리계약-dec-036)). `t_stock_master.transit_qty` **추가 금지**.
-- 경매 출하 시 `out_qty` **증가 금지** · `t_sales_*` **생성 금지**.
+**구 DEC-036 (SUPERSEDED):** `available = real - reserved - active_auction_transit` · 출하 시 out 불변.
 
-**SSOT 적용 범위 (구현 시 일관 필수 — 화면표시만 수정 금지):**
-
-- `GET …/fruit-stock` 조회
-- 주문 allocation/HOLD 가용검증 (`OrderAllocationService`)
-- DIRECT 판매/출고 가용검증 (`OrderShipService`)
-- 경매 출하 생성 가용검증
-- 기타 **실제 상품재고 소비** 경로
-
-한 경로에서 transit 집계를 **무시**하면 동일 재고 **이중사용** 가능 → **금지**. 구현 시 공통 helper 또는 **동등한 단일 책임** 지점 우선 (helper **이름은 구현 단계에서 확정**).
-
-**동시성 (APPROVED PHYSICAL):** 경매 출하 생성 = `BEGIN IMMEDIATE` → 가용 재검증 → header/line INSERT → COMMIT. 실패 시 **전체 rollback**. `reserved_qty` / `out_qty` / `t_sales_*` / SALE `t_stock_log` **변경 없음**.
+**동시성:** 경매 출하 생성 = `BEGIN IMMEDIATE` → 가용 재검증 → header/line INSERT → `out_qty` + AUCTION_SHIP log → COMMIT. 실패 시 **전체 rollback**.
 
 **데이터 품질 (CURRENT 관찰 · DEC-036 범위 밖):** 일부 row에서 `out_qty > in_qty`로 **음수 가용** 가능. **자동 보정·clamp·DB 수정 금지**. 구현 시 `available_qty <= 0` → 경매 선택 불가 · 서버 출하 **reject**. 정리는 **별도 작업**.
 
@@ -347,7 +333,7 @@ available_qty              = real_qty - reserved_qty - active_auction_transit_qt
 - [DEC-035](./07_decisions.md) 수확 N:M **소진 SSOT로 사용 금지**.
 - [DEC-036](./07_decisions.md) 경매 출하 묶음/라인 **SSOT로 사용 금지**.
 - 출하중 표현용 **신규 io_type 임의 확정 금지**.
-- [DEC-037](./07_decisions.md) 최종 판매 OUT은 기존 **`OUT` + `ref_type='SALE'`** 계약과 정합.
+- [DEC-037](./07_decisions.md) 경매 finalize는 SALE stock log를 만들지 않는다. 반품만 `AUCTION_SHIP` IN.
 - `t_stock_log` = **감사/이력**. 출하 **현재상태 원장이 아님**.
 
 ---
@@ -478,20 +464,16 @@ active_auction_transit_qty(stock_seq) =
 ```
 
 - v1 **active** = master `status = 'IN_TRANSIT'` line만.
-- `reserved_qty` / `out_qty` **미사용**.
+- **Stage A:** 이 집계는 출하중 **표시**용. `available` 계산·`reserved_qty`와 **무관**. 재고 차감은 `out_qty`.
 
 ### 8B.3 v1 상태 (CLOSED — 생성)
 
 | 코드 | v1 | 의미 |
 |------|:--:|------|
-| **`IN_TRANSIT`** | **생성 시 설정** | 농장→시장 출하중 · active transit · 가용 제외 · 판매 아님 · reserved/out **불변** |
+| **`IN_TRANSIT`** | **생성 시 설정** | 농장→시장 출하중 · **이미 out_qty 반영** · 판매 아님 · reserved **불변** |
+| **`CANCELLED`** | Stage A Core | 매칭 전 취소 · 재고 복구 · DELETE 금지 |
 
-**v1 비필수 / 금지:**
-
-- `CHECKED` 등 **별도 상태 전이 필수 아님** — `company_confirmed_qty` 입력만으로 확인 진행 표현 가능
-- `COMPLETED` · **`CANCELLED`** — v1 **구현 금지** (출하 취소/정정 = **CAN-DEFER**)
-
-**OPEN (후속):** 판매확정 후 잔여 transit 해소 · 취소/정정 · 확인/매칭 완료 상태 — [OPEN-SHIP-STATE](./07_decisions.md) **후속 OPEN**.
+`COMPLETED` = Stage C. REST cancel = **Stage D IMPLEMENTED**.
 
 ### 8B.4 Legacy `AUCTION_RT` DRAFT
 
@@ -525,35 +507,30 @@ DEC-037에서 **19**를 판매확정해도 DEC-036 shipment **전체 자동 종�
 ### APPROVED LOGICAL (유지)
 
 - 출하 ≠ 판매 DRAFT · 출하중 ≠ `sales_status`.
-- `reserved_qty` 재사용 금지 · 출하 시 `out_qty` 선차감 금지 · `t_sales_master/detail` 생성 **금지**.
-- 단순 `transit_qty` 단독 SSOT **금지**.
-- 출하 시 `t_stock_log` **임의 추가 금지** (감사 필요성 확인 전).
+- 출하 시 `t_sales_*` 생성 **금지**.
+- `transit_qty` 단독 SSOT **금지**.
+- 출하 시 `t_stock_log` **`AUCTION_SHIP` OUT 필수**. SALE log 금지.
 
 ---
 
 ## 8C. 경매 판매확정 연결계약 (DEC-037)
 
-상세: [09 §5.3](./09_production_inventory_flow.md) · [02 §6.2](./02_domain_flow.md). **설계 APPROVED · 구현·DDL 아님.** DEC-010 **SUPERSEDED** 원자성 승계.
+상세: [09 §5.3](./09_production_inventory_flow.md) · [02 §6.2](./02_domain_flow.md). **Stage C Core + Stage D REST IMPLEMENTED.**
 
 개념 TX (실패 시 **전체 rollback**):
 
-1. 출하/매칭 원장 확인
-2. **최종 승인 판매수량** 확인
-3. **판매 생성 또는 기존 DRAFT 확정** → `CONFIRMED` *(목표에서 DRAFT 필수 여부 = OPEN)*
-4. `t_sales_detail` ↔ stock 추적 (`stock_seq` — DEC-036 line과 **별도** DEC-037 OUT 대상)
-5. `t_stock_master.out_qty` 증가 (최종 승인 수량)
-6. `t_stock_log` SALE OUT (`OUT` + `ref_type='SALE'`)
-7. S4A 자동분류 (`SA010200` / `SA020400` / `SA030300`)
+1. 서버 candidate 재조회 · selected `source_key` 검증 (client amount 미신뢰)
+2. candidate → shipment spec 유일 매핑 (내부 spec vs 외부 source grade 분리)
+3. spec별 `diff_qty = matched − farm_shipped`. 차이 시 discrepancy 1건
+4. RETURN이면 역FIFO `in_qty` + `AUCTION_SHIP` IN log. 추가 OUT/SALE log **0**
+5. `t_sales_master` `sales_source=AUCTION` · `sales_dt=trade_dt` · gross
+6. 1 match = 1 `t_sales_detail` · `stock_seq=NULL`
+7. shipment `COMPLETED` + `sales_no`/`match_trade_dt`
 8. rollback on failure
 
-- 출하 시 OUT **없음** → **이중 OUT 금지**.
-- `t_sales_detail.qty` = **최종 승인 판매수량** 축. 출하/확인 **원본은 출하 원장에 유지**.
-
-**예 (20 출하 / 19 확인):** 판매확정 19 → OUT 19.
-남은 차이 1을 자동 가용복귀·자동 OUT·감모·반입·재고조정 중 무엇으로 할지는 **OPEN-QTY-DIFF**.
-「판매확정 시 출하라인 전체가 자동 종료된다」고 **단정하지 않는다**.
-
-문구: **최종 승인수량은 판매 OUT 처리한다. 출하수량과 최종 승인수량의 미해결 차이분이 이후 가용·출하중·조정 중 어디에 귀속되는지는 OPEN-QTY-DIFF이며 임의 처리하지 않는다.**
+- 활성 `source_key`는 전역 UNIQUE (`is_valid=1`). 같은 외부 경락행은 농장이 달라도 중복 매칭 불가.
+- `t_sales_detail.qty` = 서버 candidate 수량. 출하 원본은 shipment detail 유지.
+- 경락수량 > 출하수량 허용 (`QTY_ERROR`/`OTHER`). 재고를 판매수량에 맞추지 않음.
 
 [DEC-016](./07_decisions.md) delivery 생성 여부 **OPEN**.
 

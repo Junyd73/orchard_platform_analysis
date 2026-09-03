@@ -82,15 +82,15 @@ DIRECT 출고: allocation/HOLD 없이 가능 (DEC-020). `allocated_qty=0`은 정
 ```
 상품재고(가용)
  → [경매 넘기기]          ← 출하중 시작 (판매 아님)
- → 출하중                 ← DRAFT 아님 · 가용에서 제외 · reserved/out 아님
- → 청과 확인/매칭         ← 농장 출하수량 · 청과 확인수량 이중 보존
- → 판매확정 (DEC-037)     ← 최종 승인 수량 OUT · SA 자동 · 원자 TX
+ → 출하중                 ← DRAFT 아님 · 재고는 이미 OUT · status IN_TRANSIT
+ → 청과 확인/매칭         ← 농장 출하수량 · 경락수량 이중 보존 · 추가 OUT 없음
+ → 판매확정 (DEC-037)     ← 매출 확정 · SA 자동 · 재고 OUT 없음
  → 정산
 ```
 
 - **출하중**은 판매가 **아님**. **판매 DRAFT가 아님**.
-- 출하 시 가용에서 제외하되 `reserved_qty` 사용·`out_qty` 선차감 **금지**.
-- 판매확정은 [DEC-037](./07_decisions.md).
+- 출하 시 `out_qty` 즉시 증가. `reserved_qty` 사용 금지.
+- 판매확정은 [DEC-037](./07_decisions.md) — **추가 OUT 없음**.
 - **OPEN:** 목표 흐름에서 판매 **DRAFT 단계가 필수인지**는 미확정 (현재 코드 사실과 섞지 않음).
 
 #### 현재 코드
@@ -270,31 +270,31 @@ allocation 불필요. 위 STOCK 식을 적용하지 않음.
 
 상세: [03 §8B](./03_data_contract.md) · [09 §2.3.1](./09_production_inventory_flow.md) · [05 §9A](./05_api_contract.md).
 
-**상태:** APPROVED LOGICAL · **APPROVED PHYSICAL DESIGN** · **NOT IMPLEMENTED**.
+**상태:** APPROVED LOGICAL · **APPROVED PHYSICAL** · **Stage A IMPLEMENTED**.
 
 - 복수 **규격 집계 row** [경매 넘기기] → Server **FIFO** → `t_auction_ship_detail` (**1 line = 1 `stock_seq`**).
-- SSOT: **`t_auction_ship_master` / `t_auction_ship_detail`**. v1 `status = IN_TRANSIT`.
-- **경매 출하 ≠ 판매 DRAFT** · 출하 시 `reserved`/`out`/`t_sales_*` **불변**.
-- 가용: `in − out − reserved − active_auction_transit` — **모든 재고소비 경로** ([03 §7.1](./03_data_contract.md)).
-- **농장 출하수량** 원본 · **청과 확인수량** 별도 · 차이 = OPEN-QTY-DIFF.
-- **20→19:** DEC-037 판매확정 시 shipment **전체 자동종료·잔량 자동복귀 금지**.
+- SSOT: **`t_auction_ship_master` / `t_auction_ship_detail`**. 생성 `status = IN_TRANSIT`.
+- **경매 출하 ≠ 판매 DRAFT** · 출하 시 `reserved`/`t_sales_*` **불변** · **`out_qty` 즉시 증가**.
+- 가용: `in − out − reserved` — transit **미차감** ([03 §7.1](./03_data_contract.md)).
+- **농장 출하수량** 원본 · 경락 매칭 = Stage C.
+- 매칭 전 취소: Core `CANCELLED` + 재고 복구.
 
-### 6.2 경매 판매확정 (DEC-037) — 승인된 목표
+### 6.2 경매 판매확정 (DEC-037) — Stage C Core
 
 상세: [09 §5.3](./09_production_inventory_flow.md) · [DEC-037](./07_decisions.md).
-DEC-036 출하중·청과 확인/매칭 **이후**. 출하 시 OUT하지 않음 → **이중 OUT 금지**.
+DEC-036 출하중·청과 확인/매칭 **이후**. 재고는 보내기 시 이미 OUT → 매칭에서 **추가 OUT 금지**.
 
 개념 TX (하나라도 실패 시 **전체 rollback**):
 
-1. 유효 출하/매칭 검증
-2. **최종 승인 판매수량** 검증
-3. **판매 생성 또는 기존 판매초안 확정** → `CONFIRMED` *(목표에서 DRAFT 필수 여부는 OPEN)*
-4. 상품재고 **OUT** (최종 승인 수량 기준)
-5. stock log
-6. 판매분류 자동 (사용자 선택 금지): `SA010200` 도매 · `SA020400` 경매판매 · `SA030300` 경매연동
+1. 서버 candidate 재조회 · `source_key` 검증 (client amount 미신뢰)
+2. spec 유일 매핑 · `diff_qty = matched − farm_shipped`
+3. 차이 시 discrepancy (`QTY_ERROR`/`RETURN`/`DAMAGE`/`OTHER`)
+4. RETURN만 역FIFO IN. 추가 OUT/SALE log 없음
+5. `sales_source=AUCTION` · `sales_dt=trade_dt` · 1 match = 1 detail · `stock_seq=NULL` · gross
+6. shipment `COMPLETED`
 7. 실패 시 전체 rollback
 
-**OPEN (확정 금지):** OPEN-QTY-DIFF · OPEN-SHIP-STATE **(후속)** · OPEN-AUCTION-MATCH-CARDINALITY · [DEC-016](./07_decisions.md) · 출하 취소/정정 · DRAFT 필수 여부.
+**후속:** Stage F-4 반품/수금 reverse · [DEC-016](./07_decisions.md). Mobile 반자동 매칭은 Stage E. Core 정정은 Stage F-1. REST reopen은 Stage F-2. Mobile `[경락매칭 정정]`은 Stage F-3.
 
 ### 6.3 현재 코드 스냅샷
 
@@ -697,9 +697,9 @@ PK/UNIQUE는 구현 전 실제 schema와 대조하여 확정.
 | 주문 배정 | 행 `reserved_qty` +, 줄 `allocated_qty` + | 박스 (주문 HOLD) |
 | 배정 해제 | reserved −, allocated − (미출고분) | 박스 |
 | 소매/주문 출고확정 | reserved −, out + | 박스 (`allocated_qty` 유지, `shipped_qty` 증가) |
-| **경매 출하** (목표 DEC-036) | 가용에서 **출하중 수량 제외** | **`reserved`/`out` 아님** |
-| **경매 판매확정** (목표 DEC-037) | 최종 승인 수량 기준 **out +** · shipment **전체 자동종료 금지** | 박스 |
+| **경매 출하** (Stage A DEC-036) | `out_qty` 즉시 + · `AUCTION_SHIP` OUT log | `reserved` 불변 · 판매 없음 |
+| **경매 판매확정** (목표 DEC-037) | **추가 OUT 없음** · shipment **전체 자동종료 금지** | 박스 (매출만) |
 
-**APPROVED PHYSICAL:** `available = in − out − reserved − active_auction_transit` ([03 §7.1](./03_data_contract.md) · [09 §14](./09_production_inventory_flow.md)). **CURRENT 코드**는 transit **미반영**.
+**Stage A:** `available = in − out − reserved` ([03 §7.1](./03_data_contract.md) · [09 §14](./09_production_inventory_flow.md)). transit 가용차감 **SUPERSEDED**.
 
 원황/조생은 원물 입고 없이 상품 `in_qty`만 실사/생산으로 올릴 수 있음 (운영).

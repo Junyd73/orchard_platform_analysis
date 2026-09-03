@@ -10,6 +10,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _HERE = Path(__file__).resolve()
 _SERVER = _HERE.parents[1]
@@ -20,10 +21,19 @@ for p in (_HERE.parent, _SERVER, _ROOT):
         sys.path.insert(0, s)
 
 from core.auction_ship_constants import (  # noqa: E402
+    AUCTION_SHIP_STATUS_CANCELLED,
     AUCTION_SHIP_STATUS_IN_TRANSIT,
-    CODE_AUCTION_SHIP_SCHEMA,
+    CODE_AUCTION_SHIP_CANCEL_STATUS,
+    CODE_AUCTION_SHIP_NOT_FOUND,
     CODE_AUCTION_SHIP_QTY_UNAVAILABLE,
+    CODE_AUCTION_SHIP_SCHEMA,
+    CODE_AUCTION_SHIP_STOCK_LOG_MISMATCH,
     CODE_AUCTION_SHIP_STOCK_SCHEMA,
+    IO_TYPE_IN,
+    IO_TYPE_OUT,
+    MSG_REMARK_AUCTION_SHIP,
+    MSG_REMARK_AUCTION_SHIP_CANCEL,
+    REF_TYPE_AUCTION_SHIP,
     TABLE_AUCTION_SHIP_DETAIL,
     TABLE_AUCTION_SHIP_MASTER,
 )
@@ -31,6 +41,7 @@ from core.auction_ship_schema import (  # noqa: E402
     auction_ship_schema_ready,
     ensure_auction_ship_schema,
 )
+from core.sales_stock_trace_schema import ensure_sales_stock_trace_schema  # noqa: E402
 from core.auction_ship_service import (  # noqa: E402
     AuctionShipCreateIn,
     AuctionShipError,
@@ -82,6 +93,7 @@ def _open_ops() -> tuple[Path, sqlite3.Connection]:
     conn.execute("DROP TABLE IF EXISTS t_stock_master")
     conn.executescript(_ops_stock_ddl())
     ensure_auction_ship_schema(conn)
+    ensure_sales_stock_trace_schema(conn)
     conn.commit()
     return path, conn
 
@@ -216,9 +228,16 @@ def _counts(conn: sqlite3.Connection) -> dict[str, int]:
         return int(row[0]) if row else 0
 
     sale_logs = 0
+    auction_out_logs = 0
     cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(t_stock_log)")}
     if "ref_type" in cols:
         sale_logs = c("SELECT COUNT(*) FROM t_stock_log WHERE ref_type='SALE'")
+        auction_out_logs = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM t_stock_log WHERE ref_type=? AND io_type=?",
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_OUT),
+            ).fetchone()[0]
+        )
 
     return {
         "master": c(f"SELECT COUNT(*) FROM {TABLE_AUCTION_SHIP_MASTER}"),
@@ -229,6 +248,7 @@ def _counts(conn: sqlite3.Connection) -> dict[str, int]:
             conn.execute("SELECT COALESCE(SUM(reserved_qty),0) FROM t_stock_master").fetchone()[0]
         ),
         "sale_logs": sale_logs,
+        "auction_out_logs": auction_out_logs,
     }
 
 
@@ -301,7 +321,7 @@ class AuctionShipSchemaTest(unittest.TestCase):
 
 
 class AuctionShipCoreTest(unittest.TestCase):
-    def test_ship_01_basic_transit(self) -> None:
+    def test_ship_01_immediate_out(self) -> None:
         path, conn = _open_ops()
         try:
             _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
@@ -312,19 +332,38 @@ class AuctionShipCoreTest(unittest.TestCase):
             self.assertEqual(after["master"], before["master"] + 1)
             self.assertEqual(after["detail"], before["detail"] + 1)
             self.assertEqual(after["sales"], before["sales"])
-            self.assertEqual(after["out_sum"], before["out_sum"])
+            self.assertAlmostEqual(after["out_sum"], before["out_sum"] + 10)
             self.assertEqual(after["reserved_sum"], before["reserved_sum"])
+            self.assertEqual(after["sale_logs"], before["sale_logs"])
+            self.assertEqual(after["auction_out_logs"], before["auction_out_logs"] + 1)
             rows = OrderAllocationService(conn).get_available_stock(FARM, item_cd=ITEM)
             self.assertAlmostEqual(rows[0]["available_qty"], 10.0)
+            log = conn.execute(
+                """
+                SELECT io_type, ref_type, ref_id, qty, remark, stock_seq
+                FROM t_stock_log WHERE ref_type=? AND io_type=?
+                """,
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_OUT),
+            ).fetchone()
+            self.assertEqual(str(log["io_type"]), IO_TYPE_OUT)
+            self.assertEqual(str(log["ref_type"]), REF_TYPE_AUCTION_SHIP)
+            self.assertEqual(str(log["ref_id"]), out["shipment_id"])
+            self.assertAlmostEqual(float(log["qty"]), 10.0)
+            self.assertEqual(str(log["remark"]), MSG_REMARK_AUCTION_SHIP)
         finally:
             conn.close()
             path.unlink(missing_ok=True)
 
-    def test_ship_02_reserved_and_transit(self) -> None:
+    def test_ship_02_reserved_and_out(self) -> None:
         path, conn = _open_ops()
         try:
             _insert_stock(conn, storage_dt="2025-10-01", in_qty=20, reserved=5)
             AuctionShipService(conn).create_shipment(_payload(10))
+            row = conn.execute(
+                "SELECT out_qty, reserved_qty FROM t_stock_master"
+            ).fetchone()
+            self.assertAlmostEqual(float(row["out_qty"]), 10.0)
+            self.assertAlmostEqual(float(row["reserved_qty"]), 5.0)
             rows = OrderAllocationService(conn).get_available_stock(FARM, item_cd=ITEM)
             self.assertAlmostEqual(rows[0]["available_qty"], 5.0)
         finally:
@@ -386,6 +425,27 @@ class AuctionShipCoreTest(unittest.TestCase):
             by_seq = {int(r[0]): float(r[1]) for r in rows}
             self.assertAlmostEqual(by_seq[101], 6.0)
             self.assertAlmostEqual(by_seq[205], 2.0)
+            out_a = conn.execute(
+                "SELECT out_qty FROM t_stock_master WHERE stock_seq=101"
+            ).fetchone()[0]
+            out_b = conn.execute(
+                "SELECT out_qty FROM t_stock_master WHERE stock_seq=205"
+            ).fetchone()[0]
+            self.assertAlmostEqual(float(out_a), 6.0)
+            self.assertAlmostEqual(float(out_b), 2.0)
+            logs = conn.execute(
+                """
+                SELECT stock_seq, qty FROM t_stock_log
+                WHERE ref_type=? AND io_type=?
+                ORDER BY stock_seq
+                """,
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_OUT),
+            ).fetchall()
+            self.assertEqual(len(logs), 2)
+            self.assertEqual(int(logs[0][0]), 101)
+            self.assertAlmostEqual(float(logs[0][1]), 6.0)
+            self.assertEqual(int(logs[1][0]), 205)
+            self.assertAlmostEqual(float(logs[1][1]), 2.0)
         finally:
             conn.close()
             path.unlink(missing_ok=True)
@@ -449,7 +509,7 @@ class AuctionShipCoreTest(unittest.TestCase):
             AuctionShipService(conn).create_shipment(_payload(10))
             after = _counts(conn)
             self.assertEqual(after["sales"], before["sales"])
-            self.assertEqual(after["out_sum"], before["out_sum"])
+            self.assertAlmostEqual(after["out_sum"], before["out_sum"] + 10)
             self.assertEqual(after["reserved_sum"], before["reserved_sum"])
             self.assertEqual(after["sale_logs"], before["sale_logs"])
             self.assertEqual(after["master"], before["master"] + 1)
@@ -490,11 +550,202 @@ class AuctionShipCoreTest(unittest.TestCase):
                 1,
             )
             c2 = sqlite3.connect(str(path))
+            c2.row_factory = sqlite3.Row
             transit = get_active_auction_transit_qty(
                 c2, farm_cd=FARM, stock_seq=stock_seq,
             )
+            avail_rows = OrderAllocationService(c2).get_available_stock(FARM, item_cd=ITEM)
+            out_qty = c2.execute(
+                "SELECT out_qty FROM t_stock_master WHERE stock_seq=?",
+                (stock_seq,),
+            ).fetchone()[0]
             c2.close()
             self.assertAlmostEqual(transit, 7.0)
+            self.assertAlmostEqual(float(out_qty), 7.0)
+            self.assertAlmostEqual(avail_rows[0]["available_qty"], 3.0)
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+
+class AuctionShipStageAStockTest(unittest.TestCase):
+    def test_available_not_double_subtracted(self) -> None:
+        path, conn = _open_ops()
+        try:
+            seq = _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
+            AuctionShipService(conn).create_shipment(_payload(7))
+            transit = get_active_auction_transit_qty(conn, farm_cd=FARM, stock_seq=seq)
+            rows = OrderAllocationService(conn).get_available_stock(FARM, item_cd=ITEM)
+            self.assertAlmostEqual(transit, 7.0)
+            self.assertAlmostEqual(rows[0]["available_qty"], 13.0)
+            self.assertNotAlmostEqual(rows[0]["available_qty"], 6.0)
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_create_failure_rolls_back_out(self) -> None:
+        path, conn = _open_ops()
+        try:
+            _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
+            before = _counts(conn)
+            with patch.object(
+                AuctionShipService,
+                "_insert_stock_log",
+                side_effect=RuntimeError("log"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    AuctionShipService(conn).create_shipment(_payload(7))
+            after = _counts(conn)
+            self.assertEqual(after["master"], before["master"])
+            self.assertEqual(after["detail"], before["detail"])
+            self.assertEqual(after["out_sum"], before["out_sum"])
+            self.assertEqual(after["auction_out_logs"], before["auction_out_logs"])
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_cancel_restores_stock_and_logs(self) -> None:
+        path, conn = _open_ops()
+        try:
+            _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
+            created = AuctionShipService(conn).create_shipment(_payload(7))
+            sid = created["shipment_id"]
+            cancelled = AuctionShipService(conn).cancel_shipment(FARM, sid, user_id="TEST")
+            self.assertEqual(cancelled["status"], AUCTION_SHIP_STATUS_CANCELLED)
+            status = conn.execute(
+                f"SELECT status FROM {TABLE_AUCTION_SHIP_MASTER} WHERE shipment_id=?",
+                (sid,),
+            ).fetchone()[0]
+            self.assertEqual(str(status), AUCTION_SHIP_STATUS_CANCELLED)
+            out_qty = conn.execute("SELECT out_qty FROM t_stock_master").fetchone()[0]
+            self.assertAlmostEqual(float(out_qty), 0.0)
+            rows = OrderAllocationService(conn).get_available_stock(FARM, item_cd=ITEM)
+            self.assertAlmostEqual(rows[0]["available_qty"], 20.0)
+            inn = conn.execute(
+                """
+                SELECT qty, remark, ref_id FROM t_stock_log
+                WHERE ref_type=? AND io_type=? AND ref_id=?
+                """,
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_IN, sid),
+            ).fetchone()
+            self.assertIsNotNone(inn)
+            self.assertAlmostEqual(float(inn["qty"]), 7.0)
+            self.assertEqual(str(inn["remark"]), MSG_REMARK_AUCTION_SHIP_CANCEL)
+            listed = AuctionShipService(conn).list_shipments(FARM)
+            self.assertEqual(listed, [])
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_double_cancel_rejected(self) -> None:
+        path, conn = _open_ops()
+        try:
+            _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
+            sid = AuctionShipService(conn).create_shipment(_payload(7))["shipment_id"]
+            AuctionShipService(conn).cancel_shipment(FARM, sid, user_id="TEST")
+            with self.assertRaises(AuctionShipError) as ctx:
+                AuctionShipService(conn).cancel_shipment(FARM, sid, user_id="TEST")
+            self.assertEqual(ctx.exception.code, CODE_AUCTION_SHIP_CANCEL_STATUS)
+            in_cnt = conn.execute(
+                """
+                SELECT COUNT(*) FROM t_stock_log
+                WHERE ref_type=? AND io_type=? AND ref_id=?
+                """,
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_IN, sid),
+            ).fetchone()[0]
+            self.assertEqual(int(in_cnt), 1)
+            out_qty = conn.execute("SELECT out_qty FROM t_stock_master").fetchone()[0]
+            self.assertAlmostEqual(float(out_qty), 0.0)
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_cancel_unknown_shipment(self) -> None:
+        path, conn = _open_ops()
+        try:
+            with self.assertRaises(AuctionShipError) as ctx:
+                AuctionShipService(conn).cancel_shipment(FARM, "AUC20990101-001")
+            self.assertEqual(ctx.exception.code, CODE_AUCTION_SHIP_NOT_FOUND)
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_cancel_log_mismatch_rejected(self) -> None:
+        path, conn = _open_ops()
+        try:
+            _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
+            sid = AuctionShipService(conn).create_shipment(_payload(7))["shipment_id"]
+            conn.execute(
+                """
+                UPDATE t_stock_log SET qty = qty + 1
+                WHERE ref_type=? AND io_type=? AND ref_id=?
+                """,
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_OUT, sid),
+            )
+            conn.commit()
+            with self.assertRaises(AuctionShipError) as ctx:
+                AuctionShipService(conn).cancel_shipment(FARM, sid, user_id="TEST")
+            self.assertEqual(ctx.exception.code, CODE_AUCTION_SHIP_STOCK_LOG_MISMATCH)
+            status = conn.execute(
+                f"SELECT status FROM {TABLE_AUCTION_SHIP_MASTER} WHERE shipment_id=?",
+                (sid,),
+            ).fetchone()[0]
+            self.assertEqual(str(status), AUCTION_SHIP_STATUS_IN_TRANSIT)
+            out_qty = conn.execute("SELECT out_qty FROM t_stock_master").fetchone()[0]
+            self.assertAlmostEqual(float(out_qty), 7.0)
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_cancel_rollback(self) -> None:
+        path, conn = _open_ops()
+        try:
+            _insert_stock(conn, storage_dt="2025-10-01", in_qty=20)
+            sid = AuctionShipService(conn).create_shipment(_payload(7))["shipment_id"]
+            original = AuctionShipService._insert_stock_log
+
+            def _boom(self, cur, *, io_type, **kwargs):  # noqa: ANN001
+                if io_type == IO_TYPE_IN:
+                    raise RuntimeError("cancel-log")
+                return original(self, cur, io_type=io_type, **kwargs)
+
+            with patch.object(AuctionShipService, "_insert_stock_log", _boom):
+                with self.assertRaises(RuntimeError):
+                    AuctionShipService(conn).cancel_shipment(FARM, sid, user_id="TEST")
+            status = conn.execute(
+                f"SELECT status FROM {TABLE_AUCTION_SHIP_MASTER} WHERE shipment_id=?",
+                (sid,),
+            ).fetchone()[0]
+            self.assertEqual(str(status), AUCTION_SHIP_STATUS_IN_TRANSIT)
+            out_qty = conn.execute("SELECT out_qty FROM t_stock_master").fetchone()[0]
+            self.assertAlmostEqual(float(out_qty), 7.0)
+            in_cnt = conn.execute(
+                """
+                SELECT COUNT(*) FROM t_stock_log
+                WHERE ref_type=? AND io_type=? AND ref_id=?
+                """,
+                (REF_TYPE_AUCTION_SHIP, IO_TYPE_IN, sid),
+            ).fetchone()[0]
+            self.assertEqual(int(in_cnt), 0)
+        finally:
+            conn.close()
+            path.unlink(missing_ok=True)
+
+    def test_cancel_fifo_restore(self) -> None:
+        path, conn = _open_ops()
+        try:
+            _insert_stock(conn, storage_dt="2025-10-01", in_qty=6, stock_seq=101)
+            _insert_stock(conn, storage_dt="2025-10-02", in_qty=10, stock_seq=205)
+            sid = AuctionShipService(conn).create_shipment(_payload(8))["shipment_id"]
+            AuctionShipService(conn).cancel_shipment(FARM, sid, user_id="TEST")
+            out_a = conn.execute(
+                "SELECT out_qty FROM t_stock_master WHERE stock_seq=101"
+            ).fetchone()[0]
+            out_b = conn.execute(
+                "SELECT out_qty FROM t_stock_master WHERE stock_seq=205"
+            ).fetchone()[0]
+            self.assertAlmostEqual(float(out_a), 0.0)
+            self.assertAlmostEqual(float(out_b), 0.0)
         finally:
             conn.close()
             path.unlink(missing_ok=True)
