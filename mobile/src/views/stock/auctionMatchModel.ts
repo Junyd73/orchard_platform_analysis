@@ -75,11 +75,12 @@ export type SpecDiffRow = {
 
 const WEIGHT_EPS = 0.05
 
+/** UX 기본 경락일자 = 출하일 + 1일 (API는 전달된 trade_dt를 바꾸지 않음) */
 export function defaultTradeDt(shipDt: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(shipDt || '').trim())
   if (!m) return String(shipDt || '').trim()
   const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
-  dt.setUTCDate(dt.getUTCDate() - 1)
+  dt.setUTCDate(dt.getUTCDate() + 1)
   return dt.toISOString().slice(0, 10)
 }
 

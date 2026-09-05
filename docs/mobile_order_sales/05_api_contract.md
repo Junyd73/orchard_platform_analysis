@@ -472,7 +472,7 @@ HTTP: 검증 400 · 충돌/부족/SCHEMA_PRECONDITION 409 · 주문 없음 404 �
 **CURRENT — Stage B 후보 조회**
 
 - `GET /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}/auction-candidates?trade_dt=YYYY-MM-DD` (필수 단일일).
-- UX 기본 날짜 계약: `ship_dt - 1일` (Mobile Stage E). API는 전달된 `trade_dt`를 바꾸지 않음.
+- UX 기본 날짜 계약: `ship_dt + 1일` (Mobile Stage E). API는 전달된 `trade_dt`를 바꾸지 않음.
 - source: 정산 외부 API (`MarketSettlementManager.fetch_settlement_data` / katSale) 우선. 유효 후보 0건이면 realtime (`MarketPriceManager.fetch_real_time_data`).
 - 두 source 혼합 금지. local `market_price_settlement`는 matching SSOT **아님**.
 - 자동필터: farm 소재지(시/군) · shipment `corporation_name` · variety · kg. 최종 행 선택은 사용자 (Stage E IMPLEMENTED).

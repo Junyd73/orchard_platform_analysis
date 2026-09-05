@@ -167,7 +167,7 @@ git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS AP
 ### C. 청과 확인/매칭
 
 **CURRENT (Stage B API + Stage E Mobile):** `GET /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}/auction-candidates?trade_dt=YYYY-MM-DD`.
-정산 API 원본 우선 → 유효 후보 0이면 realtime fallback. 기본 조회일 `ship_dt-1`. 사용자 최종 선택 · REALTIME 등급 · N행 유지. 0건은 empty UX.
+정산 API 원본 우선 → 유효 후보 0이면 realtime fallback. 기본 조회일 `ship_dt+1`. 사용자 최종 선택 · REALTIME 등급 · N행 유지. 0건은 empty UX.
 
 **OPEN:** 없음 (Stage E 재사용).
 
