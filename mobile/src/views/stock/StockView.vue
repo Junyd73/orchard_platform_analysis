@@ -7,6 +7,7 @@ import { listFruitStock, listStockLogs, adjustStock, adjustStockBySpec } from '@
 import type { StockItem, StockLog } from '@/api/stock'
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { ApiClientError } from '@/api/client'
+import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsCard from '@/components/ods/OdsCard.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
@@ -35,7 +36,11 @@ import {
   auctionShipmentStatusLabel,
   AUCTION_STATUS_CANCELLED,
   AUCTION_STATUS_COMPLETED,
+  AUCTION_STATUS_FILTER_ALL,
+  AUCTION_STATUS_FILTER_DEFAULT,
+  AUCTION_STATUS_FILTER_OPTIONS,
   AUCTION_STATUS_IN_TRANSIT,
+  filterShipmentsByStatus,
   isAuctionCancelAllowed,
   isAuctionMatchFetchAllowed,
   isAuctionReopenAllowed,
@@ -47,6 +52,8 @@ import {
   auctionMatchUserMessage,
   formatWon,
   isStatusConflictError,
+  filterShipmentsByYearMonth,
+  formatShipmentYearMonthLabel,
   mergeShipmentLists,
   MSG_AUCTION_CANCEL_CONFIRM,
   MSG_AUCTION_CANCEL_OK,
@@ -54,6 +61,7 @@ import {
   MSG_AUCTION_REOPEN_OK,
   MSG_AUCTION_REOPEN_STATUS,
   sortAuctionShipments,
+  uniqueShipmentYearMonths,
 } from '@/views/stock/auctionMatchModel'
 
 // ── item_cd 상수 (core/stock_constants.py 일치) ──────────────────────
@@ -463,6 +471,72 @@ const transitOpen = ref(false)
 const transitLoading = ref(false)
 const transitError = ref('')
 const transitShipments = ref<AuctionShipmentListItem[]>([])
+const transitYearMonth = ref('')
+const transitMonthOptions = computed(() =>
+  uniqueShipmentYearMonths(transitShipments.value).map((yearMonth) => ({
+    value: yearMonth,
+    label: formatShipmentYearMonthLabel(yearMonth),
+  })),
+)
+const transitStatus = ref(AUCTION_STATUS_FILTER_DEFAULT)
+const filteredTransitShipments = computed(() =>
+  filterShipmentsByStatus(
+    filterShipmentsByYearMonth(transitShipments.value, transitYearMonth.value),
+    transitStatus.value,
+  ),
+)
+/** 출하중 목록은 접힘 기본 · 한 번에 1건만 확장 */
+const expandedShipmentId = ref('')
+watch(transitShipments, (items) => {
+  expandedShipmentId.value = ''
+  // 선택 상태에 건이 없으면 빈 목록 대신 전체로 보정 (년월 필터와 동일한 방식)
+  if (
+    transitStatus.value !== AUCTION_STATUS_FILTER_ALL &&
+    !filterShipmentsByStatus(items, transitStatus.value).length
+  ) {
+    transitStatus.value = AUCTION_STATUS_FILTER_ALL
+  }
+  const months = uniqueShipmentYearMonths(items)
+  if (!months.length) {
+    transitYearMonth.value = ''
+    return
+  }
+  if (!months.includes(transitYearMonth.value)) {
+    transitYearMonth.value = months[0]
+  }
+})
+watch([transitYearMonth, transitStatus], () => {
+  expandedShipmentId.value = ''
+})
+
+function isTransitCancelled(ship: AuctionShipmentListItem): boolean {
+  return ship.status === AUCTION_STATUS_CANCELLED
+}
+
+function isTransitExpanded(ship: AuctionShipmentListItem): boolean {
+  return expandedShipmentId.value === ship.shipment_id
+}
+
+function toggleTransitExpand(ship: AuctionShipmentListItem) {
+  if (isTransitCancelled(ship)) return
+  expandedShipmentId.value = isTransitExpanded(ship) ? '' : ship.shipment_id
+}
+
+function transitActionsId(ship: AuctionShipmentListItem): string {
+  return `auction-transit-actions-${ship.shipment_id}`
+}
+
+/** 취소건은 read-only div, 그 외는 aria-expanded toggle button */
+function transitInfoAttrs(ship: AuctionShipmentListItem): Record<string, unknown> {
+  if (isTransitCancelled(ship)) return {}
+  const expanded = isTransitExpanded(ship)
+  return {
+    type: 'button',
+    'aria-expanded': String(expanded),
+    'aria-controls': expanded ? transitActionsId(ship) : undefined,
+    'data-testid': 'auction-transit-item-toggle',
+  }
+}
 const transitCancelBusy = ref(false)
 const matchSheetOpen = ref(false)
 const matchShipmentId = ref('')
@@ -525,7 +599,7 @@ async function loadTransitShipments() {
     transitShipments.value = sortAuctionShipments(mergeShipmentLists(pages))
   } catch {
     transitShipments.value = []
-    transitError.value = '출하중 목록을 불러오지 못했습니다.'
+    transitError.value = '경매출하 목록을 불러오지 못했습니다.'
   } finally {
     transitLoading.value = false
   }
@@ -837,78 +911,146 @@ const stockBatchDockStyle = {
     <OdsCard
       v-if="stockType === ITEM_PRODUCT"
       class="stock-view__transit"
-      aria-label="출하중"
+      aria-label="경매출하"
       data-testid="auction-transit-section"
     >
-      <button
-        type="button"
-        class="stock-view__transit-toggle"
-        data-testid="auction-transit-toggle"
-        @click="transitOpen = !transitOpen"
-      >
-        출하중
-        <span v-if="transitLoading"> 불러오는 중…</span>
-        <span v-else>{{ transitShipments.length }}건</span>
-      </button>
+      <div class="stock-view__transit-head">
+        <OdsSelect
+          v-model="transitYearMonth"
+          class="stock-view__transit-month"
+          aria-label="출하 년월"
+          data-testid="auction-transit-month"
+          :disabled="!transitMonthOptions.length"
+        >
+          <option v-if="!transitMonthOptions.length" value="">년월</option>
+          <option
+            v-for="option in transitMonthOptions"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option>
+        </OdsSelect>
+        <OdsSelect
+          v-model="transitStatus"
+          class="stock-view__transit-status"
+          aria-label="출하 상태"
+          data-testid="auction-transit-status"
+        >
+          <option
+            v-for="option in AUCTION_STATUS_FILTER_OPTIONS"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option>
+        </OdsSelect>
+        <span
+          v-if="transitLoading"
+          class="stock-view__transit-count"
+          data-testid="auction-transit-count"
+        >불러오는 중…</span>
+        <span
+          v-else
+          class="stock-view__transit-count"
+          data-testid="auction-transit-count"
+        >{{ filteredTransitShipments.length }}건</span>
+        <button
+          type="button"
+          class="stock-view__transit-toggle"
+          :aria-label="transitOpen ? '경매출하 목록 접기' : '경매출하 목록 보기'"
+          :aria-expanded="transitOpen"
+          data-testid="auction-transit-toggle"
+          @click="transitOpen = !transitOpen"
+        >
+          <svg class="stock-view__transit-toggle-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5.2" stroke="currentColor" stroke-width="1.6" />
+            <path d="M12.5 12.5L16.2 16.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
       <p v-if="transitError" class="stock-view__transit-err">{{ transitError }}</p>
-      <ul v-if="transitOpen && transitShipments.length" class="stock-view__transit-list">
+      <ul v-if="transitOpen && filteredTransitShipments.length" class="stock-view__transit-list">
         <li
-          v-for="ship in transitShipments"
+          v-for="ship in filteredTransitShipments"
           :key="ship.shipment_id"
           class="stock-view__transit-item"
+          :class="{
+            'stock-view__transit-item--cancelled': isTransitCancelled(ship),
+          }"
           data-testid="auction-transit-item"
         >
-          <span class="stock-view__transit-main">
-            {{ ship.ship_dt }} · {{ ship.market_name }} · {{ ship.corporation_name }}
-          </span>
-          <span class="stock-view__transit-sub">
-            출하 {{ ship.total_shipped_qty }}박스 · {{ auctionShipmentStatusLabel(ship.status) }}
-            <template v-if="ship.status === AUCTION_STATUS_COMPLETED && ship.gross_sales_amount">
-              · {{ formatWon(ship.gross_sales_amount) }}
-            </template>
-          </span>
-          <div class="stock-view__transit-actions">
-            <OdsButton
-              v-if="ship.status !== AUCTION_STATUS_CANCELLED"
+          <component
+            :is="isTransitCancelled(ship) ? 'div' : 'button'"
+            class="stock-view__transit-info"
+            :class="{ 'stock-view__transit-info--toggle': !isTransitCancelled(ship) }"
+            v-bind="transitInfoAttrs(ship)"
+            @click="toggleTransitExpand(ship)"
+          >
+            <span class="stock-view__transit-lines">
+              <span class="stock-view__transit-main">
+                {{ ship.ship_dt }} · {{ ship.market_name }} · {{ ship.corporation_name }}
+              </span>
+              <span class="stock-view__transit-sub">
+                출하 {{ ship.total_shipped_qty }}박스 · {{ auctionShipmentStatusLabel(ship.status) }}
+                <template v-if="ship.status === AUCTION_STATUS_COMPLETED && ship.gross_sales_amount">
+                  · {{ formatWon(ship.gross_sales_amount) }}
+                </template>
+              </span>
+            </span>
+            <img
+              v-if="!isTransitCancelled(ship)"
+              class="stock-view__transit-chev"
+              :class="{ 'stock-view__transit-chev--open': isTransitExpanded(ship) }"
+              :src="iconChevronDown"
+              alt=""
+              aria-hidden="true"
+            >
+          </component>
+          <div
+            v-if="isTransitExpanded(ship)"
+            :id="transitActionsId(ship)"
+            class="stock-view__transit-actions"
+            data-testid="auction-transit-actions"
+          >
+            <button
+              v-if="isAuctionMatchFetchAllowed(ship)"
               type="button"
-              :block="false"
-              :disabled="!isAuctionMatchFetchAllowed(ship) || transitCancelBusy || reopenSheetOpen"
+              class="stock-view__transit-action stock-view__transit-action--strong"
+              :disabled="transitCancelBusy || reopenSheetOpen"
               data-testid="auction-match-open"
-              @click="openAuctionMatch(ship)"
+              @click.stop="openAuctionMatch(ship)"
             >
               경락가 가져오기
-            </OdsButton>
-            <OdsButton
-              v-if="isAuctionCancelAllowed(ship)"
-              type="button"
-              variant="secondary"
-              :block="false"
-              :busy="transitCancelBusy"
-              :disabled="transitCancelBusy || matchSheetOpen || reopenSheetOpen"
-              data-testid="auction-ship-cancel"
-              @click="cancelTransitShipment(ship)"
-            >
-              경매출하 취소
-            </OdsButton>
-            <OdsButton
+            </button>
+            <button
               v-if="isAuctionReopenAllowed(ship)"
               type="button"
-              variant="secondary"
-              :block="false"
+              class="stock-view__transit-action stock-view__transit-action--strong"
               :disabled="transitCancelBusy || matchSheetOpen || reopenSheetOpen"
               data-testid="auction-reopen-open"
-              @click="openAuctionReopen(ship)"
+              @click.stop="openAuctionReopen(ship)"
             >
               경락매칭 정정
-            </OdsButton>
+            </button>
+            <button
+              v-if="isAuctionCancelAllowed(ship)"
+              type="button"
+              class="stock-view__transit-action"
+              :disabled="transitCancelBusy || matchSheetOpen || reopenSheetOpen"
+              data-testid="auction-ship-cancel"
+              @click.stop="cancelTransitShipment(ship)"
+            >
+              경매출하 취소
+            </button>
           </div>
         </li>
       </ul>
       <p
-        v-else-if="transitOpen && !transitLoading && !transitShipments.length"
+        v-else-if="transitOpen && !transitLoading && !filteredTransitShipments.length"
         class="stock-view__transit-empty"
       >
-        출하중인 건이 없습니다.
+        {{ transitShipments.length ? '조건에 맞는 출하 건이 없습니다.' : '경매출하 건이 없습니다.' }}
       </p>
     </OdsCard>
 
@@ -1642,19 +1784,52 @@ const stockBatchDockStyle = {
 .stock-view__transit {
   margin-bottom: var(--ods-space-8);
 }
-.stock-view__transit-toggle {
-  width: 100%;
+.stock-view__transit-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--ods-space-8);
   padding: var(--ods-space-8) var(--ods-space-4);
+}
+/* 년월·상태 필터는 내용폭, 건수는 우측 정렬 (360px에서도 1행 유지) */
+.stock-view__transit-month,
+.stock-view__transit-status {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.stock-view__transit-month {
+  max-width: 42%;
+}
+.stock-view__transit-status {
+  max-width: 32%;
+}
+.stock-view__transit-count {
+  margin-left: auto;
+  font: var(--ods-font-caption);
+  font-weight: 500;
+  color: var(--ods-color-text-secondary);
+  white-space: nowrap;
+}
+/* 건수는 표시만 — 펼침은 우측 돋보기 아이콘으로만 */
+.stock-view__transit-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ods-touch-min);
+  height: var(--ods-touch-min);
+  margin: 0;
+  padding: 0;
   border: none;
+  border-radius: var(--ods-radius-button);
   background: transparent;
-  font: var(--ods-font-body-2);
-  font-weight: 700;
-  color: var(--ods-color-text);
+  color: var(--ods-color-text-secondary);
   cursor: pointer;
+}
+.stock-view__transit-toggle-icon {
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
+  display: block;
 }
 .stock-view__transit-list {
   list-style: none;
@@ -1667,25 +1842,102 @@ const stockBatchDockStyle = {
 .stock-view__transit-item {
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-2);
-  padding: var(--ods-space-8);
   border-radius: var(--ods-radius-card);
   background: var(--ods-color-surface-muted, #faf8f4);
+  overflow: hidden;
+}
+.stock-view__transit-item--cancelled {
+  background: var(--ods-color-bg-muted);
+}
+/* 접힘 상태 기본 2줄 — 날짜/시장/회사 + 수량/상태 */
+.stock-view__transit-info {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  width: 100%;
+  margin: 0;
+  padding: var(--ods-space-8);
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.stock-view__transit-info--toggle {
+  cursor: pointer;
+}
+.stock-view__transit-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-2);
+}
+.stock-view__transit-chev {
+  flex: 0 0 auto;
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
+  opacity: 0.55;
+  transition: transform 180ms ease;
+}
+.stock-view__transit-chev--open {
+  transform: rotate(180deg);
 }
 .stock-view__transit-main {
   font: var(--ods-font-body-2);
   font-weight: 600;
+  color: var(--ods-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.stock-view__transit-sub {
-  font: var(--ods-font-footnote);
+.stock-view__transit-item--cancelled .stock-view__transit-main {
+  font-weight: 500;
   color: var(--ods-color-text-secondary);
 }
+.stock-view__transit-sub {
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stock-view__transit-item--cancelled .stock-view__transit-sub {
+  color: var(--ods-color-gray-500);
+}
+/* 확장 시에만 노출되는 무채색 chip 액션 — 좌측 정렬, 구분선 없이 여백으로만 분리 */
 .stock-view__transit-actions {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--ods-space-6);
-  margin-top: var(--ods-space-6);
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--ods-space-8);
+  padding: 0 var(--ods-space-8) var(--ods-space-8);
+}
+.stock-view__transit-action {
+  flex: 0 0 auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 var(--ods-space-12);
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-badge);
+  background: var(--ods-color-bg);
+  box-shadow: none;
+  color: var(--ods-color-text);
+  font: var(--ods-font-body-2);
+  font-weight: 400;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.stock-view__transit-action--strong {
+  font-weight: 600;
+}
+/* ODS disabled — gray-300 배경 + gray-500 텍스트 */
+.stock-view__transit-action:disabled {
+  border-color: var(--ods-color-gray-300);
+  background: var(--ods-color-gray-300);
+  color: var(--ods-color-gray-500);
+  cursor: default;
 }
 .stock-view__transit-err,
 .stock-view__transit-empty {

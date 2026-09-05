@@ -354,6 +354,35 @@ export function mergeShipmentLists<T extends { shipment_id: string }>(
   return [...byId.values()]
 }
 
+/** ship_dt(YYYY-MM-DD) → YYYY-MM. 형식이 아니면 빈 문자열. */
+export function shipmentYearMonth(shipDt: string): string {
+  const raw = String(shipDt || '')
+  return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : ''
+}
+
+export function formatShipmentYearMonthLabel(yearMonth: string): string {
+  const matched = /^(\d{4})-(\d{2})$/.exec(yearMonth)
+  if (!matched) return yearMonth
+  return `${matched[1]}년 ${Number(matched[2])}월`
+}
+
+export function uniqueShipmentYearMonths(items: { ship_dt: string }[]): string[] {
+  const months = new Set<string>()
+  for (const item of items) {
+    const yearMonth = shipmentYearMonth(item.ship_dt)
+    if (yearMonth) months.add(yearMonth)
+  }
+  return [...months].sort((a, b) => b.localeCompare(a))
+}
+
+export function filterShipmentsByYearMonth<T extends { ship_dt: string }>(
+  items: T[],
+  yearMonth: string,
+): T[] {
+  if (!yearMonth) return items
+  return items.filter((item) => shipmentYearMonth(item.ship_dt) === yearMonth)
+}
+
 const STATUS_RANK: Record<string, number> = {
   IN_TRANSIT: 0,
   COMPLETED: 1,

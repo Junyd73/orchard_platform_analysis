@@ -140,6 +140,25 @@ export function isAuctionMatchFetchAllowed(ship: { status: string }): boolean {
   return String(ship.status || '').trim() === AUCTION_STATUS_IN_TRANSIT
 }
 
+/** 목록 상태 필터 — 조회 전용, 상태 판정/권한과 무관 */
+export const AUCTION_STATUS_FILTER_ALL = 'ALL'
+export const AUCTION_STATUS_FILTER_DEFAULT = AUCTION_STATUS_IN_TRANSIT
+
+export const AUCTION_STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: AUCTION_STATUS_FILTER_ALL, label: '전체' },
+  ...[AUCTION_STATUS_IN_TRANSIT, AUCTION_STATUS_COMPLETED, AUCTION_STATUS_CANCELLED].map(
+    (status) => ({ value: status, label: auctionShipmentStatusLabel(status) }),
+  ),
+]
+
+export function filterShipmentsByStatus<T extends { status: string }>(
+  items: T[],
+  status: string,
+): T[] {
+  if (!status || status === AUCTION_STATUS_FILTER_ALL) return items
+  return items.filter((item) => String(item.status || '').trim() === status)
+}
+
 export function shipDraftLinesToAuctionLines(
   lines: ShipDraftLine[],
 ): AuctionShipmentLinePayload[] {
