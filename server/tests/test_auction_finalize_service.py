@@ -84,11 +84,13 @@ from test_auction_candidate_service import (  # noqa: E402
     MARKET_CD,
     TRADE_DT,
     _ensure_farm,
+    _kg_row,
     _row,
 )
 from test_auction_ship_service import (  # noqa: E402
     GRADE,
     ITEM,
+    MARKET_NM,
     SIZE,
     VARIETY,
     WEIGHT,
@@ -101,7 +103,8 @@ from test_auction_ship_service import (  # noqa: E402
 
 GRADE2 = "GR010200"
 SIZE2 = "FR020102"
-SIZE_NM = "15과"
+SIZE_NM = "1다이"
+SIZE2_NM = "2다이전"
 FARM2 = "OR002"
 
 
@@ -170,7 +173,7 @@ def _open_finalize() -> tuple[Path, sqlite3.Connection]:
     )
     conn.execute(
         "INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd) VALUES (?, ?, ?, ?)",
-        (FARM, SIZE2, SIZE_NM, "FR02"),
+        (FARM, SIZE2, SIZE2_NM, "FR02"),
     )
     _ensure_farm(conn)
     conn.commit()
@@ -468,7 +471,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_settlement_relookup_and_ignore_client_amount(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000, amount=180000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000, amount=180000)]
         item = self._lookup(sid)["items"][0]
         self.assertEqual(item["source_type"], SOURCE_SETTLEMENT)
         out = self._run(
@@ -521,14 +524,14 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_stale_source_key(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn("dead" * 16)])
         self.assertEqual(ctx.exception.code, CODE_AUCTION_MATCH_STALE)
 
     def test_duplicate_source_in_payload(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(key), AuctionSelectedIn(key)])
@@ -539,7 +542,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         svc_ship = AuctionShipService(self.conn)
         sid1 = str(svc_ship.create_shipment(_payload(2))["shipment_id"])
         sid2 = str(svc_ship.create_shipment(_payload(2))["shipment_id"])
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid1)["items"][0]["source_key"]
         self._run(sid1, [AuctionSelectedIn(key)])
         with self.assertRaises(AuctionFinalizeError) as ctx:
@@ -548,7 +551,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_different_farm_same_source_key_reject(self) -> None:
         sid1 = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid1)["items"][0]["source_key"]
         self._run(sid1, [AuctionSelectedIn(key)])
         sid2 = self._ship_other_farm(2)
@@ -585,7 +588,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_inactive_source_key_reusable(self) -> None:
         sid1 = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid1)["items"][0]["source_key"]
         self._run(sid1, [AuctionSelectedIn(key)])
         self.conn.execute(
@@ -607,7 +610,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_settlement_external_grade_maps_internal_spec(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000, grade="특", grade_cd="EXT99")]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000, grade="특", grade_cd="EXT99")]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._run(sid, [AuctionSelectedIn(key)])
         row = self.conn.execute(
@@ -617,46 +620,49 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         self.assertEqual(row["source_grade_cd"], "EXT99")
 
     def test_ambiguous_spec_mapping(self) -> None:
-        _stock(self.conn, seq=201, storage_dt="2026-08-20", in_qty=5, size=SIZE)
-        _stock(self.conn, seq=203, storage_dt="2026-08-21", in_qty=5, size=SIZE2)
-        payload = AuctionShipCreateIn(
-            farm_cd=FARM,
-            ship_dt="2026-08-31",
-            market_cd=MARKET_CD,
-            market_name="서울가락",
-            corporation_name=CORP,
-            lines=[
-                _spec_line(2),
-                AuctionShipSpecLineIn(
-                    wh_cd=WAREHOUSE_CD_DEFAULT,
-                    item_cd=ITEM,
-                    variety_cd=VARIETY,
-                    grade_cd=GRADE,
-                    size_cd=SIZE2,
-                    weight=WEIGHT,
-                    harvest_year=YEAR,
-                    qty=2,
-                ),
-            ],
-            user_id="TEST",
-        )
-        sid = str(AuctionShipService(self.conn).create_shipment(payload)["shipment_id"])
-        self.settlement_rows = [_row(qty=2, price=90000)]
-        key = self._lookup(sid)["items"][0]["source_key"]
+        """동일 variety/grade/weight/bucket을 가진 spec 2건이면 AMBIGUOUS."""
+        sid = self._ship(2)
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
+        item = self._lookup(sid)["items"][0]
+        specs = self._svc()._load_specs(FARM, sid)
+        self.assertEqual(len(specs), 1)
+        twin = dict(specs[0])
+        twin["id"] = ("FR010101", GRADE, "FR020199", WEIGHT)
+        twin["size_cd"] = "FR020199"
         with self.assertRaises(AuctionFinalizeError) as ctx:
-            self._run(
-                sid,
-                [AuctionSelectedIn(key)],
-                [_disc(reason=REASON_QTY_ERROR, grade=GRADE, size=SIZE2)],
-            )
+            self._svc()._map_spec(item, [specs[0], twin], SOURCE_SETTLEMENT, None)
         self.assertEqual(ctx.exception.code, CODE_AUCTION_MATCH_AMBIGUOUS_SPEC)
+
+    def test_bucket_maps_despite_raw_size_label(self) -> None:
+        sid = self._ship(2)
+        self.settlement_rows = [_kg_row(boxes=2, price=90000, size="10개이하")]
+        item = self._lookup(sid)["items"][0]
+        self.assertEqual(item["fruit_count_bucket"], 10)
+        self.assertNotEqual(item["size_name"], SIZE_NM)
+        out = self._run(sid, [AuctionSelectedIn(item["source_key"])])
+        self.assertEqual(out["status"], AUCTION_SHIP_STATUS_COMPLETED)
+
+    def test_one_spec_n_match_same_bucket_labels(self) -> None:
+        sid = self._ship(10)
+        self.settlement_rows = [
+            _kg_row(boxes=4, price=90000, size="10과이내", auction_time="09:00:00"),
+            _kg_row(boxes=3, price=87000, size="10개이하", auction_time="09:01:00"),
+            _kg_row(boxes=3, price=85000, size="10개", auction_time="09:02:00"),
+        ]
+        items = self._lookup(sid)["items"]
+        self.assertEqual(len(items), 3)
+        self.assertEqual({i["fruit_count_bucket"] for i in items}, {10})
+        out = self._run(sid, [AuctionSelectedIn(i["source_key"]) for i in items])
+        self.assertEqual(out["match_count"], 3)
+        n_det = self.conn.execute("SELECT COUNT(*) FROM t_sales_detail").fetchone()[0]
+        self.assertEqual(int(n_det), 3)
 
     def test_one_spec_n_match_and_three_sales_details(self) -> None:
         sid = self._ship(10)
         self.settlement_rows = [
-            _row(qty=4, price=90000, auction_time="09:00:00"),
-            _row(qty=3, price=87000, auction_time="09:01:00"),
-            _row(qty=3, price=85000, auction_time="09:02:00"),
+            _kg_row(boxes=4, price=90000, auction_time="09:00:00"),
+            _kg_row(boxes=3, price=87000, auction_time="09:01:00"),
+            _kg_row(boxes=3, price=85000, auction_time="09:02:00"),
         ]
         items = self._lookup(sid)["items"]
         self.assertEqual(len(items), 3)
@@ -692,7 +698,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
     def test_no_extra_out_or_sale_log_and_completed(self) -> None:
         sid = self._ship(2, reserved=1)
         before = self._stock_row(202)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         out = self._run(sid, [AuctionSelectedIn(key)])
         after = self._stock_row(202)
@@ -725,7 +731,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_diff_zero_discrepancy_reject(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(key)], [_disc(reason=REASON_QTY_ERROR)])
@@ -733,7 +739,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_unresolved_diff_reject(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=3, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=3, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(key)])
@@ -741,7 +747,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_qty_error_positive_and_negative(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=3, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=3, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._run(sid, [AuctionSelectedIn(key)], [_disc(reason=REASON_QTY_ERROR)])
         row = self.conn.execute(
@@ -754,7 +760,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         try:
             _insert_stock(conn2, storage_dt="2026-08-28", in_qty=20, stock_seq=202)
             sid2 = str(AuctionShipService(conn2).create_shipment(_payload(2))["shipment_id"])
-            rows = [_row(qty=1, price=90000)]
+            rows = [_kg_row(boxes=1, price=90000)]
             svc = AuctionFinalizeService(
                 conn2,
                 settlement_fetch=lambda *_: rows,
@@ -783,7 +789,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_other_requires_remark(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=3, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=3, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(key)], [_disc(reason=REASON_OTHER)])
@@ -796,7 +802,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_damage_negative_ok_positive_reject(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         before = self._stock_row(202)
         self._run(sid, [AuctionSelectedIn(key)], [_disc(reason=REASON_DAMAGE, remark="파손")])
@@ -808,7 +814,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         try:
             _insert_stock(conn2, storage_dt="2026-08-28", in_qty=20, stock_seq=202)
             sid2 = str(AuctionShipService(conn2).create_shipment(_payload(2))["shipment_id"])
-            rows = [_row(qty=3, price=90000)]
+            rows = [_kg_row(boxes=3, price=90000)]
             svc = AuctionFinalizeService(
                 conn2, settlement_fetch=lambda *_: rows, realtime_fetch=lambda *_: []
             )
@@ -839,7 +845,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         before_b = self._stock_row(202)
         avail_a = self._available(201)
         avail_b = self._available(202)
-        self.settlement_rows = [_row(qty=6, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=6, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._run(
             sid,
@@ -882,7 +888,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         _stock(self.conn, seq=201, storage_dt="2026-08-20", in_qty=5)
         _stock(self.conn, seq=202, storage_dt="2026-08-21", in_qty=3)
         sid = str(AuctionShipService(self.conn).create_shipment(_payload(8))["shipment_id"])
-        self.settlement_rows = [_row(qty=3, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=3, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._run(
             sid,
@@ -901,7 +907,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_return_without_confirm_reject(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(key)], [_disc(reason=REASON_RETURN)])
@@ -909,7 +915,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_return_positive_diff_reject(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=3, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=3, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(
@@ -921,7 +927,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_second_finalize_and_completed_cancel_reject(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._run(sid, [AuctionSelectedIn(key)])
         with self.assertRaises(AuctionFinalizeError) as ctx:
@@ -935,7 +941,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
 
     def test_exception_rolls_back(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         before_out = float(self._stock_row(202)["out_qty"])
         with patch.object(AuctionFinalizeService, "_insert_sales_master", side_effect=RuntimeError("boom")):
@@ -982,7 +988,7 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
             user_id="TEST",
         )
         sid = str(AuctionShipService(self.conn).create_shipment(payload)["shipment_id"])
-        self.settlement_rows = [_row(qty=2, price=90000, grade="특")]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000, grade="특")]
         key = self._lookup(sid)["items"][0]["source_key"]
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(key)])
@@ -1004,6 +1010,148 @@ class AuctionFinalizeServiceTest(unittest.TestCase):
         with self.assertRaises(AuctionFinalizeError) as ctx:
             self._run(sid, [AuctionSelectedIn(item["source_key"], user_grade_cd=GRADE)])
         self.assertEqual(ctx.exception.code, CODE_AUCTION_MATCH_SPEC_UNMATCHED)
+
+    def test_settlement_kg_to_box_finalize_diff_zero(self) -> None:
+        """OPS 대표: 390kg/15kg → 26박스, finalize diff=0, gross=1,222,000."""
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO t_stock_master (
+                stock_seq, farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd,
+                weight, harvest_year, storage_dt, in_qty, out_qty, reserved_qty, reg_id
+            ) VALUES (915, ?, ?, ?, ?, ?, ?, 15, ?, '2026-08-20', 80, 0, 0, 'TEST')
+            """,
+            (FARM, WAREHOUSE_CD_DEFAULT, ITEM, VARIETY, GRADE, SIZE, YEAR),
+        )
+        self.conn.commit()
+        sid = str(
+            AuctionShipService(self.conn).create_shipment(
+                AuctionShipCreateIn(
+                    farm_cd=FARM,
+                    ship_dt="2026-08-25",
+                    market_cd=MARKET_CD,
+                    market_name=MARKET_NM,
+                    corporation_name=CORP,
+                    lines=[
+                        AuctionShipSpecLineIn(
+                            wh_cd=WAREHOUSE_CD_DEFAULT,
+                            item_cd=ITEM,
+                            variety_cd=VARIETY,
+                            grade_cd=GRADE,
+                            size_cd=SIZE,
+                            weight=15,
+                            harvest_year=YEAR,
+                            qty=26,
+                        )
+                    ],
+                    user_id="TEST",
+                )
+            )["shipment_id"]
+        )
+        self.settlement_rows = [
+            _row(qty=390, spec="15kg", price=47000, amount=1222000, variety="신고", size="20개이하")
+        ]
+        item = self._lookup(sid)["items"][0]
+        self.assertEqual(item["qty"], 26)
+        self.assertEqual(item["fruit_count_bucket"], 20)
+        self.assertEqual(item["unit_price"], 47000)
+        self.assertEqual(item["amount"], 1222000)
+        before_out = self.conn.execute(
+            "SELECT COUNT(*) FROM t_stock_log WHERE ref_type=? AND io_type=?",
+            (REF_TYPE_AUCTION_SHIP, IO_TYPE_OUT),
+        ).fetchone()[0]
+        out = self._run(sid, [AuctionSelectedIn(item["source_key"])])
+        self.assertEqual(out["status"], AUCTION_SHIP_STATUS_COMPLETED)
+        self.assertEqual(out["tot_sales_amt"], 1222000)
+        det = self.conn.execute(
+            "SELECT qty, unit_price, tot_item_amt FROM t_sales_detail"
+        ).fetchone()
+        self.assertEqual(float(det["qty"]), 26)
+        self.assertEqual(float(det["unit_price"]), 47000)
+        self.assertEqual(float(det["tot_item_amt"]), 1222000)
+        match = self.conn.execute(
+            f"SELECT qty, amount FROM {TABLE_AUCTION_MATCH_DETAIL}"
+        ).fetchone()
+        self.assertEqual(int(match["qty"]), 26)
+        self.assertEqual(float(match["amount"]), 1222000)
+        self.assertEqual(
+            int(
+                self.conn.execute(
+                    f"SELECT COUNT(*) FROM {TABLE_AUCTION_QTY_DISCREPANCY}"
+                ).fetchone()[0]
+            ),
+            0,
+        )
+        sale_logs = self.conn.execute(
+            "SELECT COUNT(*) FROM t_stock_log WHERE ref_type='SALE'"
+        ).fetchone()[0]
+        after_out = self.conn.execute(
+            "SELECT COUNT(*) FROM t_stock_log WHERE ref_type=? AND io_type=?",
+            (REF_TYPE_AUCTION_SHIP, IO_TYPE_OUT),
+        ).fetchone()[0]
+        self.assertEqual(int(sale_logs), 0)
+        self.assertEqual(int(after_out), int(before_out))
+
+    def test_settlement_avgprc_mismatch_finalize_uses_totprc_gross(self) -> None:
+        """avgprc 반올림 불일치여도 qty=weight SSOT, gross=totprc 유지."""
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO t_stock_master (
+                stock_seq, farm_cd, wh_cd, item_cd, variety_cd, grade_cd, size_cd,
+                weight, harvest_year, storage_dt, in_qty, out_qty, reserved_qty, reg_id
+            ) VALUES (916, ?, ?, ?, ?, ?, ?, 15, ?, '2026-08-20', 80, 0, 0, 'TEST')
+            """,
+            (FARM, WAREHOUSE_CD_DEFAULT, ITEM, VARIETY, GRADE, SIZE, YEAR),
+        )
+        self.conn.commit()
+        sid = str(
+            AuctionShipService(self.conn).create_shipment(
+                AuctionShipCreateIn(
+                    farm_cd=FARM,
+                    ship_dt="2026-08-25",
+                    market_cd=MARKET_CD,
+                    market_name=MARKET_NM,
+                    corporation_name=CORP,
+                    lines=[
+                        AuctionShipSpecLineIn(
+                            wh_cd=WAREHOUSE_CD_DEFAULT,
+                            item_cd=ITEM,
+                            variety_cd=VARIETY,
+                            grade_cd=GRADE,
+                            size_cd=SIZE,
+                            weight=15,
+                            harvest_year=YEAR,
+                            qty=26,
+                        )
+                    ],
+                    user_id="TEST",
+                )
+            )["shipment_id"]
+        )
+        self.settlement_rows = [
+            _row(
+                qty=390,
+                spec="15kg",
+                price=46923,
+                amount=1220000,
+                variety="신고",
+                size="20개이하",
+            )
+        ]
+        item = self._lookup(sid)["items"][0]
+        self.assertEqual(item["qty"], 26)
+        self.assertEqual(item["unit_price"], 46923)
+        self.assertEqual(item["amount"], 1220000)
+        out = self._run(sid, [AuctionSelectedIn(item["source_key"])])
+        self.assertEqual(out["status"], AUCTION_SHIP_STATUS_COMPLETED)
+        self.assertEqual(out["tot_sales_amt"], 1220000)
+        det = self.conn.execute(
+            "SELECT qty, unit_price, tot_item_amt FROM t_sales_detail"
+        ).fetchone()
+        self.assertEqual(float(det["qty"]), 26)
+        self.assertEqual(float(det["unit_price"]), 46923)
+        self.assertEqual(float(det["tot_item_amt"]), 1220000)
+        # qty*price 재계산 금지
+        self.assertNotEqual(int(26 * 46923), 1220000)
 
 
 if __name__ == "__main__":

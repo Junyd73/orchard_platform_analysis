@@ -119,6 +119,7 @@ def _to_detail(result: dict) -> AuctionShipmentDetailOut:
             size_name=str(s.get("size_name") or ""),
             weight=float(s.get("weight") or 0),
             farm_shipped_qty=float(s.get("farm_shipped_qty") or 0),
+            fruit_count_bucket=s.get("fruit_count_bucket"),
             matched_qty=s.get("matched_qty"),
             diff_qty=s.get("diff_qty"),
             discrepancy_reason=s.get("discrepancy_reason"),

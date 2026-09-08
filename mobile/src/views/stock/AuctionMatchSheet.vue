@@ -6,6 +6,13 @@ import {
   getAuctionCandidates,
   getAuctionShipmentDetail,
 } from '@/api/auctionShipments'
+import iconFarm from '@/assets/ods/common/icon-farm.svg'
+import iconChart from '@/assets/ods/pesticide/icon-menu-stats.svg'
+import iconReceipt from '@/assets/ods/pesticide/icon-menu-receipt.svg'
+import iconStock from '@/assets/ods/pesticide/icon-kpi-stock.svg'
+import iconCalendar from '@/assets/ods/scr004/icon-calendar.svg'
+import iconDoc from '@/assets/ods/scr004/icon-content.svg'
+import iconInfo from '@/assets/ods/scr004/icon-meta.svg'
 import OdsButton from '@/components/ods/OdsButton.vue'
 import OdsInput from '@/components/ods/OdsInput.vue'
 import OdsSelect from '@/components/ods/OdsSelect.vue'
@@ -13,10 +20,17 @@ import {
   allowedReasons,
   auctionMatchUserMessage,
   buildFinalizeRequest,
+  candidateSpecTitle,
+  compareSpecTitle,
+  compareSummaryMessage,
   computeSpecDiffs,
+  confirmStatusText,
+  confirmStatusTone,
   defaultTradeDt,
   discrepancyReady,
+  formatDiffQty,
   formatWon,
+  hasSpecDiff,
   isSourceFetchError,
   isStatusConflictError,
   isStaleCandidateError,
@@ -26,9 +40,11 @@ import {
   reasonLabel,
   selectionComplete,
   selectedTotals,
+  sortAuctionCandidates,
+  sortSpecDiffRows,
   sourceUsedLabel,
   specKey,
-  specTitle,
+  sumSpecDiffTotals,
   uniqueSpecGrades,
   type DiscrepancyDraft,
 } from '@/views/stock/auctionMatchModel'
@@ -55,7 +71,7 @@ const emit = defineEmits<{
   statusConflict: []
 }>()
 
-type MatchStep = 'fetch' | 'diff' | 'confirm' | 'done'
+type MatchStep = 'fetch' | 'compare' | 'diff' | 'confirm' | 'done'
 
 const detail = ref<AuctionShipmentDetail | null>(null)
 const detailError = ref('')
@@ -88,6 +104,12 @@ const selectedRows = computed(() =>
 
 const totals = computed(() => selectedTotals(selectedRows.value.map((row) => row.candidate)))
 const diffs = computed(() => computeSpecDiffs(detail.value?.specs ?? [], selectedRows.value))
+const sortedCandidates = computed(() => sortAuctionCandidates(candidates.value))
+const sortedDiffs = computed(() => sortSpecDiffRows(diffs.value))
+const mismatchDiffs = computed(() => sortedDiffs.value.filter((row) => row.diff !== 0))
+const compareTotals = computed(() => sumSpecDiffTotals(diffs.value))
+const compareHasDiff = computed(() => hasSpecDiff(diffs.value))
+const compareMessage = computed(() => compareSummaryMessage(diffs.value))
 const grades = computed(() => uniqueSpecGrades(detail.value?.specs ?? []))
 const discCheck = computed(() => discrepancyReady(diffs.value, drafts.value))
 const canSelectNext = computed(() => selectionComplete(selectedRows.value))
@@ -232,9 +254,13 @@ function setReturnConfirmed(key: string, confirmed: boolean) {
   patchDraft(key, { returnConfirmed: confirmed })
 }
 
-function goDiff() {
+function goCompare() {
   if (!canSelectNext.value) return
   submitError.value = ''
+  step.value = 'compare'
+}
+
+function prepareDiffDrafts() {
   const next: Record<string, DiscrepancyDraft> = {}
   for (const row of diffs.value) {
     if (row.diff === 0) continue
@@ -242,7 +268,26 @@ function goDiff() {
     next[key] = drafts.value[key] ?? emptyDraft()
   }
   drafts.value = next
-  step.value = 'diff'
+}
+
+function continueFromCompare() {
+  if (!canSelectNext.value) return
+  submitError.value = ''
+  if (compareHasDiff.value) {
+    prepareDiffDrafts()
+    step.value = 'diff'
+    return
+  }
+  drafts.value = {}
+  step.value = 'confirm'
+}
+
+function backFromDiff() {
+  step.value = 'compare'
+}
+
+function backFromConfirm() {
+  step.value = compareHasDiff.value ? 'diff' : 'compare'
 }
 
 function goConfirm() {
@@ -319,6 +364,7 @@ watch(
     <div
       v-if="open"
       class="auc-sheet"
+      :class="{ 'is-busy': busy }"
       role="dialog"
       aria-modal="true"
       aria-label="경락매칭"
@@ -327,7 +373,22 @@ watch(
       <button type="button" class="auc-sheet__backdrop" aria-label="닫기" :disabled="busy" @click="emit('close')" />
       <div class="auc-sheet__panel">
         <div class="auc-sheet__header">
-          <p class="auc-sheet__title">경락매칭</p>
+          <div class="auc-sheet__header-main">
+            <span class="auc-sheet__title-ico" aria-hidden="true">
+              <img :src="iconChart" alt="" />
+            </span>
+            <div class="auc-sheet__header-text">
+              <p class="auc-sheet__title">경락매칭</p>
+              <p
+                v-if="detail"
+                class="auc-sheet__meta"
+                data-testid="auction-match-meta"
+              >
+                {{ detail.ship_dt }} · {{ detail.market_name }} · {{ detail.corporation_name }}
+                · 출하 {{ detail.total_shipped_qty }}박스
+              </p>
+            </div>
+          </div>
           <button type="button" class="auc-sheet__close" aria-label="닫기" :disabled="busy" @click="emit('close')">
             ✕
           </button>
@@ -339,16 +400,12 @@ watch(
         </p>
 
         <template v-if="detail">
-          <p class="auc-sheet__meta" data-testid="auction-match-meta">
-            {{ detail.ship_dt }} · {{ detail.market_name }} · {{ detail.corporation_name }}
-            · 출하 {{ detail.total_shipped_qty }}박스
-          </p>
-
           <template v-if="step !== 'done' && inTransit">
-            <div class="auc-sheet__field">
+            <div class="auc-sheet__trade-row">
               <label class="auc-sheet__lbl" for="auc-trade-dt">경락일자</label>
               <OdsInput
                 id="auc-trade-dt"
+                class="auc-sheet__trade-input"
                 :model-value="tradeDt"
                 type="date"
                 variant="form"
@@ -356,20 +413,27 @@ watch(
                 :disabled="busy"
                 @update:model-value="onTradeDtChange"
               />
+              <OdsButton
+                type="button"
+                variant="secondary-filled"
+                :block="false"
+                :busy="fetchBusy"
+                :disabled="busy"
+                class="auc-sheet__fetch-btn"
+                data-testid="auction-match-fetch"
+                @click="fetchCandidates"
+              >
+                경락가 가져오기
+              </OdsButton>
             </div>
-            <OdsButton
-              type="button"
-              variant="secondary"
-              :busy="fetchBusy"
-              :disabled="busy"
-              data-testid="auction-match-fetch"
-              @click="fetchCandidates"
+            <div
+              v-if="sourceUsed"
+              class="auc-sheet__source-head"
+              data-testid="auction-match-source"
             >
-              경락가 가져오기
-            </OdsButton>
-            <p v-if="sourceUsed" class="auc-sheet__hint" data-testid="auction-match-source">
-              {{ sourceUsedLabel(sourceUsed) }}
-            </p>
+              <img class="auc-sheet__source-ico" :src="iconDoc" alt="" aria-hidden="true" />
+              <span class="auc-sheet__source-label">{{ sourceUsedLabel(sourceUsed) }}</span>
+            </div>
             <p v-if="sourceError" class="auc-sheet__err" data-testid="auction-match-source-error">
               {{ sourceError }}
             </p>
@@ -395,49 +459,76 @@ watch(
               {{ MSG_AUCTION_MATCH_EMPTY }}
               <span class="auc-sheet__hint">{{ MSG_AUCTION_MATCH_EMPTY_HINT }}</span>
             </p>
-            <ul v-if="candidates.length" class="auc-sheet__cand-list" data-testid="auction-match-candidates">
-              <li
-                v-for="item in candidates"
-                :key="item.source_key"
-                class="auc-sheet__cand"
-                :class="{ 'auc-sheet__cand--on': selectedKeys.includes(item.source_key) }"
-              >
-                <button
-                  type="button"
-                  class="auc-sheet__cand-btn"
-                  :data-testid="`auction-cand-${item.source_key}`"
-                  :disabled="busy"
-                  @click="toggleCandidate(item)"
-                >
-                  <span class="auc-sheet__cand-name">
-                    {{ item.variety_name || '경락' }}
-                    · {{ item.qty }}박스
-                    · {{ formatWon(item.unit_price) }}
-                  </span>
-                  <span class="auc-sheet__cand-meta">
-                    <template v-if="item.requires_grade_input">등급 선택 필요</template>
-                    <template v-else>{{ item.grade_name || '등급' }}</template>
-                    <template v-if="item.size_name"> · {{ item.size_name }}</template>
-                    <template v-if="item.spec_kg"> · {{ item.spec_kg }}kg</template>
-                    <template v-if="item.amount"> · {{ formatWon(item.amount) }}</template>
-                    <template v-if="item.auction_time"> · {{ item.auction_time }}</template>
-                  </span>
-                </button>
-                <OdsSelect
-                  v-if="item.requires_grade_input && selectedKeys.includes(item.source_key)"
-                  :model-value="gradeByKey[item.source_key] || ''"
-                  variant="form"
-                  :data-testid="`auction-cand-grade-${item.source_key}`"
-                  :disabled="busy"
-                  @update:model-value="(v: string) => setGrade(item.source_key, v)"
-                >
-                  <option value="">등급 선택</option>
-                  <option v-for="g in grades" :key="g.grade_cd" :value="g.grade_cd">
-                    {{ g.grade_name }}
-                  </option>
-                </OdsSelect>
-              </li>
-            </ul>
+            <div
+              v-if="sortedCandidates.length"
+              class="auc-sheet__cand-frame"
+              data-testid="auction-match-candidates"
+            >
+              <table class="auc-sheet__compare-table auc-sheet__cand-table">
+                <colgroup>
+                  <col class="auc-sheet__compare-col--no" />
+                  <col class="auc-sheet__compare-col--spec" />
+                  <col class="auc-sheet__cand-col--qty" />
+                  <col class="auc-sheet__cand-col--price" />
+                  <col class="auc-sheet__cand-col--amt" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">No.</th>
+                    <th scope="col">규격</th>
+                    <th scope="col">수량</th>
+                    <th scope="col">단가</th>
+                    <th scope="col">금액</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="(item, idx) in sortedCandidates" :key="item.source_key">
+                    <tr
+                      class="auc-sheet__cand-row"
+                      :class="{ 'auc-sheet__cand-row--on': selectedKeys.includes(item.source_key) }"
+                      :data-testid="`auction-cand-${item.source_key}`"
+                      :aria-selected="selectedKeys.includes(item.source_key)"
+                      tabindex="0"
+                      @click="toggleCandidate(item)"
+                      @keydown.enter.prevent="toggleCandidate(item)"
+                      @keydown.space.prevent="toggleCandidate(item)"
+                    >
+                      <td class="auc-sheet__compare-no">{{ idx + 1 }}</td>
+                      <td class="auc-sheet__compare-spec">
+                        {{ candidateSpecTitle(item) }}
+                        <span
+                          v-if="item.requires_grade_input"
+                          class="auc-sheet__cand-grade-hint"
+                        > · 등급선택</span>
+                      </td>
+                      <td class="auc-sheet__compare-num">{{ item.qty }}박스</td>
+                      <td class="auc-sheet__compare-num">{{ formatWon(item.unit_price) }}</td>
+                      <td class="auc-sheet__compare-num">{{ formatWon(item.amount) }}</td>
+                    </tr>
+                    <tr
+                      v-if="item.requires_grade_input && selectedKeys.includes(item.source_key)"
+                      class="auc-sheet__cand-grade-row"
+                    >
+                      <td colspan="5">
+                        <OdsSelect
+                          :model-value="gradeByKey[item.source_key] || ''"
+                          variant="form"
+                          :data-testid="`auction-cand-grade-${item.source_key}`"
+                          :disabled="busy"
+                          @click.stop
+                          @update:model-value="(v: string) => setGrade(item.source_key, v)"
+                        >
+                          <option value="">등급 선택</option>
+                          <option v-for="g in grades" :key="g.grade_cd" :value="g.grade_cd">
+                            {{ g.grade_name }}
+                          </option>
+                        </OdsSelect>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
             <p v-if="selectedRows.length" class="auc-sheet__summary" data-testid="auction-match-summary">
               선택 {{ totals.count }}건 · {{ totals.qty }}박스 · {{ formatWon(totals.amount) }}
             </p>
@@ -446,25 +537,127 @@ watch(
               type="button"
               :disabled="!canSelectNext || busy"
               data-testid="auction-match-next-diff"
-              @click="goDiff"
+              @click="goCompare"
             >
               수량 확인
             </OdsButton>
           </template>
 
+          <template v-if="step === 'compare'">
+            <section class="auc-sheet__compare" aria-label="수량 비교" data-testid="auction-match-compare">
+              <div class="auc-sheet__compare-summary">
+                <p class="auc-sheet__compare-totals" data-testid="auction-match-compare-totals">
+                  보낸수량
+                  <strong>{{ compareTotals.totalShipped }}박스</strong>
+                  <span class="auc-sheet__compare-sep" aria-hidden="true">|</span>
+                  경락수량
+                  <strong>{{ compareTotals.totalMatched }}박스</strong>
+                </p>
+                <p
+                  class="auc-sheet__compare-msg"
+                  :class="{ 'auc-sheet__compare-msg--warn': compareHasDiff }"
+                  data-testid="auction-match-compare-msg"
+                >
+                  <span
+                    v-if="compareHasDiff"
+                    class="auc-sheet__compare-warn-mark"
+                    aria-hidden="true"
+                  >!</span>
+                  {{ compareMessage }}
+                </p>
+              </div>
+              <div class="auc-sheet__compare-frame">
+                <table class="auc-sheet__compare-table">
+                  <colgroup>
+                    <col class="auc-sheet__compare-col--no" />
+                    <col class="auc-sheet__compare-col--spec" />
+                    <col class="auc-sheet__compare-col--qty" />
+                    <col class="auc-sheet__compare-col--qty" />
+                    <col class="auc-sheet__compare-col--diff" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th scope="col">No.</th>
+                      <th scope="col">규격</th>
+                      <th scope="col">보낸수량</th>
+                      <th scope="col">경락수량</th>
+                      <th scope="col">차이</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(row, idx) in sortedDiffs"
+                      :key="specKey(row.spec)"
+                      :data-testid="`auction-compare-row-${specKey(row.spec)}`"
+                    >
+                      <td class="auc-sheet__compare-no">{{ idx + 1 }}</td>
+                      <td class="auc-sheet__compare-spec">{{ compareSpecTitle(row.spec) }}</td>
+                      <td class="auc-sheet__compare-num">{{ row.shipped }}박스</td>
+                      <td class="auc-sheet__compare-num">{{ row.matched }}박스</td>
+                      <td
+                        class="auc-sheet__compare-num"
+                        :class="{
+                          'auc-sheet__compare-diff--neg': row.diff < 0,
+                          'auc-sheet__compare-diff--pos': row.diff > 0,
+                        }"
+                      >
+                        {{ formatDiffQty(row.diff) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr data-testid="auction-match-compare-total-row">
+                      <td class="auc-sheet__compare-total-label" colspan="2">합계</td>
+                      <td class="auc-sheet__compare-num">{{ compareTotals.totalShipped }}박스</td>
+                      <td class="auc-sheet__compare-num">{{ compareTotals.totalMatched }}박스</td>
+                      <td class="auc-sheet__compare-num">{{ formatDiffQty(compareTotals.totalDiff) }}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+            <div class="auc-sheet__compare-footer">
+              <p class="auc-sheet__compare-guide">
+                <img class="auc-sheet__compare-guide-ico" :src="iconInfo" alt="" aria-hidden="true" />
+                규격별 수량을 확인한 후 다음 단계로 진행하세요.
+              </p>
+              <div class="auc-sheet__actions">
+                <OdsButton
+                  type="button"
+                  variant="secondary"
+                  :block="false"
+                  :disabled="busy"
+                  data-testid="auction-match-compare-back"
+                  @click="step = 'fetch'"
+                >
+                  이전
+                </OdsButton>
+                <OdsButton
+                  type="button"
+                  :block="false"
+                  :disabled="busy"
+                  data-testid="auction-match-compare-continue"
+                  @click="continueFromCompare"
+                >
+                  확인하고 계속
+                </OdsButton>
+              </div>
+            </div>
+          </template>
+
           <template v-if="step === 'diff'">
             <ul class="auc-sheet__diff-list" data-testid="auction-match-diffs">
-              <li v-for="row in diffs" :key="specKey(row.spec)" class="auc-sheet__diff">
-                <p class="auc-sheet__diff-title">{{ specTitle(row.spec) }}</p>
-                <p class="auc-sheet__cand-meta">
-                  출하 {{ row.shipped }} · 경락 {{ row.matched }} ·
-                  <template v-if="row.diff === 0">정상</template>
-                  <template v-else>차이 {{ row.diff > 0 ? '+' : '' }}{{ row.diff }}</template>
-                </p>
-                <template v-if="row.diff !== 0">
+              <li v-for="row in mismatchDiffs" :key="specKey(row.spec)" class="auc-sheet__diff">
+                <div class="auc-sheet__diff-top">
+                  <div class="auc-sheet__diff-info">
+                    <p class="auc-sheet__diff-title">{{ compareSpecTitle(row.spec) }}</p>
+                    <p class="auc-sheet__cand-meta">
+                      보낸 {{ row.shipped }} · 경락 {{ row.matched }} · 차이 {{ formatDiffQty(row.diff) }}
+                    </p>
+                  </div>
                   <OdsSelect
+                    class="auc-sheet__diff-reason"
                     :model-value="drafts[specKey(row.spec)]?.reason || ''"
-                    variant="form"
                     :data-testid="`auction-diff-reason-${specKey(row.spec)}`"
                     :disabled="busy"
                     @update:model-value="(v: string) => setReason(specKey(row.spec), v)"
@@ -478,35 +671,43 @@ watch(
                       {{ reasonLabel(reason) }}
                     </option>
                   </OdsSelect>
-                  <OdsInput
-                    v-if="drafts[specKey(row.spec)]?.reason === 'OTHER' || drafts[specKey(row.spec)]?.reason === 'QTY_ERROR'"
-                    :model-value="drafts[specKey(row.spec)]?.remark || ''"
-                    variant="form"
-                    :placeholder="drafts[specKey(row.spec)]?.reason === 'OTHER' ? '비고 (필수)' : '비고 (선택)'"
-                    :data-testid="`auction-diff-remark-${specKey(row.spec)}`"
-                    @update:model-value="(v: string) => setRemark(specKey(row.spec), v)"
+                </div>
+                <OdsInput
+                  v-if="drafts[specKey(row.spec)]?.reason === 'OTHER' || drafts[specKey(row.spec)]?.reason === 'QTY_ERROR'"
+                  class="auc-sheet__diff-remark"
+                  :model-value="drafts[specKey(row.spec)]?.remark || ''"
+                  variant="form"
+                  :placeholder="drafts[specKey(row.spec)]?.reason === 'OTHER' ? '비고 (필수)' : '비고 (선택)'"
+                  :data-testid="`auction-diff-remark-${specKey(row.spec)}`"
+                  @update:model-value="(v: string) => setRemark(specKey(row.spec), v)"
+                />
+                <label
+                  v-if="drafts[specKey(row.spec)]?.reason === 'RETURN'"
+                  class="auc-sheet__check"
+                  data-testid="auction-return-confirm"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="Boolean(drafts[specKey(row.spec)]?.returnConfirmed)"
+                    :disabled="busy"
+                    @change="(e) => setReturnConfirmed(
+                      specKey(row.spec),
+                      (e.target as HTMLInputElement).checked,
+                    )"
                   />
-                  <label
-                    v-if="drafts[specKey(row.spec)]?.reason === 'RETURN'"
-                    class="auc-sheet__check"
-                    data-testid="auction-return-confirm"
-                  >
-                    <input
-                      type="checkbox"
-                      :checked="Boolean(drafts[specKey(row.spec)]?.returnConfirmed)"
-                      :disabled="busy"
-                      @change="(e) => setReturnConfirmed(
-                        specKey(row.spec),
-                        (e.target as HTMLInputElement).checked,
-                      )"
-                    />
-                    반품 {{ Math.abs(row.diff) }}박스를 재고에 다시 반영합니다.
-                  </label>
-                </template>
+                  반품 {{ Math.abs(row.diff) }}박스를 재고에 다시 반영합니다.
+                </label>
               </li>
             </ul>
             <div class="auc-sheet__actions">
-              <OdsButton type="button" variant="secondary" :block="false" :disabled="busy" @click="step = 'fetch'">
+              <OdsButton
+                type="button"
+                variant="secondary"
+                :block="false"
+                :disabled="busy"
+                data-testid="auction-match-diff-back"
+                @click="backFromDiff"
+              >
                 이전
               </OdsButton>
               <OdsButton
@@ -522,22 +723,93 @@ watch(
           </template>
 
           <template v-if="step === 'confirm'">
-            <ul class="auc-sheet__confirm" data-testid="auction-match-confirm">
-              <li>경락일자 {{ tradeDt }}</li>
-              <li>{{ detail.market_name }} · {{ detail.corporation_name }}</li>
-              <li>선택 {{ totals.count }}건 · {{ totals.qty }}박스</li>
-              <li>예상 매출 {{ formatWon(totals.amount) }}</li>
-              <li v-for="row in diffs" :key="specKey(row.spec)">
-                {{ specTitle(row.spec) }}
-                <template v-if="row.diff === 0">정상</template>
-                <template v-else>
-                  차이 {{ row.diff > 0 ? '+' : '' }}{{ row.diff }}
-                  · {{ reasonLabel((drafts[specKey(row.spec)]?.reason || 'QTY_ERROR') as AuctionDiscrepancyReason) }}
-                </template>
-              </li>
-            </ul>
-            <div class="auc-sheet__actions">
-              <OdsButton type="button" variant="secondary" :block="false" :disabled="busy" @click="step = 'diff'">
+            <section class="auc-sheet__confirm" aria-label="최종 확인" data-testid="auction-match-confirm">
+              <div class="auc-sheet__confirm-summary">
+                <div class="auc-sheet__confirm-stat">
+                  <img class="auc-sheet__confirm-stat-ico" :src="iconCalendar" alt="" aria-hidden="true" />
+                  <div class="auc-sheet__confirm-stat-body">
+                    <span class="auc-sheet__confirm-stat-lbl">경락일자</span>
+                    <strong class="auc-sheet__confirm-stat-val auc-sheet__confirm-stat-val--accent">{{ tradeDt }}</strong>
+                  </div>
+                </div>
+                <div class="auc-sheet__confirm-stat">
+                  <img class="auc-sheet__confirm-stat-ico" :src="iconFarm" alt="" aria-hidden="true" />
+                  <div class="auc-sheet__confirm-stat-body">
+                    <span class="auc-sheet__confirm-stat-lbl">시장 · 중도매인</span>
+                    <strong class="auc-sheet__confirm-stat-val">
+                      {{ detail.market_name }} · {{ detail.corporation_name }}
+                    </strong>
+                  </div>
+                </div>
+                <div class="auc-sheet__confirm-stat">
+                  <img class="auc-sheet__confirm-stat-ico" :src="iconStock" alt="" aria-hidden="true" />
+                  <div class="auc-sheet__confirm-stat-body">
+                    <span class="auc-sheet__confirm-stat-lbl">선택규격 / 출하수량</span>
+                    <strong class="auc-sheet__confirm-stat-val auc-sheet__confirm-stat-val--accent">
+                      {{ totals.count }}건 · {{ totals.qty }}박스
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="auc-sheet__confirm-revenue" data-testid="auction-match-confirm-revenue">
+                <img class="auc-sheet__confirm-revenue-ico" :src="iconReceipt" alt="" aria-hidden="true" />
+                <p class="auc-sheet__confirm-revenue-text">
+                  예상 매출
+                  <strong>{{ formatWon(totals.amount) }}</strong>
+                </p>
+              </div>
+
+              <div class="auc-sheet__compare-frame auc-sheet__confirm-frame">
+                <table class="auc-sheet__compare-table auc-sheet__confirm-table">
+                  <colgroup>
+                    <col class="auc-sheet__compare-col--no" />
+                    <col class="auc-sheet__compare-col--spec" />
+                    <col class="auc-sheet__confirm-col--status" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th scope="col">No.</th>
+                      <th scope="col">규격</th>
+                      <th scope="col">상태 / 비고</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(row, idx) in sortedDiffs"
+                      :key="specKey(row.spec)"
+                      :data-testid="`auction-confirm-row-${specKey(row.spec)}`"
+                    >
+                      <td class="auc-sheet__compare-no">{{ idx + 1 }}</td>
+                      <td class="auc-sheet__compare-spec">{{ compareSpecTitle(row.spec) }}</td>
+                      <td
+                        class="auc-sheet__confirm-status"
+                        :class="`auc-sheet__confirm-status--${confirmStatusTone(row.diff)}`"
+                      >
+                        {{ confirmStatusText(row, drafts) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <p
+                class="auc-sheet__confirm-guide"
+                data-testid="auction-match-confirm-msg"
+              >
+                <img class="auc-sheet__compare-guide-ico" :src="iconInfo" alt="" aria-hidden="true" />
+                {{ compareMessage }}
+              </p>
+            </section>
+            <div class="auc-sheet__actions auc-sheet__actions--end">
+              <OdsButton
+                type="button"
+                variant="secondary"
+                :block="false"
+                :disabled="busy"
+                data-testid="auction-match-confirm-back"
+                @click="backFromConfirm"
+              >
                 이전
               </OdsButton>
               <OdsButton
@@ -596,28 +868,56 @@ watch(
   z-index: 1;
   width: 100%;
   max-width: var(--ods-page-content-max);
-  max-height: min(88vh, 640px);
+  max-height: min(92vh, 720px);
   overflow: auto;
   background: var(--ods-color-white);
   border-radius: var(--ods-radius-card) var(--ods-radius-card) 0 0;
   padding: var(--ods-space-16) var(--ods-space-16)
-    calc(var(--ods-space-16) + env(safe-area-inset-bottom));
+    calc(var(--ods-space-20) + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: var(--ods-space-12);
+  gap: var(--ods-space-16);
 }
 .auc-sheet__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--ods-space-8);
 }
+.auc-sheet__header-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+.auc-sheet__title-ico {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, var(--ods-color-white));
+  color: var(--ods-color-primary);
+}
+.auc-sheet__title-ico img {
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
+}
+.auc-sheet__header-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-4);
+}
 .auc-sheet__title {
   margin: 0;
-  font: var(--ods-font-headline);
-  font-weight: 700;
+  font: var(--ods-font-title-2);
+  color: var(--ods-color-text);
 }
 .auc-sheet__close {
+  flex-shrink: 0;
   padding: var(--ods-space-4);
   background: transparent;
   border: none;
@@ -625,27 +925,58 @@ watch(
   color: var(--ods-color-text-secondary);
   cursor: pointer;
 }
-.auc-sheet__field {
+.auc-sheet__trade-row {
   display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-4);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ods-space-8);
 }
 .auc-sheet__lbl {
   margin: 0;
-  font: var(--ods-font-form-label, var(--ods-font-body-2));
-  font-weight: 700;
+  flex-shrink: 0;
+  font: var(--ods-font-card-emphasis);
+  color: var(--ods-color-text);
+}
+.auc-sheet__trade-input {
+  flex: 1 1 8.5rem;
+  min-width: 0;
+}
+.auc-sheet__fetch-btn {
+  flex: 0 0 auto;
+  min-height: var(--ods-button-height-in-card);
+  padding-inline: var(--ods-space-12);
+  font: var(--ods-font-card-emphasis);
+}
+.auc-sheet :deep(.auc-sheet__fetch-btn.ods-btn--secondary-filled) {
+  background: color-mix(in srgb, var(--ods-color-secondary) 22%, var(--ods-color-white));
+  color: var(--ods-color-primary);
+  border: 1px solid color-mix(in srgb, var(--ods-color-primary) 28%, transparent);
+}
+.auc-sheet__source-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+}
+.auc-sheet__source-ico {
+  width: var(--ods-icon-lg);
+  height: var(--ods-icon-lg);
+  flex-shrink: 0;
+}
+.auc-sheet__source-label {
+  font: var(--ods-font-headline);
+  color: var(--ods-color-text);
 }
 .auc-sheet__meta,
 .auc-sheet__hint,
 .auc-sheet__summary,
 .auc-sheet__ok {
   margin: 0;
-  font: var(--ods-font-footnote);
+  font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
 .auc-sheet__err {
   margin: 0;
-  font: var(--ods-font-footnote);
+  font: var(--ods-font-caption);
   color: var(--ods-color-danger);
 }
 .auc-sheet__retry {
@@ -654,7 +985,7 @@ watch(
   border: none;
   background: transparent;
   color: var(--ods-color-primary);
-  font: var(--ods-font-footnote);
+  font: var(--ods-font-caption);
   cursor: pointer;
   text-decoration: underline;
 }
@@ -665,9 +996,7 @@ watch(
   gap: var(--ods-space-4);
   font: var(--ods-font-body-2);
 }
-.auc-sheet__cand-list,
-.auc-sheet__diff-list,
-.auc-sheet__confirm {
+.auc-sheet__diff-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -675,30 +1004,49 @@ watch(
   flex-direction: column;
   gap: var(--ods-space-8);
 }
-.auc-sheet__cand {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ods-space-6);
-  padding: var(--ods-space-8);
-  border-radius: var(--ods-radius-card);
-  background: var(--ods-color-surface-muted, #faf8f4);
+.auc-sheet__cand-frame {
+  min-width: 0;
+  margin-inline: calc(var(--ods-space-8) * -1);
+  width: calc(100% + var(--ods-space-16));
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  overflow: hidden;
+  background: var(--ods-color-white);
 }
-.auc-sheet__cand--on {
-  outline: 2px solid var(--ods-color-primary);
+.auc-sheet__cand-col--qty {
+  width: 3.4rem;
 }
-.auc-sheet__cand-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--ods-space-2);
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  text-align: left;
+.auc-sheet__cand-col--price {
+  width: 4.25rem;
+}
+.auc-sheet__cand-col--amt {
+  width: 4.75rem;
+}
+.auc-sheet__cand-row {
   cursor: pointer;
 }
-.auc-sheet__cand-name,
+.auc-sheet__cand-row:hover td {
+  background: color-mix(in srgb, var(--ods-color-primary) 4%, var(--ods-color-white));
+}
+.auc-sheet__cand-row--on td {
+  background: color-mix(in srgb, var(--ods-color-primary) 10%, var(--ods-color-white));
+}
+.auc-sheet__cand-row--on td:first-child {
+  box-shadow: inset 3px 0 0 var(--ods-color-primary);
+}
+.auc-sheet.is-busy .auc-sheet__cand-row {
+  cursor: wait;
+  pointer-events: none;
+}
+.auc-sheet__cand-grade-hint {
+  color: var(--ods-color-caution);
+  font-weight: 600;
+}
+.auc-sheet__cand-grade-row td {
+  padding: var(--ods-space-8);
+  background: color-mix(in srgb, var(--ods-color-primary) 6%, var(--ods-color-white));
+  border-bottom: 1px solid var(--ods-color-border);
+}
 .auc-sheet__diff-title {
   margin: 0;
   font: var(--ods-font-body-2);
@@ -706,13 +1054,197 @@ watch(
 }
 .auc-sheet__cand-meta {
   margin: 0;
-  font: var(--ods-font-footnote);
+  font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
 .auc-sheet__diff {
   display: flex;
   flex-direction: column;
   gap: var(--ods-space-6);
+  padding: var(--ods-space-8);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-surface-muted, #faf8f4);
+}
+.auc-sheet__diff-top {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  min-width: 0;
+}
+.auc-sheet__diff-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.auc-sheet__diff :deep(.auc-sheet__diff-reason) {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 5.75rem;
+  max-width: 7.25rem;
+  height: var(--ods-select-height);
+  min-height: var(--ods-select-height);
+  max-height: var(--ods-select-height);
+  padding: 0 var(--ods-space-8);
+  font: var(--ods-font-caption);
+  line-height: 1.2;
+}
+.auc-sheet__compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+  min-width: 0;
+  margin-inline: calc(var(--ods-space-8) * -1);
+  width: calc(100% + var(--ods-space-16));
+}
+.auc-sheet__compare-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-primary) 8%, var(--ods-color-white));
+}
+.auc-sheet__compare-totals {
+  margin: 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text);
+}
+.auc-sheet__compare-totals strong {
+  font: var(--ods-font-card-emphasis);
+  color: var(--ods-color-primary);
+}
+.auc-sheet__compare-sep {
+  margin: 0 var(--ods-space-4);
+  color: var(--ods-color-text-secondary);
+}
+.auc-sheet__compare-msg {
+  margin: 0;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.auc-sheet__compare-msg--warn {
+  color: var(--ods-color-caution);
+}
+.auc-sheet__compare-warn-mark {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: var(--ods-radius-badge);
+  background: var(--ods-color-caution);
+  color: var(--ods-color-white);
+  font: 700 10px/14px var(--ods-font-family);
+  text-align: center;
+}
+.auc-sheet__compare-frame {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-button);
+  overflow: hidden;
+  background: var(--ods-color-white);
+}
+.auc-sheet__compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font: var(--ods-font-caption);
+}
+.auc-sheet__compare-col--no {
+  width: 1.75rem;
+}
+.auc-sheet__compare-col--spec {
+  width: auto;
+}
+.auc-sheet__compare-col--qty {
+  width: 3.4rem;
+}
+.auc-sheet__compare-col--diff {
+  width: 1.85rem;
+}
+.auc-sheet__compare-table th,
+.auc-sheet__compare-table td {
+  box-sizing: border-box;
+  padding: var(--ods-space-8) var(--ods-space-4);
+  border-bottom: 1px solid var(--ods-color-border);
+  vertical-align: middle;
+  line-height: 1.3;
+}
+.auc-sheet__compare-table thead th {
+  background: var(--ods-color-bg-muted);
+  color: var(--ods-color-text-secondary);
+  font: var(--ods-font-card-emphasis);
+  text-align: right;
+  white-space: nowrap;
+}
+.auc-sheet__compare-table thead th:nth-child(1),
+.auc-sheet__compare-table thead th:nth-child(2) {
+  text-align: left;
+}
+.auc-sheet__compare-no {
+  font: var(--ods-font-caption);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--ods-color-text-secondary);
+}
+.auc-sheet__compare-spec {
+  font: var(--ods-font-caption);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ods-color-text);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.auc-sheet__compare-num {
+  font: var(--ods-font-caption);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--ods-color-text);
+}
+.auc-sheet__compare-diff--neg {
+  color: var(--ods-color-danger);
+  font-weight: 600;
+}
+.auc-sheet__compare-diff--pos {
+  color: var(--ods-color-ai);
+  font-weight: 600;
+}
+.auc-sheet__compare-table tfoot td {
+  background: color-mix(in srgb, var(--ods-color-primary) 10%, var(--ods-color-white));
+  font: var(--ods-font-card-emphasis);
+  border-bottom: none;
+}
+.auc-sheet__compare-total-label {
+  text-align: left;
+  padding-left: var(--ods-space-8);
+}
+.auc-sheet__compare-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+  padding-top: var(--ods-space-4);
+}
+.auc-sheet__compare-guide {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.auc-sheet__compare-guide-ico {
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.75;
 }
 .auc-sheet__check {
   display: flex;
@@ -723,6 +1255,136 @@ watch(
 .auc-sheet__actions {
   display: flex;
   gap: var(--ods-space-8);
+}
+.auc-sheet__actions--end {
+  justify-content: flex-end;
+  padding-bottom: var(--ods-space-8);
+}
+.auc-sheet__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ods-space-12);
+  min-width: 0;
+  margin-inline: calc(var(--ods-space-8) * -1);
+  width: calc(100% + var(--ods-space-16));
+}
+.auc-sheet__confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-primary) 8%, var(--ods-color-white));
+}
+.auc-sheet__confirm-stat {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.auc-sheet__confirm-stat + .auc-sheet__confirm-stat {
+  padding-left: var(--ods-space-8);
+  border-left: 1px solid color-mix(in srgb, var(--ods-color-primary) 18%, transparent);
+}
+.auc-sheet__confirm-stat-ico {
+  width: var(--ods-icon-sm);
+  height: var(--ods-icon-sm);
+  flex-shrink: 0;
+  margin-top: 2px;
+  opacity: 0.85;
+}
+.auc-sheet__confirm-stat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.auc-sheet__confirm-stat-lbl {
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.auc-sheet__confirm-stat-val {
+  margin: 0;
+  font: var(--ods-font-caption);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ods-color-text);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.auc-sheet__confirm-stat-val--accent {
+  color: var(--ods-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+.auc-sheet__confirm-revenue {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-primary) 10%, var(--ods-color-white));
+}
+.auc-sheet__confirm-revenue-ico {
+  width: var(--ods-icon-md, var(--ods-icon-sm));
+  height: var(--ods-icon-md, var(--ods-icon-sm));
+  flex-shrink: 0;
+}
+.auc-sheet__confirm-revenue-text {
+  margin: 0;
+  font: var(--ods-font-body-2);
+  color: var(--ods-color-text);
+}
+.auc-sheet__confirm-revenue-text strong {
+  margin-left: var(--ods-space-4);
+  font: var(--ods-font-headline);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-color-primary);
+}
+.auc-sheet__confirm-col--status {
+  width: 7.25rem;
+}
+.auc-sheet__confirm-table thead th:nth-child(3) {
+  text-align: left;
+}
+.auc-sheet__confirm-status {
+  font: var(--ods-font-caption);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  text-align: left;
+  white-space: nowrap;
+}
+.auc-sheet__confirm-status--ok {
+  color: var(--ods-color-primary);
+}
+.auc-sheet__confirm-status--neg {
+  color: var(--ods-color-danger);
+}
+.auc-sheet__confirm-status--pos {
+  color: var(--ods-color-ai);
+}
+.auc-sheet__confirm-guide {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  padding: var(--ods-space-8) var(--ods-space-12);
+  border-radius: var(--ods-radius-button);
+  background: color-mix(in srgb, var(--ods-color-primary) 8%, var(--ods-color-white));
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+@media (max-width: 360px) {
+  .auc-sheet__confirm-summary {
+    grid-template-columns: 1fr;
+  }
+  .auc-sheet__confirm-stat + .auc-sheet__confirm-stat {
+    padding-left: 0;
+    border-left: none;
+    padding-top: var(--ods-space-8);
+    border-top: 1px solid color-mix(in srgb, var(--ods-color-primary) 18%, transparent);
+  }
 }
 .auc-sheet__done {
   margin: 0;

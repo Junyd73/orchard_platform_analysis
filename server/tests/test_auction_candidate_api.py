@@ -40,6 +40,7 @@ from test_auction_candidate_service import (  # noqa: E402
     TRADE_DT,
     _create_ship,
     _ensure_farm,
+    _kg_row,
     _row,
 )
 from test_auction_ship_service import _open_ops  # noqa: E402
@@ -54,7 +55,7 @@ class AuctionCandidateApiTest(unittest.TestCase):
         self.path, self.conn = _open_ops()
         _ensure_farm(self.conn)
         self.sid = _create_ship(self.conn)
-        self.settlement_rows = [_row()]
+        self.settlement_rows = [_kg_row()]
         self.realtime_calls = 0
 
         def settlement(trade_dt: str, market_cd: str):
@@ -90,6 +91,8 @@ class AuctionCandidateApiTest(unittest.TestCase):
         self.assertNotIn("skipped", body)
         self.assertIn("source_key", item)
         self.assertIn("requires_grade_input", item)
+        self.assertIn("fruit_count_bucket", item)
+        self.assertEqual(item["fruit_count_bucket"], 10)
         self.assertEqual(self.realtime_calls, 0)
 
     def test_missing_trade_dt(self) -> None:

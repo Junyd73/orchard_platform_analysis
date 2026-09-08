@@ -19,6 +19,7 @@ export const PAYMENT_STATUS_UNPAID = 'UNPAID'
 export const PAYMENT_STATUS_PARTIAL = 'PARTIAL'
 export const PAYMENT_STATUS_PAID = 'PAID'
 
+export const SALES_SOURCE_AUCTION = 'AUCTION'
 export const SALES_SOURCE_AUCTION_RT = 'AUCTION_RT'
 
 export const STATUS_FILTER_ALL = ''
@@ -26,13 +27,24 @@ export const STATUS_FILTER_ALL = ''
 export const LABEL_SALES_STATUS = '판매상태'
 export const LABEL_PAYMENT_STATUS = '수금상태'
 export const LABEL_SALES_DETAIL = '판매상세'
+export const MSG_SALES_DETAIL_SUBTITLE = '거래처와 판매 내역을 확인할 수 있습니다.'
+export const LABEL_SALES_PARTY = '거래처'
 export const LABEL_SALES_SUMMARY = '판매요약'
 export const LABEL_SALES_PRODUCTS = '판매상품'
+export const LABEL_PRODUCT_SPEC = '품목 · 규격'
+export const LABEL_PRODUCTS_MORE = '더보기'
+export const LABEL_PRODUCTS_LESS = '접기'
+export const SALES_DETAIL_PRODUCT_PREVIEW = 4
 export const LABEL_PAYMENT_HISTORY = '수금내역'
 export const LABEL_PAYMENT_REGISTER = '수금 등록'
+export const LABEL_PAYMENT_REGISTER_CTA = '+ 수금 등록'
 export const LABEL_PAY_DT = '수금일'
-export const LABEL_PAY_AMOUNT = '수금액'
+export const LABEL_PAY_DT_COL = '일자'
 export const LABEL_PAY_METHOD = '결제수단'
+export const LABEL_PAY_METHOD_COL = '수금방법'
+export const LABEL_PAY_MEMO = '메모'
+export const LABEL_PAY_AMOUNT = '수금액'
+export const LABEL_PAY_TOTAL = '누적 수금'
 export const LABEL_PAY_SUBMIT = '등록'
 export const LABEL_PAY_CANCEL = '취소'
 export const MSG_PAYMENT_CREATE_FAIL = '수금 등록에 실패했습니다.'
@@ -42,9 +54,13 @@ export const MSG_PAY_AMOUNT_INVALID = '수금액을 확인해 주세요.'
 export const PAY_METHOD_ACCT_PREFIX = 'AS0101'
 export const PAY_METHOD_ACCT_LEVEL = 4
 export const LABEL_SALES_ROUTE = '판매경로'
+export const LABEL_SALES_METHOD = '판매방법'
+export const LABEL_SALES_DATE = '판매일자'
+export const LABEL_SALES_BOX_QTY = '판매박스수'
 export const LABEL_SALES_AMOUNT = '판매금액'
 export const LABEL_PAID_AMOUNT = '수금액'
 export const LABEL_UNPAID_AMOUNT = '미수금'
+export const LABEL_UNPAID_AMOUNT_FULL = '미수금액'
 export const LABEL_QTY = '수량'
 export const LABEL_UNIT_PRICE = '단가'
 export const LABEL_LINE_AMOUNT = '금액'
@@ -110,24 +126,35 @@ export function paymentStatusToneOf(
 }
 
 export function salesRouteLabel(row: Pick<SalesListItem, 'sales_source' | 'order_no'>): string {
-  if (row.sales_source === SALES_SOURCE_AUCTION_RT) return '경매'
+  const source = String(row.sales_source || '').trim()
+  if (source === SALES_SOURCE_AUCTION || source === SALES_SOURCE_AUCTION_RT) return '경매'
   if (String(row.order_no || '').trim()) return '주문출고'
   return '직접판매'
+}
+
+function salesRepWeightText(weight: number | null | undefined): string {
+  const n = Number(weight)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return `${n}kg`
 }
 
 function salesRepProductText(
   row: Pick<
     SalesListItem,
-    'rep_item_cd' | 'rep_variety_nm' | 'rep_size_nm' | 'rep_grade_nm' | 'rep_crop_nm'
+    'rep_item_cd' | 'rep_variety_nm' | 'rep_size_nm' | 'rep_grade_nm' | 'rep_crop_nm' | 'rep_weight'
   >,
 ): string {
   const juice = JUICE_ITEM_LABEL[String(row.rep_item_cd || '').trim()]
   if (juice) return juice
   const variety = row.rep_variety_nm || ''
-  const size = row.rep_size_nm || ''
+  const size = String(row.rep_size_nm || '').trim()
   const grade = row.rep_grade_nm || ''
   const crop = row.rep_crop_nm || ''
-  return joinDot([variety, size, grade, crop].filter(Boolean))
+  const weight = salesRepWeightText(row.rep_weight)
+  // 품종 · 중량 · 등급 · 크기(1다이). size가 이미 kg면 중량 자리로만 사용
+  const weightPart = weight || (size.endsWith('kg') ? size : '')
+  const sizePart = size && size !== weightPart ? size : ''
+  return joinDot([variety, weightPart, grade, sizePart, crop].filter(Boolean))
 }
 
 export function salesListSecondaryText(row: SalesListItem): string {
@@ -140,6 +167,16 @@ export function salesListSecondaryText(row: SalesListItem): string {
 
 export function salesListAmountLine(row: SalesListItem): string {
   return `${formatOrderAmt(row.tot_sales_amt)} | ${formatOrderAmt(row.paid_amt)} / ${formatOrderAmt(row.unpaid_amt)}`
+}
+
+export function salesListBoxQtyText(row: Pick<SalesListItem, 'tot_qty'>): string {
+  const n = Number(row.tot_qty)
+  const qty = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0
+  return `${formatOrderAmt(qty)}박스`
+}
+
+export function salesListWonText(amount: number): string {
+  return `${formatOrderAmt(amount)}원`
 }
 
 export function salesCustomerLabel(row: Pick<SalesListItem, 'customer' | 'custm_id'>): string {
@@ -164,14 +201,22 @@ function salesProductSpecKey(line: Pick<
 export function salesDetailProductText(
   line: Pick<
     SalesDetailLine,
-    'item_cd' | 'variety_nm' | 'size_nm' | 'grade_nm' | 'crop_nm'
+    'item_cd' | 'variety_nm' | 'size_nm' | 'grade_nm' | 'crop_nm' | 'weight'
   >,
 ): string {
   const juice = JUICE_ITEM_LABEL[String(line.item_cd || '').trim()]
   if (juice) return juice
+  const size = String(line.size_nm || '').trim()
+  const weight = salesRepWeightText(line.weight)
+  const weightPart = weight || (size.endsWith('kg') ? size : '')
+  const sizePart = size && size !== weightPart ? size : ''
   return joinDot(
-    [line.variety_nm, line.size_nm, line.grade_nm, line.crop_nm].filter(Boolean),
+    [line.variety_nm, weightPart, line.grade_nm, sizePart, line.crop_nm].filter(Boolean),
   )
+}
+
+export function salesProductsCountLabel(count: number): string {
+  return `총 ${Math.max(0, Number(count) || 0)}개 상품`
 }
 
 export function paymentSourceLabelOf(
@@ -184,6 +229,18 @@ export function paymentSourceLabelOf(
       : LABEL_PAYMENT_SOURCE_ORDER_PREPAY
   }
   return LABEL_PAYMENT_SOURCE_GENERAL
+}
+
+/** 수금내역 메모 표시. 자동 기본문구(판매입금)는 '-' 처리. */
+export function paymentMemoText(
+  item: Pick<SalesPaymentItem, 'rmk' | 'payment_source' | 'source_order_no'>,
+): string {
+  const rmk = String(item.rmk || '').trim()
+  if (rmk && !/^판매입금\s*\(/u.test(rmk)) return rmk
+  if (item.payment_source === PAYMENT_SOURCE_ORDER_PREPAY) {
+    return paymentSourceLabelOf(item)
+  }
+  return '-'
 }
 
 /** FIFO raw rows → 논리 표시 line (order_detail_id NULL은 합치지 않음). */

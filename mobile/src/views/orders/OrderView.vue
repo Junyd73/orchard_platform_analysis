@@ -7,6 +7,8 @@ import { fetchCommonCodes } from '@/api/commonCodes'
 import { fetchOrders } from '@/api/orders'
 import { fetchSales } from '@/api/sales'
 import { ApiClientError } from '@/api/client'
+import iconFarm from '@/assets/ods/common/icon-farm.svg'
+import iconChevronRight from '@/assets/ods/scr004/icon-chevron-right.svg'
 import iconPlus from '@/assets/ods/work-log/icon-plus.svg'
 import OdsAppBar from '@/components/ods/OdsAppBar.vue'
 import OdsBadge from '@/components/ods/OdsBadge.vue'
@@ -20,6 +22,13 @@ import OrderLookupPanel, {
 } from '@/views/orders/OrderLookupPanel.vue'
 import SalesLookupPanel from '@/views/sales/SalesLookupPanel.vue'
 import {
+  LABEL_PAID_AMOUNT,
+  LABEL_SALES_AMOUNT,
+  LABEL_SALES_BOX_QTY,
+  LABEL_SALES_DATE,
+  LABEL_SALES_METHOD,
+  LABEL_SALES_PARTY,
+  LABEL_UNPAID_AMOUNT_FULL,
   MSG_SALES_EMPTY_FILTER,
   MSG_SALES_EMPTY_FILTER_DESC,
   MSG_SALES_LOAD_FAIL,
@@ -27,8 +36,9 @@ import {
   paymentStatusLabelOf,
   paymentStatusToneOf,
   salesCustomerLabel,
-  salesListAmountLine,
-  salesListSecondaryText,
+  salesListBoxQtyText,
+  salesListWonText,
+  salesRouteLabel,
   salesStatusLabelOf,
   salesStatusToneOf,
 } from '@/views/sales/salesConstants'
@@ -583,24 +593,69 @@ onMounted(() => {
               class="sales-list__row"
               @click="openSale(row.sales_no)"
             >
-              <div class="sales-list__line1">
-                <span class="sales-list__cust">{{ salesCustomerLabel(row) }}</span>
-                <span class="sales-list__amt">{{ salesListAmountLine(row) }}</span>
-                <OdsBadge
-                  class="sales-list__pay"
-                  :tone="paymentStatusToneOf(row)"
-                >
-                  {{ paymentStatusLabelOf(row) }}
-                </OdsBadge>
+              <div class="sales-list__head">
+                <div class="sales-list__party">
+                  <span class="sales-list__party-ico" aria-hidden="true">
+                    <img :src="iconFarm" alt="" />
+                  </span>
+                  <div class="sales-list__party-text">
+                    <span class="sales-list__party-lbl">{{ LABEL_SALES_PARTY }}</span>
+                    <span class="sales-list__party-name">{{ salesCustomerLabel(row) }}</span>
+                  </div>
+                </div>
+                <div class="sales-list__head-right">
+                  <div class="sales-list__badges">
+                    <OdsBadge :tone="paymentStatusToneOf(row)">
+                      {{ paymentStatusLabelOf(row) }}
+                    </OdsBadge>
+                    <OdsBadge :tone="salesStatusToneOf(row.sales_status)">
+                      {{ salesStatusLabelOf(row.sales_status) }}
+                    </OdsBadge>
+                  </div>
+                  <img
+                    class="sales-list__chevron"
+                    :src="iconChevronRight"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                </div>
               </div>
-              <div class="sales-list__line2">
-                <span class="sales-list__meta">{{ salesListSecondaryText(row) }}</span>
-                <OdsBadge
-                  class="sales-list__status"
-                  :tone="salesStatusToneOf(row.sales_status)"
-                >
-                  {{ salesStatusLabelOf(row.sales_status) }}
-                </OdsBadge>
+
+              <div class="sales-list__meta" aria-label="판매 요약">
+                <div class="sales-list__meta-col">
+                  <span class="sales-list__meta-lbl">{{ LABEL_SALES_DATE }}</span>
+                  <span class="sales-list__meta-val">{{ row.sales_dt }}</span>
+                </div>
+                <div class="sales-list__meta-col">
+                  <span class="sales-list__meta-lbl">{{ LABEL_SALES_METHOD }}</span>
+                  <span class="sales-list__meta-val">{{ salesRouteLabel(row) }}</span>
+                </div>
+                <div class="sales-list__meta-col">
+                  <span class="sales-list__meta-lbl">{{ LABEL_SALES_BOX_QTY }}</span>
+                  <span class="sales-list__meta-val">{{ salesListBoxQtyText(row) }}</span>
+                </div>
+              </div>
+
+              <div class="sales-list__footer">
+                <div class="sales-list__amt-col">
+                  <span class="sales-list__amt-lbl">{{ LABEL_SALES_AMOUNT }}</span>
+                  <strong class="sales-list__amt-val">{{ salesListWonText(row.tot_sales_amt) }}</strong>
+                </div>
+                <div class="sales-list__amt-col">
+                  <span class="sales-list__amt-lbl">{{ LABEL_PAID_AMOUNT }}</span>
+                  <strong class="sales-list__amt-val sales-list__amt-val--paid">
+                    {{ salesListWonText(row.paid_amt) }}
+                  </strong>
+                </div>
+                <div class="sales-list__amt-col">
+                  <span class="sales-list__amt-lbl">{{ LABEL_UNPAID_AMOUNT_FULL }}</span>
+                  <strong
+                    class="sales-list__amt-val"
+                    :class="{ 'sales-list__amt-val--unpaid': Number(row.unpaid_amt) > 0 }"
+                  >
+                    {{ salesListWonText(row.unpaid_amt) }}
+                  </strong>
+                </div>
               </div>
             </button>
           </li>
@@ -797,79 +852,151 @@ onMounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0;
-  background: var(--ods-color-white, #fff);
+  gap: var(--ods-space-8);
 }
 .sales-list__item {
-  border-bottom: 1px solid var(--ods-color-border);
-}
-.sales-list__item:last-child {
-  border-bottom: none;
+  margin: 0;
 }
 .sales-list__row {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 2px;
   width: 100%;
-  min-height: 60px;
-  padding: var(--ods-space-8) 0;
-  border: 0;
-  background: transparent;
+  padding: 0;
+  border: 1px solid var(--ods-color-border);
+  border-radius: var(--ods-radius-card);
+  background: var(--ods-color-white);
+  box-shadow: var(--ods-shadow-card);
   text-align: left;
   color: inherit;
   cursor: pointer;
+  overflow: hidden;
 }
 .sales-list__row:active {
-  background: var(--ods-color-primary-subtle, #f0f7f4);
+  background: color-mix(in srgb, var(--ods-color-primary) 6%, white);
 }
-.sales-list__line1 {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto;
-  align-items: center;
-  column-gap: var(--ods-space-6);
-  padding: 0 var(--ods-space-16);
-  font: var(--ods-font-body-2);
-}
-.sales-list__cust {
-  min-width: 0;
-  font-weight: 600;
-  color: var(--ods-color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sales-list__amt {
-  min-width: 0;
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
-  color: var(--ods-color-text);
-}
-.sales-list__pay {
-  justify-self: end;
-  white-space: nowrap;
-}
-.sales-list__line2 {
+.sales-list__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
-  padding: 0 var(--ods-space-16);
+  padding: var(--ods-space-16) var(--ods-space-12) var(--ods-space-12);
+}
+.sales-list__party {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-8);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.sales-list__party-ico {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ods-color-primary) 12%, white);
+  color: var(--ods-color-primary);
+}
+.sales-list__party-ico img {
+  width: 20px;
+  height: 20px;
+}
+.sales-list__party-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.sales-list__party-lbl {
   font: var(--ods-font-caption);
   color: var(--ods-color-text-secondary);
 }
-.sales-list__meta {
-  min-width: 0;
+.sales-list__party-name {
+  font: var(--ods-font-headline);
+  font-weight: 700;
+  color: var(--ods-color-text);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.sales-list__status {
+.sales-list__head-right {
+  display: flex;
+  align-items: center;
+  gap: var(--ods-space-6);
   flex-shrink: 0;
+}
+.sales-list__badges {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: var(--ods-space-4);
+}
+.sales-list__chevron {
+  width: 14px;
+  height: 14px;
+  opacity: 0.4;
+}
+.sales-list__meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12) var(--ods-space-12) var(--ods-space-16);
+  border-top: 1px solid var(--ods-color-border);
+}
+.sales-list__meta-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.sales-list__meta-lbl {
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.sales-list__meta-val {
+  font: var(--ods-font-body-1);
+  font-weight: 700;
+  color: var(--ods-color-text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.sales-list__footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ods-space-8);
+  padding: var(--ods-space-12);
+  background: var(--ods-color-bg-muted);
+}
+.sales-list__amt-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ods-space-4);
+  min-width: 0;
+}
+.sales-list__amt-lbl {
+  font: var(--ods-font-caption);
+  color: var(--ods-color-text-secondary);
+}
+.sales-list__amt-val {
+  font: var(--ods-font-body-1);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.sales-list__amt-val--paid {
+  color: var(--ods-color-primary);
+}
+.sales-list__amt-val--unpaid {
+  color: var(--ods-color-danger);
 }
 .pager {
   display: flex;

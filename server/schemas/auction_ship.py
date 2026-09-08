@@ -77,6 +77,7 @@ class AuctionShipmentSpecOut(BaseModel):
     size_name: str
     weight: float
     farm_shipped_qty: float
+    fruit_count_bucket: int | None = None
     matched_qty: float | None = None
     diff_qty: float | None = None
     discrepancy_reason: str | None = None

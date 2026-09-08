@@ -45,6 +45,7 @@ def _map_payment_history(data: dict, *, sales_no: str = "") -> SalesPaymentHisto
             pay_method_cd=str(p.get("pay_method_cd") or ""),
             pay_method_nm=str(p.get("pay_method_nm") or ""),
             pay_amt=float(p.get("pay_amt") or 0),
+            rmk=(str(p.get("rmk")).strip() if p.get("rmk") is not None else None) or None,
             payment_source=str(p.get("payment_source") or ""),
             source_order_no=p.get("source_order_no"),
         )

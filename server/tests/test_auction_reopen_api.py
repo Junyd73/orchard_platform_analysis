@@ -74,6 +74,7 @@ from test_auction_candidate_service import (  # noqa: E402
     MARKET_CD,
     TRADE_DT,
     _ensure_farm,
+    _kg_row,
     _row,
 )
 from test_auction_finalize_service import FARM2, _open_finalize  # noqa: E402
@@ -210,7 +211,7 @@ class AuctionReopenApiTest(unittest.TestCase):
 
     def _complete(self, qty: float = 2, *, stock_seq: int = 202) -> tuple[str, str, str]:
         sid = self._create(qty, stock_seq=stock_seq)
-        self.settlement_rows = [_row(qty=qty, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=qty, price=90000)]
         key = self._lookup_key(sid)
         out = self._finalize(sid, key)
         return sid, str(out["sales_no"]), key
@@ -253,7 +254,7 @@ class AuctionReopenApiTest(unittest.TestCase):
 
     def test_completed_return_reopen_blocked(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup_key(sid)
         self._finalize(
             sid,
@@ -501,7 +502,7 @@ class AuctionReopenApiTest(unittest.TestCase):
 
     def test_existing_finalize_and_list_regression(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         out = self._finalize(sid, key)
         self.assertEqual(out["status"], AUCTION_SHIP_STATUS_COMPLETED)

@@ -74,6 +74,7 @@ from test_auction_candidate_service import (  # noqa: E402
     MARKET_CD,
     TRADE_DT,
     _ensure_farm,
+    _kg_row,
     _row,
 )
 from test_auction_finalize_service import FARM2, _open_finalize  # noqa: E402
@@ -272,7 +273,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_completed_detail_and_sales_summary(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         fin = self.client.post(
             f"{_base()}/{sid}/finalize",
@@ -322,7 +323,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
         transit = self._create(2, stock_seq=201)
         done = self._create(2, stock_seq=202)
         cancelled = self._create(2, stock_seq=203)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(done)
         self.assertEqual(
             self.client.post(
@@ -381,7 +382,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_completed_cancel_409(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         self.assertEqual(
             self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key)).status_code,
@@ -413,7 +414,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_finalize_rejects_client_price_fields(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         res = self.client.post(
             f"{_base()}/{sid}/finalize",
@@ -428,9 +429,9 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_stale_candidate_409(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
-        self.settlement_rows = [_row(qty=2, price=88000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=88000)]
         res = self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key))
         self.assertEqual(res.status_code, 409, res.text)
         self.assertEqual(res.json()["error_code"], CODE_AUCTION_CANDIDATE_STALE)
@@ -438,7 +439,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_second_finalize_409(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         self.assertEqual(
             self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key)).status_code,
@@ -451,7 +452,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
     def test_same_farm_duplicate_source_409(self) -> None:
         sid1 = self._create(2, stock_seq=201)
         sid2 = self._create(2, stock_seq=202)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid1)
         self.assertEqual(
             self.client.post(f"{_base()}/{sid1}/finalize", json=self._finalize_body(key)).status_code,
@@ -463,7 +464,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_different_farm_duplicate_source_409(self) -> None:
         sid1 = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid1)
         self.assertEqual(
             self.client.post(f"{_base()}/{sid1}/finalize", json=self._finalize_body(key)).status_code,
@@ -515,7 +516,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_unresolved_and_other_without_remark(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup_key(sid)
         unresolved = self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key))
         self.assertEqual(unresolved.status_code, 400)
@@ -541,7 +542,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
     def test_return_only_in_and_non_return_out_zero(self) -> None:
         sid = self._create(2)
         out_before = self._stock()[1]
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup_key(sid)
         res = self.client.post(
             f"{_base()}/{sid}/finalize",
@@ -570,7 +571,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
         sid = self._create(2)
         out_before = self._stock()[1]
         in_before = self._stock()[0]
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         res = self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key))
         self.assertEqual(res.status_code, 200, res.text)
@@ -583,7 +584,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_finalize_rollback(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup_key(sid)
         self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key))
         ship = self.conn.execute(
@@ -624,7 +625,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_auction_sales_query_and_regressions(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         fin = self.client.post(f"{_base()}/{sid}/finalize", json=self._finalize_body(key))
         self.assertEqual(fin.status_code, 200, fin.text)
@@ -680,7 +681,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
 
     def test_finalize_other_farm_404(self) -> None:
         sid = self._create(2)
-        self.settlement_rows = [_row(qty=2, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=2, price=90000)]
         key = self._lookup_key(sid)
         res = self.client.post(
             f"{_base(OTHER_FARM)}/{sid}/finalize",

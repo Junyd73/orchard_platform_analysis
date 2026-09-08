@@ -131,27 +131,187 @@ export function uniqueSpecGrades(
   return [...map.entries()].map(([grade_cd, grade_name]) => ({ grade_cd, grade_name }))
 }
 
+function bucketEquals(
+  candidateBucket: number | null | undefined,
+  specBucket: number | null | undefined,
+): boolean {
+  if (candidateBucket == null || specBucket == null) return false
+  if (!Number.isFinite(Number(candidateBucket)) || !Number.isFinite(Number(specBucket))) {
+    return false
+  }
+  return Number(candidateBucket) === Number(specBucket)
+}
+
 export function mapCandidateToSpec(
   candidate: AuctionCandidate,
   specs: AuctionShipmentSpec[],
   userGradeCd?: string | null,
 ): AuctionShipmentSpec | null {
+  const candBucket = candidate.fruit_count_bucket
+  if (candBucket == null || !Number.isFinite(Number(candBucket))) return null
+  // Core와 동일: 유효 weight면 weight 미매칭 시 전체 specs fallback 금지
+  if (candidate.spec_kg == null || !Number.isFinite(Number(candidate.spec_kg))) return null
   const byWeight = specs.filter((spec) => weightClose(candidate.spec_kg, spec.weight))
-  const pool = byWeight.length ? byWeight : specs
+  if (!byWeight.length) return null
+
   if (candidate.requires_grade_input) {
     const grade = String(userGradeCd || '').trim()
     if (!grade) return null
-    const hits = pool.filter((spec) => spec.grade_cd === grade)
+    const hits = byWeight.filter(
+      (spec) => spec.grade_cd === grade && bucketEquals(candBucket, spec.fruit_count_bucket),
+    )
     return hits.length === 1 ? hits[0] : null
   }
-  const hits = pool.filter((spec) => {
+  const hits = byWeight.filter((spec) => {
     const gradeOk =
       !candidate.grade_name || labelKey(candidate.grade_name) === labelKey(spec.grade_name)
-    const sizeOk =
-      !candidate.size_name || labelKey(candidate.size_name) === labelKey(spec.size_name)
-    return gradeOk && sizeOk
+    return gradeOk && bucketEquals(candBucket, spec.fruit_count_bucket)
   })
   return hits.length === 1 ? hits[0] : null
+}
+
+const GRADE_SORT_RANK: Record<string, number> = {
+  특: 0,
+  상: 1,
+  중: 2,
+}
+
+function gradeSortRank(name: string | null | undefined): number {
+  const key = String(name || '').replace(/\s+/g, '')
+  if (!key) return 99
+  if (key in GRADE_SORT_RANK) return GRADE_SORT_RANK[key]
+  return 9
+}
+
+function sortKeyText(value: string | null | undefined): string {
+  const text = String(value || '').trim()
+  return text || '\uffff'
+}
+
+function sortKeyNum(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(Number(value))) return Number.POSITIVE_INFINITY
+  return Number(value)
+}
+
+/** 후보 정렬: 품종 → 중량 → 등급 → 과수. 원본 mutate 금지. */
+export function sortAuctionCandidates(candidates: AuctionCandidate[]): AuctionCandidate[] {
+  return [...candidates].sort((a, b) => {
+    const byVariety = sortKeyText(a.variety_name).localeCompare(sortKeyText(b.variety_name), 'ko')
+    if (byVariety) return byVariety
+    const byWeight = sortKeyNum(a.spec_kg) - sortKeyNum(b.spec_kg)
+    if (byWeight) return byWeight
+    const byGrade = gradeSortRank(a.grade_name) - gradeSortRank(b.grade_name)
+    if (byGrade) return byGrade
+    const byBucket = sortKeyNum(a.fruit_count_bucket) - sortKeyNum(b.fruit_count_bucket)
+    if (byBucket) return byBucket
+    return String(a.source_key || '').localeCompare(String(b.source_key || ''))
+  })
+}
+
+/** 비교/diff row 정렬: 품종 → 중량 → 등급 → 과수. */
+export function sortSpecDiffRows(rows: SpecDiffRow[]): SpecDiffRow[] {
+  return [...rows].sort((a, b) => {
+    const byVariety = sortKeyText(a.spec.variety_name).localeCompare(
+      sortKeyText(b.spec.variety_name),
+      'ko',
+    )
+    if (byVariety) return byVariety
+    const byWeight = sortKeyNum(a.spec.weight) - sortKeyNum(b.spec.weight)
+    if (byWeight) return byWeight
+    const byGrade = gradeSortRank(a.spec.grade_name) - gradeSortRank(b.spec.grade_name)
+    if (byGrade) return byGrade
+    const byBucket =
+      sortKeyNum(a.spec.fruit_count_bucket) - sortKeyNum(b.spec.fruit_count_bucket)
+    if (byBucket) return byBucket
+    return specKey(a.spec).localeCompare(specKey(b.spec))
+  })
+}
+
+export function hasSpecDiff(rows: SpecDiffRow[]): boolean {
+  return rows.some((row) => row.diff !== 0)
+}
+
+export function sumSpecDiffTotals(rows: SpecDiffRow[]): {
+  totalShipped: number
+  totalMatched: number
+  totalDiff: number
+} {
+  const totalShipped = rows.reduce((sum, row) => sum + Number(row.shipped || 0), 0)
+  const totalMatched = rows.reduce((sum, row) => sum + Number(row.matched || 0), 0)
+  return {
+    totalShipped,
+    totalMatched,
+    totalDiff: totalMatched - totalShipped,
+  }
+}
+
+export function compareSummaryMessage(rows: SpecDiffRow[]): string {
+  const { totalShipped, totalMatched } = sumSpecDiffTotals(rows)
+  if (!hasSpecDiff(rows)) return '모든 규격의 수량이 일치합니다.'
+  if (totalShipped === totalMatched) {
+    return '총수량은 같지만 규격별 수량 차이가 있습니다.'
+  }
+  return '보낸수량과 경락수량에 차이가 있습니다.'
+}
+
+export function formatDiffQty(diff: number): string {
+  const n = Number(diff) || 0
+  if (n === 0) return '0'
+  if (n > 0) return `+${n}`
+  return String(n)
+}
+
+/** 최종확인 표 상태/비고 문구 (표시 전용). */
+export function confirmStatusText(
+  row: SpecDiffRow,
+  drafts: Record<string, DiscrepancyDraft>,
+): string {
+  if (row.diff === 0) return '정상'
+  const reason = (drafts[specKey(row.spec)]?.reason || 'QTY_ERROR') as AuctionDiscrepancyReason
+  return `차이 ${formatDiffQty(row.diff)} · ${reasonLabel(reason)}`
+}
+
+/** 최종확인 상태 색상 톤 (표시 전용). */
+export function confirmStatusTone(diff: number): 'ok' | 'neg' | 'pos' {
+  if (diff < 0) return 'neg'
+  if (diff > 0) return 'pos'
+  return 'ok'
+}
+
+export function fruitCountBucketLabel(bucket: number | null | undefined): string | null {
+  if (bucket == null || !Number.isFinite(Number(bucket))) return null
+  return `${Number(bucket)}과이내`
+}
+
+/** 비교 화면 규격명: 품종 · 중량 · 등급 · N과이내 (bucket 우선). */
+export function compareSpecTitle(spec: AuctionShipmentSpec): string {
+  const sizePart =
+    fruitCountBucketLabel(spec.fruit_count_bucket) || spec.size_name || spec.size_cd
+  return [
+    spec.variety_name || '',
+    Number(spec.weight) > 0 ? `${spec.weight}kg` : '',
+    spec.grade_name || spec.grade_cd,
+    sizePart,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** 후보 목록 규격명: 품종 · 등급 · size_name · 중량 (raw label 유지). */
+export function candidateSpecTitle(candidate: AuctionCandidate): string {
+  const gradePart = candidate.requires_grade_input
+    ? null
+    : candidate.grade_name || candidate.grade_cd
+  return [
+    candidate.variety_name || '경락',
+    gradePart,
+    candidate.size_name,
+    candidate.spec_kg != null && Number.isFinite(Number(candidate.spec_kg))
+      ? `${candidate.spec_kg}kg`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 export function computeSpecDiffs(

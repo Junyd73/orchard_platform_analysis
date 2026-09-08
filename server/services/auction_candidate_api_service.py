@@ -35,6 +35,7 @@ def _to_response(result: dict[str, Any]) -> AuctionCandidateListOut:
             size_name=row.get("size_name"),
             spec_name=row.get("spec_name"),
             spec_kg=row.get("spec_kg"),
+            fruit_count_bucket=row.get("fruit_count_bucket"),
             qty=int(row.get("qty") or 0),
             unit_price=int(row.get("unit_price") or 0),
             amount=int(row.get("amount") or 0),

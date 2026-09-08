@@ -66,6 +66,7 @@ export type AuctionShipmentSpec = {
   size_name: string
   weight: number
   farm_shipped_qty: number
+  fruit_count_bucket?: number | null
   matched_qty?: number | null
   diff_qty?: number | null
   discrepancy_reason?: string | null
@@ -101,6 +102,7 @@ export type AuctionCandidate = {
   size_name: string | null
   spec_name: string | null
   spec_kg: number | null
+  fruit_count_bucket?: number | null
   qty: number
   unit_price: number
   amount: number

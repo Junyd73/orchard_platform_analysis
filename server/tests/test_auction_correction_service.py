@@ -61,7 +61,7 @@ from core.order_ship_constants import (  # noqa: E402
 )
 from core.sales_payment_constants import SALES_STATUS_DRAFT  # noqa: E402
 from core.sales_query_service import SalesQueryService  # noqa: E402
-from test_auction_candidate_service import TRADE_DT, _row  # noqa: E402
+from test_auction_candidate_service import TRADE_DT, _kg_row, _row  # noqa: E402
 from test_auction_finalize_service import (  # noqa: E402
     FARM,
     FARM2,
@@ -128,7 +128,7 @@ class AuctionCorrectionServiceTest(unittest.TestCase):
     ) -> tuple[str, str, str]:
         sid = self._ship(qty)
         matched = qty if matched_qty is None else matched_qty
-        self.settlement_rows = [_row(qty=matched, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=matched, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         out = self._finalize_svc().finalize(
             AuctionFinalizeIn(
@@ -296,7 +296,7 @@ class AuctionCorrectionServiceTest(unittest.TestCase):
 
     def test_return_rejects(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._finalize_svc().finalize(
             AuctionFinalizeIn(
@@ -579,7 +579,7 @@ class AuctionCorrectionServiceTest(unittest.TestCase):
 
     def test_permissions_return_blocks_reopen(self) -> None:
         sid = self._ship(2)
-        self.settlement_rows = [_row(qty=1, price=90000)]
+        self.settlement_rows = [_kg_row(boxes=1, price=90000)]
         key = self._lookup(sid)["items"][0]["source_key"]
         self._finalize_svc().finalize(
             AuctionFinalizeIn(

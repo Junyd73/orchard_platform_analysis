@@ -20,6 +20,7 @@ class SalesListItem(BaseModel):
     paid_amt: float
     unpaid_amt: float
     payment_status: str | None = None
+    tot_qty: float = 0
     rep_item_cd: str = ""
     rep_variety_cd: str = ""
     rep_variety_nm: str = ""
@@ -53,6 +54,7 @@ class SalesDetailLine(BaseModel):
     size_cd: str = ""
     size_nm: str = ""
     crop_nm: str = ""
+    weight: float = 0
     qty: float = 0
     unit_price: float = 0
     item_amt: float = 0
@@ -86,6 +88,7 @@ class SalesPaymentItem(BaseModel):
     pay_method_cd: str
     pay_method_nm: str = ""
     pay_amt: float
+    rmk: str | None = None
     payment_source: str
     source_order_no: str | None = None
 

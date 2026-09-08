@@ -104,7 +104,7 @@ def _insert_sale(
     sales_dt: str = "2026-08-22",
     sales_status: str = SALES_STATUS_CONFIRMED,
     sales_source: str = "ORDER",
-    custm_id: str = "C001",
+    custm_id: str | None = "C001",
     order_no: str | None = None,
     tot: float = 100000,
     master_paid: float = 0,
@@ -406,6 +406,15 @@ class SalesQueryServiceTests(unittest.TestCase):
         row = self.svc.list_sales(FARM_A)["items"][0]
         self.assertEqual(row["rep_variety_cd"], "FR010101")
         self.assertEqual(row["rep_variety_nm"], "신고")
+
+    def test_list_tot_qty_sums_detail_qty(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="QTY-01")
+        _insert_detail(cur, sale_detail_no="QTY-01-S01", sales_no="QTY-01", qty=26)
+        _insert_detail(cur, sale_detail_no="QTY-01-S02", sales_no="QTY-01", qty=100)
+        self.conn.commit()
+        row = self.svc.list_sales(FARM_A)["items"][0]
+        self.assertEqual(row["tot_qty"], 126.0)
 
     def test_draft_payment_status_null(self) -> None:
         self.assertIsNone(
@@ -769,6 +778,117 @@ class SalesQueryDetailTests(unittest.TestCase):
         finally:
             conn.close()
             path.unlink(missing_ok=True)
+
+
+class SalesQueryAuctionProvenanceTests(unittest.TestCase):
+    """경락판매: custm_id 없이도 corporation_name을 customer로 복구."""
+
+    def setUp(self) -> None:
+        self.path, self.conn = _open_db()
+        self.svc = SalesQueryService(self.conn)
+        self.conn.executescript(
+            """
+            CREATE TABLE t_auction_ship_master (
+                shipment_id TEXT PRIMARY KEY,
+                farm_cd TEXT NOT NULL,
+                ship_dt TEXT NOT NULL,
+                market_cd TEXT NOT NULL,
+                market_name TEXT NOT NULL,
+                corporation_name TEXT NOT NULL,
+                custm_id TEXT NULL,
+                status TEXT NOT NULL,
+                sales_no TEXT NULL,
+                match_trade_dt TEXT NULL,
+                reg_dt TEXT NOT NULL
+            );
+            """
+        )
+        self.conn.commit()
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def test_auction_sale_customer_from_corporation_name(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(
+            cur,
+            sales_no="20260826-02",
+            sales_dt="2026-08-26",
+            sales_source="AUCTION",
+            custm_id=None,
+            tot=5244000,
+        )
+        cur.execute(
+            """
+            INSERT INTO t_auction_ship_master(
+                shipment_id, farm_cd, ship_dt, market_cd, market_name,
+                corporation_name, custm_id, status, sales_no, match_trade_dt, reg_dt
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "AUC20260825-001",
+                FARM_A,
+                "2026-08-25",
+                "110001",
+                "가락",
+                "한국청과(주)",
+                None,
+                "COMPLETED",
+                "20260826-02",
+                "2026-08-26",
+                "2026-08-26 00:00:00",
+            ),
+        )
+        self.conn.executescript(
+            """
+            CREATE TABLE t_auction_match_detail (
+                match_seq INTEGER PRIMARY KEY,
+                farm_cd TEXT NOT NULL,
+                shipment_id TEXT NOT NULL,
+                sale_detail_no TEXT,
+                spec_weight REAL,
+                is_valid INTEGER DEFAULT 1
+            );
+            """
+        )
+        _insert_detail(
+            cur,
+            sale_detail_no="20260826-02-S01",
+            sales_no="20260826-02",
+            qty=26,
+            unit_price=47000,
+        )
+        cur.execute(
+            """
+            INSERT INTO t_auction_match_detail(
+                match_seq, farm_cd, shipment_id, sale_detail_no, spec_weight, is_valid
+            ) VALUES (?,?,?,?,?,?)
+            """,
+            (1, FARM_A, "AUC20260825-001", "20260826-02-S01", 15.0, 1),
+        )
+        self.conn.commit()
+
+        listed = self.svc.list_sales(
+            FARM_A, from_date="2026-08-01", to_date="2026-08-31", keyword="한국청과"
+        )
+        row = next(it for it in listed["items"] if it["sales_no"] == "20260826-02")
+        self.assertEqual(row["customer"], "한국청과(주)")
+        self.assertEqual(row["sales_source"], "AUCTION")
+        self.assertEqual(row["tot_sales_amt"], 5244000)
+        self.assertEqual(row["paid_amt"], 0)
+        self.assertEqual(row["rep_weight"], 15.0)
+
+        detail = self.svc.get_sale_detail(FARM_A, "20260826-02")
+        self.assertEqual(detail["customer"], "한국청과(주)")
+        self.assertEqual(detail["sales_source"], "AUCTION")
+        self.assertEqual(detail["lines"][0]["weight"], 15.0)
+    def test_regular_customer_unchanged_when_auction_join_present(self) -> None:
+        cur = self.conn.cursor()
+        _insert_sale(cur, sales_no="R-01", tot=100000, custm_id="C001")
+        self.conn.commit()
+        out = self.svc.get_sale_detail(FARM_A, "R-01")
+        self.assertEqual(out["customer"], "홍길동")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ class AuctionCandidateItemOut(BaseModel):
     size_name: str | None = None
     spec_name: str | None = None
     spec_kg: float | None = None
+    fruit_count_bucket: int | None = None
     qty: int
     unit_price: int
     amount: int

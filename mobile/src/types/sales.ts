@@ -14,6 +14,7 @@ export interface SalesListItem {
   paid_amt: number
   unpaid_amt: number
   payment_status: PaymentStatus
+  tot_qty: number
   rep_item_cd: string
   rep_variety_cd: string
   rep_variety_nm: string
@@ -53,6 +54,7 @@ export interface SalesDetailLine {
   size_cd: string
   size_nm: string
   crop_nm: string
+  weight?: number
   qty: number
   unit_price: number
   item_amt: number
@@ -82,6 +84,7 @@ export interface SalesPaymentItem {
   pay_method_cd: string
   pay_method_nm: string
   pay_amt: number
+  rmk?: string | null
   payment_source: PaymentSource
   source_order_no: string | null
 }
