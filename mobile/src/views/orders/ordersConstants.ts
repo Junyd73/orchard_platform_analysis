@@ -224,6 +224,27 @@ export const DEFAULT_SALES_TYPE_CD = 'SA010100'
 export const DEFAULT_SEASON_TYPE_CD = 'SS010300'
 
 export const PEAR_ITEM_CD = 'FR010100'
+export const ORDER_PRODUCT_PEAR = 'PEAR'
+export const ORDER_PRODUCT_JUICE = 'JUICE'
+export const LABEL_PRODUCT_KIND = '판매품목'
+export const LABEL_PRODUCT_PEAR = '배'
+export const LABEL_PRODUCT_JUICE = '배즙'
+export const LABEL_JUICE_KIND = '배즙종류'
+export const LABEL_JUICE_PACK = '포장규격'
+export const MSG_JUICE_STOCK_EMPTY = '판매 가능한 배즙 재고가 없습니다.'
+export const MSG_JUICE_PACK_REQUIRED = '배즙 포장규격을 선택해 주세요.'
+
+/** 신규 주문에 노출하는 배즙 leaf (FR010200 레거시 제외) */
+export const JUICE_ORDER_ITEM_OPTIONS = [
+  { value: ITEM_JUICE_PLAIN, label: '일반배즙' },
+  { value: ITEM_JUICE_DORAJI, label: '도라지배즙' },
+] as const
+
+export const ORDER_PRODUCT_KIND_OPTIONS = [
+  { value: ORDER_PRODUCT_PEAR, label: LABEL_PRODUCT_PEAR },
+  { value: ORDER_PRODUCT_JUICE, label: LABEL_PRODUCT_JUICE },
+] as const
+
 export const WEIGHT_UNIT_KG = 'kg'
 export const WEIGHT_UNIT_PACK = '포'
 export const DEFAULT_WEIGHT_KG = 15

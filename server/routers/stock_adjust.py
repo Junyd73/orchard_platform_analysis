@@ -10,6 +10,7 @@ from app.schemas.stock_adjust import (
     StockAdjustBySpecRequest,
     StockAdjustRequest,
     StockAdjustResponse,
+    StockInitialRequest,
 )
 from app.services.stock_adjust_api_service import StockAdjustApiService
 
@@ -44,3 +45,14 @@ def adjust_stock_by_spec(
 ) -> StockAdjustResponse:
     """판매규격 집계 조정 — storage_dt 사용자 선택 없음."""
     return service.adjust_by_sale_spec(farm_cd, body, user_id=user_id)
+
+
+@router.post("/initial", response_model=StockAdjustResponse)
+def create_initial_stock(
+    farm_cd: str,
+    body: StockInitialRequest,
+    user_id: str | None = Depends(_user_header),
+    service: StockAdjustApiService = Depends(get_stock_adjust_api_service),
+) -> StockAdjustResponse:
+    """배즙 신규 재고등록 — master + 초기 IN 단일 TX."""
+    return service.create_initial(farm_cd, body, user_id=user_id)

@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 
 import { fetchCommonCodes } from '@/api/commonCodes'
 import { createCustomer, createOrder, fetchCustomers, fetchOrder, updateOrder } from '@/api/orders'
+import { listFruitStock } from '@/api/stock'
 import { fetchWorkLogAccountCodes, type WorkLogAccountCodeOption } from '@/api/workLogs'
 import { ApiClientError } from '@/api/client'
 import iconChevronDown from '@/assets/ods/common/icon-chevron-down.svg'
@@ -48,6 +49,8 @@ import {
   LABEL_EXPAND_LINE,
   LABEL_EXPAND_SHIP,
   LABEL_GRADE,
+  LABEL_JUICE_KIND,
+  LABEL_JUICE_PACK,
   LABEL_LINE,
   LABEL_NEW_CUSTOMER,
   LABEL_NEW_CUSTOMER_A11Y,
@@ -56,6 +59,7 @@ import {
   LABEL_ORDER_DT,
   LABEL_PREPAY,
   LABEL_PREPAY_METHOD,
+  LABEL_PRODUCT_KIND,
   LABEL_QTY,
   LABEL_REMOVE_LINE,
   LABEL_RCV_ADDR,
@@ -73,9 +77,16 @@ import {
   LABEL_WEIGHT,
   MSG_CUSTOMER_REQUIRED,
   MSG_CUSTOMER_SAVE_FAIL,
+  MSG_JUICE_STOCK_EMPTY,
   MSG_PARCEL_DEST_NONE,
   MSG_PREPAY_METHOD_REQUIRED,
   MSG_SAVE_FAIL,
+  ORDER_PRODUCT_JUICE,
+  ORDER_PRODUCT_KIND_OPTIONS,
+  ORDER_PRODUCT_PEAR,
+  JUICE_ORDER_ITEM_OPTIONS,
+  ITEM_JUICE_DORAJI,
+  ITEM_JUICE_PLAIN,
   formatOrderAmt,
   isOrderEditLocked,
   isParcelDelivery,
@@ -94,18 +105,29 @@ import {
   pickDefaultWeightCd,
 } from '@/views/orders/ordersConstants'
 import {
+  applyJuicePackToLine,
   buildOrderPayload,
+  clearJuiceSpec,
   destQtySum,
   emptyDest,
   emptyLine,
   effectiveDests,
   findSaveIssue as findFormSaveIssue,
   isBlankDestDraft,
+  isJuiceEditLine,
   linesFromDetail,
   num,
   type EditDest,
   type EditLine,
 } from '@/views/orders/orderFormModel'
+import {
+  buildJuicePackOptions,
+  findJuicePackOption,
+  juiceLineSummaryText,
+  juicePackOptionsForItem,
+  resolveJuicePackSelection,
+  type JuicePackOption,
+} from '@/views/orders/orderJuiceModel'
 import {
   deliveryQtyTone,
   emptyDeliveryDraft,
@@ -170,6 +192,7 @@ const grades = ref<CommonCodeItem[]>([])
 const specs = ref<CommonCodeItem[]>([])
 const pearSizes = ref<CommonCodeItem[]>([])
 const deliveries = ref<CommonCodeItem[]>([])
+const juicePackOptions = ref<JuicePackOption[]>([])
 
 const weightKgCodes = computed(() => specs.value.filter((c) => isWeightKgName(c.code_nm)))
 const weightPackCodes = computed(() => specs.value.filter((c) => isWeightPackName(c.code_nm)))
@@ -215,12 +238,19 @@ function codeNmOf(codes: CommonCodeItem[], cd: string): string {
 }
 
 function lineSpecText(line: EditLine): string {
+  if (isJuiceEditLine(line)) {
+    return juiceLineSummaryText(line)
+  }
   return joinDot([
     codeNmOf(varieties.value, line.variety_cd),
     codeNmOf(weightCodesFor(line), line.weight_cd),
     codeNmOf(grades.value, line.grade_cd),
     codeNmOf(sizeCodesFor(line), line.size_cd),
   ])
+}
+
+function juicePacksForLine(line: EditLine): JuicePackOption[] {
+  return juicePackOptionsForItem(juicePackOptions.value, line.item_cd)
 }
 
 function lineQtyAmtText(line: EditLine): string {
@@ -425,7 +455,34 @@ function lineWeightValue(line: EditLine): number {
   return parseWeightFromCodeNm(row?.code_nm || '')
 }
 
+function syncJuicePackSelection(line: EditLine) {
+  const packs = juicePacksForLine(line)
+  const picked = resolveJuicePackSelection(packs, line.juice_pack_key)
+  if (picked) applyJuicePackToLine(line, picked)
+  else clearJuiceSpec(line)
+}
+
 function applyLineDefaults(line: EditLine) {
+  if (isJuiceEditLine(line)) {
+    line.product_kind = ORDER_PRODUCT_JUICE
+    if (!isJuiceOrderLeaf(line.item_cd)) {
+      line.item_cd = ITEM_JUICE_PLAIN
+    }
+    syncJuicePackSelection(line)
+    if (!line.delivery_tp_cd && deliveries.value[0]) {
+      line.delivery_tp_cd = deliveries.value[0].code_cd
+    }
+    if (isParcelDelivery(line.delivery_tp_cd)) {
+      line.dests = line.dests.filter((d) => !isBlankDestDraft(d))
+      return
+    }
+    if (!line.dests.length) line.dests.push(emptyDest())
+    if (line.dests[0]) line.dests[0].qty = line.qty
+    return
+  }
+  line.product_kind = ORDER_PRODUCT_PEAR
+  line.item_cd = PEAR_ITEM_CD
+  clearJuiceSpec(line)
   if (!line.variety_cd || !isVarietyCode(line.variety_cd)) {
     line.variety_cd = varieties.value[0]?.code_cd || ''
   }
@@ -455,15 +512,60 @@ function applyLineDefaults(line: EditLine) {
   }
 }
 
+function isJuiceOrderLeaf(itemCd: string): boolean {
+  const cd = String(itemCd || '').trim()
+  return cd === ITEM_JUICE_PLAIN || cd === ITEM_JUICE_DORAJI
+}
+
 function setVariety(line: EditLine, varietyCd: string) {
   line.variety_cd = varietyCd
   applyLineDefaults(line)
 }
 
+function setProductKind(line: EditLine, kind: string) {
+  if (kind === ORDER_PRODUCT_JUICE) {
+    line.product_kind = ORDER_PRODUCT_JUICE
+    line.item_cd = ITEM_JUICE_PLAIN
+    line.variety_cd = ''
+    line.weight_cd = ''
+    line.grade_cd = ''
+    line.size_cd = ''
+    clearJuiceSpec(line)
+    applyLineDefaults(line)
+    return
+  }
+  line.product_kind = ORDER_PRODUCT_PEAR
+  line.item_cd = PEAR_ITEM_CD
+  line.variety_cd = ''
+  line.weight_cd = ''
+  line.grade_cd = ''
+  line.size_cd = ''
+  clearJuiceSpec(line)
+  applyLineDefaults(line)
+}
+
+function setJuiceKind(line: EditLine, itemCd: string) {
+  const cd = String(itemCd || '').trim()
+  if (!isJuiceOrderLeaf(cd)) return
+  line.product_kind = ORDER_PRODUCT_JUICE
+  line.item_cd = cd
+  clearJuiceSpec(line)
+  applyLineDefaults(line)
+}
+
+function setJuicePack(line: EditLine, packKey: string) {
+  const pack = findJuicePackOption(juicePackOptions.value, packKey)
+  if (!pack) {
+    clearJuiceSpec(line)
+    return
+  }
+  applyJuicePackToLine(line, pack)
+}
+
 async function loadMasters() {
   errorMsg.value = ''
   try {
-    const [cust, pearKids, grade, spec, size, dlv, payMethods, salesTypeCodes, seasonCodes] =
+    const [cust, pearKids, grade, spec, size, dlv, payMethods, salesTypeCodes, seasonCodes, juicePlain, juiceDoraji] =
       await Promise.all([
       fetchCustomers(farmCd.value),
       fetchCommonCodes(farmCd.value, PEAR_ITEM_CD),
@@ -478,6 +580,8 @@ async function loadMasters() {
       ),
       fetchCommonCodes(farmCd.value, CODE_PARENT_SALES_TYPE),
       fetchCommonCodes(farmCd.value, CODE_PARENT_SEASON),
+      listFruitStock(farmCd.value, { item_cd: ITEM_JUICE_PLAIN }),
+      listFruitStock(farmCd.value, { item_cd: ITEM_JUICE_DORAJI }),
     ])
     customers.value = cust
     // FR01 직계는 중분류(배/배즙/원물). 품종은 FR010100 하위 소분류만.
@@ -489,9 +593,11 @@ async function loadMasters() {
     payMethodOptions.value = payMethods
     salesTypes.value = salesTypeCodes
     seasonTypes.value = seasonCodes
-    if (!isEdit.value) {
-      lines.value.forEach(applyLineDefaults)
-    }
+    juicePackOptions.value = buildJuicePackOptions([...juicePlain, ...juiceDoraji])
+    lines.value.forEach((line) => {
+      if (isJuiceEditLine(line)) syncJuicePackSelection(line)
+      else if (!isEdit.value) applyLineDefaults(line)
+    })
   } catch (err) {
     errorMsg.value = err instanceof ApiClientError ? err.message : MSG_SAVE_FAIL
   }
@@ -517,7 +623,10 @@ async function hydrateOrder() {
   lines.value = linesFromDetail(detail, (line) =>
     isPearVariety(line.variety_cd) ? weightKgCodes.value : weightPackCodes.value,
   )
-  lines.value.forEach(applyLineDefaults)
+  lines.value.forEach((line) => {
+    if (isJuiceEditLine(line)) syncJuicePackSelection(line)
+    else applyLineDefaults(line)
+  })
   expandedProductIndex.value = 0
   expandedShipIndex.value = null
 }
@@ -807,43 +916,111 @@ watch(
               </div>
             </div>
             <div class="spec-grid">
-              <OdsFormField :label="LABEL_VARIETY" required>
+              <OdsFormField :label="LABEL_PRODUCT_KIND" required>
                 <OdsSelect
-                  :model-value="line.variety_cd"
+                  :model-value="line.product_kind"
                   variant="form"
                   :disabled="lockProducts"
-                  @update:model-value="(v) => setVariety(line, v)"
+                  data-testid="order-product-kind"
+                  @update:model-value="(v) => setProductKind(line, v)"
                 >
-                  <option value="">품종 선택</option>
-                  <option v-for="v in varieties" :key="v.code_cd" :value="v.code_cd">
-                    {{ v.code_nm }}
+                  <option
+                    v-for="opt in ORDER_PRODUCT_KIND_OPTIONS"
+                    :key="opt.value"
+                    :value="opt.value"
+                  >
+                    {{ opt.label }}
                   </option>
                 </OdsSelect>
               </OdsFormField>
-              <OdsFormField :label="LABEL_WEIGHT" required>
-                <OdsSelect v-model="line.weight_cd" variant="form" :disabled="lockProducts">
-                  <option value="">중량 선택</option>
-                  <option v-for="w in weightCodesFor(line)" :key="w.code_cd" :value="w.code_cd">
-                    {{ w.code_nm }}
-                  </option>
-                </OdsSelect>
-              </OdsFormField>
-              <OdsFormField :label="LABEL_GRADE" required>
-                <OdsSelect v-model="line.grade_cd" variant="form" :disabled="lockProducts">
-                  <option value="">등급 선택</option>
-                  <option v-for="g in grades" :key="g.code_cd" :value="g.code_cd">
-                    {{ g.code_nm }}
-                  </option>
-                </OdsSelect>
-              </OdsFormField>
-              <OdsFormField :label="LABEL_SIZE" required>
-                <OdsSelect v-model="line.size_cd" variant="form" :disabled="lockProducts">
-                  <option value="">크기 선택</option>
-                  <option v-for="s in sizeCodesFor(line)" :key="s.code_cd" :value="s.code_cd">
-                    {{ s.code_nm }}
-                  </option>
-                </OdsSelect>
-              </OdsFormField>
+              <template v-if="isJuiceEditLine(line)">
+                <OdsFormField :label="LABEL_JUICE_KIND" required>
+                  <OdsSelect
+                    :model-value="line.item_cd"
+                    variant="form"
+                    :disabled="lockProducts"
+                    data-testid="order-juice-kind"
+                    @update:model-value="(v) => setJuiceKind(line, v)"
+                  >
+                    <option
+                      v-for="opt in JUICE_ORDER_ITEM_OPTIONS"
+                      :key="opt.value"
+                      :value="opt.value"
+                    >
+                      {{ opt.label }}
+                    </option>
+                  </OdsSelect>
+                </OdsFormField>
+                <OdsFormField :label="LABEL_JUICE_PACK" required>
+                  <OdsSelect
+                    :model-value="line.juice_pack_key"
+                    variant="form"
+                    :disabled="lockProducts || !juicePacksForLine(line).length"
+                    data-testid="order-juice-pack"
+                    @update:model-value="(v) => setJuicePack(line, v)"
+                  >
+                    <option
+                      v-if="juicePacksForLine(line).length !== 1"
+                      value=""
+                    >
+                      포장규격 선택
+                    </option>
+                    <option
+                      v-for="p in juicePacksForLine(line)"
+                      :key="p.key"
+                      :value="p.key"
+                    >
+                      {{ p.label }}
+                    </option>
+                  </OdsSelect>
+                  <p
+                    v-if="!juicePacksForLine(line).length"
+                    class="juice-pack-empty"
+                    data-testid="order-juice-pack-empty"
+                  >
+                    {{ MSG_JUICE_STOCK_EMPTY }}
+                  </p>
+                </OdsFormField>
+              </template>
+              <template v-else>
+                <OdsFormField :label="LABEL_VARIETY" required>
+                  <OdsSelect
+                    :model-value="line.variety_cd"
+                    variant="form"
+                    :disabled="lockProducts"
+                    @update:model-value="(v) => setVariety(line, v)"
+                  >
+                    <option value="">품종 선택</option>
+                    <option v-for="v in varieties" :key="v.code_cd" :value="v.code_cd">
+                      {{ v.code_nm }}
+                    </option>
+                  </OdsSelect>
+                </OdsFormField>
+                <OdsFormField :label="LABEL_WEIGHT" required>
+                  <OdsSelect v-model="line.weight_cd" variant="form" :disabled="lockProducts">
+                    <option value="">중량 선택</option>
+                    <option v-for="w in weightCodesFor(line)" :key="w.code_cd" :value="w.code_cd">
+                      {{ w.code_nm }}
+                    </option>
+                  </OdsSelect>
+                </OdsFormField>
+                <OdsFormField :label="LABEL_GRADE" required>
+                  <OdsSelect v-model="line.grade_cd" variant="form" :disabled="lockProducts">
+                    <option value="">등급 선택</option>
+                    <option v-for="g in grades" :key="g.code_cd" :value="g.code_cd">
+                      {{ g.code_nm }}
+                    </option>
+                  </OdsSelect>
+                </OdsFormField>
+                <OdsFormField :label="LABEL_SIZE" required>
+                  <OdsSelect v-model="line.size_cd" variant="form" :disabled="lockProducts">
+                    <option value="">크기 선택</option>
+                    <option v-for="s in sizeCodesFor(line)" :key="s.code_cd" :value="s.code_cd">
+                      {{ s.code_nm }}
+                    </option>
+                  </OdsSelect>
+                </OdsFormField>
+              </template>
             </div>
             <div class="price-grid">
               <OdsFormField :label="LABEL_QTY" required>
@@ -1094,6 +1271,11 @@ watch(
 .spec-grid :deep(.ods-select) {
   padding-left: var(--ods-space-8);
   padding-right: var(--ods-space-8);
+}
+.juice-pack-empty {
+  margin: var(--ods-space-4) 0 0;
+  font: var(--ods-font-caption);
+  color: var(--ods-color-caution);
 }
 .form-span-2 {
   grid-column: 1 / -1;

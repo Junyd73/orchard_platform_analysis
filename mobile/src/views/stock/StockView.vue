@@ -27,6 +27,9 @@ import {
   reasonAllowsIn,
   reasonAllowsOut,
 } from '@/views/stock/stockAdjustConstants'
+import StockInitialSheet from '@/views/stock/StockInitialSheet.vue'
+import { LABEL_STOCK_INITIAL_BTN } from '@/views/stock/stockInitialModel'
+import { juiceLineSummaryText } from '@/views/orders/orderJuiceModel'
 import { cancelAuctionShipment, listAuctionShipments } from '@/api/auctionShipments'
 import type { AuctionShipmentListItem } from '@/types/auctionShipment'
 import AuctionShipConfirmSheet from '@/views/stock/AuctionShipConfirmSheet.vue'
@@ -69,11 +72,6 @@ const ITEM_PRODUCT = 'FR010100'
 const ITEM_RAW     = 'FR010300'
 const STOCK_TAB_JUICE = 'JUICE'
 const JUICE_STOCK_CDS = ['FR010200', 'FR010202', 'FR010201'] as const
-const JUICE_LABEL: Record<string, string> = {
-  FR010202: '일반배즙',
-  FR010201: '도라지배즙',
-  FR010200: '배즙',
-}
 
 const STOCK_TYPES = [
   { value: ITEM_PRODUCT, label: '상품'  },
@@ -125,6 +123,7 @@ const pageSuccess = ref('')
 const adjustReasons = ref<{ value: string; label: string }[]>(
   ADJUST_REASON_OPTIONS.map((r) => ({ value: r.value, label: r.label })),
 )
+const initialSheetOpen = ref(false)
 const canAdjustIn = computed(() => reasonAllowsIn(adjustReason.value))
 const canAdjustOut = computed(() => reasonAllowsOut(adjustReason.value))
 
@@ -303,6 +302,11 @@ watch(stockType, () => {
   resetQueryFilters()
   void load()
 })
+
+async function onInitialStockSuccess() {
+  pageSuccess.value = '배즙 재고가 등록되었습니다.'
+  await load()
+}
 
 async function loadAdjustReasons() {
   try {
@@ -811,7 +815,12 @@ function cardTitle(row: StockItem): string {
     return parts.join(' · ')
   }
   if (JUICE_STOCK_CDS.includes(row.item_cd as typeof JUICE_STOCK_CDS[number])) {
-    return JUICE_LABEL[row.item_cd] || row.item_nm || '배즙'
+    // 배즙: 품목명 · 포장규격(grade_nm). weight/size 미노출
+    return juiceLineSummaryText({
+      item_cd: row.item_cd,
+      item_nm: row.item_nm,
+      grade_nm: row.grade_nm,
+    })
   }
   // 상품: 중량 · 과수 · 등급
   const wStr = row.weight > 0 ? `${row.weight}kg` : ''
@@ -1065,6 +1074,17 @@ const stockBatchDockStyle = {
         />
         <span>재고(0)포함</span>
       </label>
+      <OdsButton
+        v-if="stockType === STOCK_TAB_JUICE"
+        type="button"
+        variant="secondary"
+        :block="false"
+        class="stock-view__initial-btn"
+        data-testid="stock-initial-open"
+        @click="initialSheetOpen = true"
+      >
+        {{ LABEL_STOCK_INITIAL_BTN }}
+      </OdsButton>
     </div>
 
     <!-- 조회 조건: 상품 리스트와 구분되는 카드 -->
@@ -1339,6 +1359,12 @@ const stockBatchDockStyle = {
       @status-conflict="onAuctionReopenStatusConflict"
       @not-found="onAuctionReopenNotFound"
     />
+    <StockInitialSheet
+      :open="initialSheetOpen"
+      :farm-cd="farmCd || ''"
+      @close="initialSheetOpen = false"
+      @success="onInitialStockSuccess"
+    />
 
     <!-- 재고 이력 bottom sheet -->
     <Teleport to="body">
@@ -1496,6 +1522,15 @@ const stockBatchDockStyle = {
   align-items: center;
   justify-content: space-between;
   gap: var(--ods-space-8);
+}
+.stock-view__initial-btn {
+  flex-shrink: 0;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 var(--ods-space-12);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .stock-view__filter-toggle {
   display: flex;

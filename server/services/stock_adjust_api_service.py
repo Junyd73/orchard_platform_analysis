@@ -3,22 +3,25 @@
 
 from __future__ import annotations
 
-from app.core.exceptions import BusinessRuleError, EntityNotFoundError
+from app.core.exceptions import BusinessRuleError, DataIntegrityError, EntityNotFoundError
 from app.db.sqlite import get_sqlite_write_connection
 from app.schemas.stock_adjust import (
     StockAdjustBySpecRequest,
     StockAdjustRequest,
     StockAdjustResponse,
+    StockInitialRequest,
 )
 from app.services._core_path import ensure_repo_root_on_path
 
 ensure_repo_root_on_path()
 
+from core.stock_adjust_constants import CODE_STOCK_SPEC_EXISTS  # noqa: E402
 from core.stock_adjust_service import (  # noqa: E402
     StockAdjustBySpecIn,
     StockAdjustError,
     StockAdjustIn,
     StockAdjustService,
+    StockInitialIn,
 )
 
 
@@ -72,6 +75,39 @@ class StockAdjustApiService:
             memo=getattr(body, "memo", "") or "",
         )
         return self._run(payload, user_id=user_id, by_spec=True)
+
+    def create_initial(
+        self,
+        farm_cd: str,
+        body: StockInitialRequest,
+        *,
+        user_id: str | None,
+    ) -> StockAdjustResponse:
+        payload = StockInitialIn(
+            farm_cd=farm_cd,
+            wh_cd=body.wh_cd,
+            item_cd=body.item_cd,
+            variety_cd=body.variety_cd,
+            grade_cd=body.grade_cd,
+            size_cd=body.size_cd,
+            weight=body.weight,
+            harvest_year=body.harvest_year,
+            initial_qty=body.initial_qty,
+            reason_cd=body.reason_cd,
+            memo=body.memo or "",
+        )
+        with get_sqlite_write_connection(self.db_path) as conn:
+            try:
+                svc = StockAdjustService(conn)
+                uid = str(user_id or "").strip() or "MOBILE"
+                out = svc.create_initial_stock(payload, user_id=uid)
+            except StockAdjustError as exc:
+                if exc.code == "STOCK_NOT_FOUND":
+                    raise EntityNotFoundError(exc.message) from exc
+                if exc.code == CODE_STOCK_SPEC_EXISTS:
+                    raise DataIntegrityError(exc.message, error_code=exc.code) from exc
+                raise BusinessRuleError(exc.message, error_code=exc.code) from exc
+        return StockAdjustResponse(**out)
 
     def _run(
         self,

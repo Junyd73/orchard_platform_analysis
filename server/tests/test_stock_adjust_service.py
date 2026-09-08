@@ -368,5 +368,154 @@ class StockAdjustServiceTests(unittest.TestCase):
         self.assertEqual(rows["2026-08-20"], 9.0)
 
 
+def _seed_juice_codes(conn: sqlite3.Connection) -> None:
+    ensure_adjust_reason_codes(conn, FARM)
+    rows = [
+        (FARM, "FR010101", "신고배", "FR010100", "Y"),
+        (FARM, "QT010100", "30포", "QT01", "Y"),
+        (FARM, "FR010201", "도라지배즙", "FR010200", "Y"),
+        (FARM, "FR010202", "순배즙", "FR010200", "Y"),
+        (FARM, "FR010200", "배즙", "FR01", "Y"),
+        (FARM, "FR010100", "배", "FR01", "Y"),
+        (FARM, "FR010300", "원물", "FR01", "Y"),
+    ]
+    conn.executemany(
+        "INSERT INTO m_common_code (farm_cd, code_cd, code_nm, parent_cd, use_yn) VALUES (?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+
+
+def _juice_initial(**over: object):
+    from core.stock_adjust_service import StockInitialIn
+    from core.stock_constants import DEFAULT_JUICE_SIZE_WEIGHT_CD, DEFAULT_JUICE_WEIGHT
+
+    data = dict(
+        farm_cd=FARM,
+        wh_cd="WH01",
+        item_cd="FR010201",
+        variety_cd="FR010101",
+        grade_cd="QT010100",
+        size_cd=DEFAULT_JUICE_SIZE_WEIGHT_CD,
+        weight=DEFAULT_JUICE_WEIGHT,
+        harvest_year=2026,
+        initial_qty=50,
+        reason_cd=REASON_OTHER,
+        memo="배즙 초기재고 등록",
+    )
+    data.update(over)
+    return StockInitialIn(**data)  # type: ignore[arg-type]
+
+
+class StockInitialJuiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.path, self.conn = _open()
+        _seed_juice_codes(self.conn)
+        self.svc = StockAdjustService(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        self.path.unlink(missing_ok=True)
+
+    def _assert_stock_and_log(self, item_cd: str, qty: float) -> int:
+        masters = self.conn.execute(
+            "SELECT * FROM t_stock_master WHERE farm_cd=? AND item_cd=?",
+            (FARM, item_cd),
+        ).fetchall()
+        self.assertEqual(len(masters), 1)
+        m = masters[0]
+        self.assertEqual(float(m["in_qty"]), qty)
+        self.assertEqual(float(m["out_qty"]), 0)
+        self.assertEqual(float(m["reserved_qty"]), 0)
+        avail = float(m["in_qty"]) - float(m["out_qty"]) - float(m["reserved_qty"])
+        self.assertEqual(avail, qty)
+        logs = self.conn.execute(
+            """
+            SELECT * FROM t_stock_log
+            WHERE farm_cd=? AND item_cd=? AND io_type=?
+            ORDER BY log_seq DESC
+            """,
+            (FARM, item_cd, IO_TYPE_IN),
+        ).fetchall()
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(float(logs[0]["qty"]), qty)
+        self.assertEqual(logs[0]["ref_type"], REF_TYPE_ADJUST)
+        self.assertEqual(logs[0]["ref_id"], REASON_OTHER)
+        self.assertIn("재고조정", logs[0]["remark"] or "")
+        return int(m["stock_seq"])
+
+    def test_create_doraji_50(self) -> None:
+        out = self.svc.create_initial_stock(_juice_initial(item_cd="FR010201"), user_id="junyd73")
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["qty"], 50)
+        self.assertEqual(out["io_type"], IO_TYPE_IN)
+        seq = self._assert_stock_and_log("FR010201", 50)
+        self.assertEqual(out["stock_seq"], seq)
+
+    def test_create_plain_50(self) -> None:
+        out = self.svc.create_initial_stock(_juice_initial(item_cd="FR010202"), user_id="junyd73")
+        self.assertTrue(out["ok"])
+        self._assert_stock_and_log("FR010202", 50)
+
+    def test_duplicate_sale_spec_rejected(self) -> None:
+        self.svc.create_initial_stock(_juice_initial(), user_id="U1")
+        with self.assertRaises(StockAdjustError) as ctx:
+            self.svc.create_initial_stock(_juice_initial(), user_id="U1")
+        self.assertEqual(ctx.exception.code, "STOCK_SPEC_EXISTS")
+        self.assertIn("동일 규격", ctx.exception.message)
+        n = self.conn.execute(
+            "SELECT COUNT(*) c FROM t_stock_master WHERE item_cd='FR010201'",
+        ).fetchone()["c"]
+        self.assertEqual(n, 1)
+
+    def test_reject_mid_product_raw(self) -> None:
+        for item in ("FR010200", "FR010100", "FR010300"):
+            with self.assertRaises(StockAdjustError) as ctx:
+                self.svc.create_initial_stock(_juice_initial(item_cd=item), user_id="U1")
+            self.assertEqual(ctx.exception.code, "INITIAL_ITEM")
+
+    def test_reject_invalid_qty(self) -> None:
+        with self.assertRaises(StockAdjustError) as ctx:
+            self.svc.create_initial_stock(_juice_initial(initial_qty=0), user_id="U1")
+        self.assertEqual(ctx.exception.code, "ADJUST_QTY")
+
+    def test_reject_invalid_weight_size(self) -> None:
+        with self.assertRaises(StockAdjustError) as ctx:
+            self.svc.create_initial_stock(_juice_initial(weight=15), user_id="U1")
+        self.assertEqual(ctx.exception.code, "INITIAL_WEIGHT_SIZE")
+        with self.assertRaises(StockAdjustError) as ctx2:
+            self.svc.create_initial_stock(_juice_initial(size_cd="SZ010200"), user_id="U1")
+        self.assertEqual(ctx2.exception.code, "INITIAL_WEIGHT_SIZE")
+
+    def test_rollback_when_log_fails_after_master_insert(self) -> None:
+        original = self.svc._apply_delta
+
+        def boom(*_a, **_k):
+            raise RuntimeError("forced log failure")
+
+        self.svc._apply_delta = boom  # type: ignore[method-assign]
+        try:
+            with self.assertRaises(RuntimeError):
+                self.svc.create_initial_stock(_juice_initial(), user_id="U1")
+        finally:
+            self.svc._apply_delta = original  # type: ignore[method-assign]
+        n_m = self.conn.execute(
+            "SELECT COUNT(*) c FROM t_stock_master WHERE item_cd='FR010201'",
+        ).fetchone()["c"]
+        n_l = self.conn.execute(
+            "SELECT COUNT(*) c FROM t_stock_log WHERE item_cd='FR010201'",
+        ).fetchone()["c"]
+        self.assertEqual(n_m, 0)
+        self.assertEqual(n_l, 0)
+
+    def test_existing_adjust_still_works(self) -> None:
+        out = self.svc.adjust(_payload(qty=1), user_id="U1")
+        self.assertTrue(out["ok"])
+        row = self.conn.execute(
+            "SELECT out_qty FROM t_stock_master WHERE item_cd='FR010100'",
+        ).fetchone()
+        self.assertEqual(float(row["out_qty"]), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

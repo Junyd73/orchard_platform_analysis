@@ -42,6 +42,23 @@ class StockAdjustBySpecRequest(BaseModel):
     memo: str = ""
 
 
+class StockInitialRequest(BaseModel):
+    """배즙 신규 재고등록 — storage_dt 서버 결정."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_cd: str = Field(..., min_length=1)
+    variety_cd: str = Field(..., min_length=1)
+    grade_cd: str = Field(..., min_length=1)
+    size_cd: str = Field(..., min_length=1)
+    weight: float
+    harvest_year: int
+    wh_cd: str = Field(..., min_length=1)
+    initial_qty: float = Field(..., gt=0)
+    reason_cd: str = Field(..., min_length=1)
+    memo: str = ""
+
+
 class StockAdjustResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
