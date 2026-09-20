@@ -47,7 +47,7 @@
 | R23 | PC_FOLLOWUP | legacy AUCTION_RT 정리 | 경로 **존재** | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 · 삭제 금지 | PC 재사용 게이트 | **LOW** | **CAN-DEFER** |
 | R24 | PC_FOLLOWUP | PC 경매 UI | 없음 · Mobile SSOT | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 | PC 재사용 게이트 | **LOW** | **CAN-DEFER** |
 | R25 | PC_FOLLOWUP | 3B 모바일 배정 UI | API만 | — | DEC-021 후순위. **PC 보류 결정에 포함하지 않음** (모바일 독립) | A12 API | **LOW** | **CAN-DEFER** |
-| R26 | USER_FEATURE | 경매조회 | **DESIGN APPROVED** · [12](./12_today_auction_design.md) | — | 판매관리 5탭 `경매` · `/orders?tab=auction` · `GET /api/v1/market-auctions`. 우선순위 **P1**. **Stage 8 blocker 아님** | 대표 최종 승인 (2026-09-20) | **MEDIUM** | **NOT-STAGE8** |
+| R26 | USER_FEATURE | 경매조회 | **IMPLEMENTED** · [12](./12_today_auction_design.md) | **OPS-VERIFIED** · runtime `0617796` | 판매관리 5탭 `경매` · `/orders?tab=auction` · `GET /api/v1/market-auctions` · 오늘·과거 `katRealTime2` 건별 · 등급/크기 미표시. **Stage 8 blocker 아님** | 배포 PASS (2026-09-20) | **MEDIUM** | **NOT-STAGE8** |
 
 **IMPLEMENTATION_INCOMPLETE (코딩 게이트):** 없음. F-4/DEC-016/3B는 정책·후순위.
 
@@ -57,7 +57,7 @@
 
 **R25**는 3B 모바일 배정 UI(DEC-021). PC 기능이 아니며 이번 PC 보류에 **포함하지 않음**. 기존 독립 CAN-DEFER 유지.
 
-**R26** 경매조회: 분류 `USER_FEATURE` · 우선순위 **P1** · 상태 **DESIGN APPROVED**. Stage 8 remaining/blocker **아님**. Stage 8 **FINAL PASS 불변**. R25·PC DEFERRED 미변경.
+**R26** 경매조회: 분류 `USER_FEATURE` · 상태 **IMPLEMENTED / OPS-VERIFIED** (`0617796`). Stage 8 remaining/blocker **아님**. Stage 8 **FINAL PASS 불변**. 규격 필터 UI 등 OPEN/CAN-DEFER는 [12](./12_today_auction_design.md) §11. R25·PC DEFERRED 미변경.
 
 ## ④ 통합회귀 (2026-09-20)
 
@@ -95,7 +95,7 @@ Stage 8 **기능 통합회귀: PASS** (R01~R05). **배포 추적성: PASS / DEPL
 | 5 | 운영 smoke | R01–R04. 정산 API 장애 시 R02만 부분 HOLD |
 | 6 | PC 후속 R19–R24 | **Stage 8 remaining/blocker 아님.** `DEFERRED — PC NOT IN USE`. 재사용 시 별도 게이트 |
 | 7 | 3B 모바일 배정 UI (R25) | PC와 무관. DEC-021 후순위 CAN-DEFER 유지 |
-| 8 | 경매조회 (R26) | **Stage 8 blocker 아님.** DESIGN APPROVED. 구현은 별도 게이트 |
+| 8 | 경매조회 (R26) | **Stage 8 blocker 아님.** IMPLEMENTED / OPS-VERIFIED (`0617796`). 규격 필터 등 OPEN은 별도 |
 
 ```
 preflight(완료) → backup 확인(R05) → 통합회귀 스모크(R01–R04)

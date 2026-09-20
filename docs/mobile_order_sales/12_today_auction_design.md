@@ -1,10 +1,11 @@
 # 12. 경매조회 — UX · READ API 설계
 
-**상태:** **DESIGN APPROVED** (2026-09-20 대표 최종 승인). **미구현.**  
+**상태:** **IMPLEMENTED / OPS-VERIFIED** (2026-09-20).  
+**deployed RUNTIME_SHA:** `06177967a37ea6d631c353207bcabe8e3c1c6276`  
 **기능명/탭명:** `경매`  
 **성격:** 판매관리 5번째 탭에서 지정 날짜의 **경매 결과**를 조회한다. 출고·수금 업무와 섞지 않는다.
 
-**금지:** DDL/settlement 스키마 변경 승인 아님. 후보매칭 API 재사용 금지. 등급·과수 추정 금지. 사용자가 source(실시간/정산)를 구분하게 하지 않음.
+**금지:** DDL/settlement 스키마 변경 승인 아님. 후보매칭 API 재사용 금지. 등급·과수 추정 금지. 사용자가 source(실시간/정산)를 구분하게 하지 않음. **합산 정산(`katSale`)을 본 화면 SSOT로 쓰지 않음.**
 
 Stage 8 **FINAL PASS**와 무관. 구현은 **R26** ([11](./11_stage8_remaining_work.md)).
 
@@ -19,6 +20,16 @@ Stage 8 **FINAL PASS**와 무관. 구현은 **R26** ([11](./11_stage8_remaining_
 - 화면의 당일 경매 / 정산완료 / 진행중 badge
 - 카드형 결과 리스트
 - PC식 이전/다음 페이지
+
+### SUPERSEDED (과거 katSale 설계)
+
+아래는 **폐기** (2026-09-20 대표 승인 A안). 구현·회귀에 쓰지 않는다.
+
+- 과거일 source = `katSale` 정산 합산
+- 과거일 등급·크기 표시를 위해 정산을 SSOT로 사용
+- 정산 행을 과수원·출하 건 식별용으로 사용
+
+**이유:** 정산은 시·군·등급·크기·가격 등으로 합산되어 다른 과수원이 한 행에 섞일 수 있음.
 
 ---
 
@@ -36,15 +47,14 @@ analysis mirror `views/orders`를 private에 강제하지 않는다.
 |------|------|
 | 하단 5메뉴 | `mobile/src/components/ods/OdsBottomNav.vue` — **변경 없음** |
 | 판매관리 탭 SSOT | `mobile/src/features/orders/ordersConstants.ts` (`ORDER_SALES_SEGMENT_OPTIONS`) |
-| 경매 탭 화면 | **`mobile/src/features/orders/OrderView.vue`** (같은 파일, `?tab=auction`) |
-| 탭 query | 기존 `applyTabQuery` (`pack_prod`/`stock`/`order`/`sales`)에 `auction` 추가 |
-| 라우터 | `mobile/src/router/index.ts` — `/orders` 유지. **신규 path 없음** |
+| 경매 탭 화면 | **`mobile/src/features/orders/OrderView.vue`** + **`AuctionTabPanel.vue`** (`?tab=auction`) |
+| 탭 query | 기존 `applyTabQuery`에 `auction` |
+| 라우터 | `/orders` 유지. **신규 path 없음** |
 | 시장/청과 lookup | `GET /api/v1/auction-markets`, `GET /api/v1/auction-corporations` |
-| 실시간 | `core/market_price_manager.py` `MarketPriceManager` |
-| 과거 원본 | `MarketSettlementManager.fetch_sale_data` (1차 katSale) |
+| 오늘·과거 원본 | `katRealTime2` (`core/market_auction_query.py` → `MarketPriceManager`) |
 | 후보매칭 (재사용 금지) | `…/auction-shipments/{id}/auction-candidates` |
 
-신규(미구현) 후보: `mobile/src/api/marketAuctions.ts`, `server/app/routers/market_auctions.py`.
+구현: `mobile/src/api/marketAuctions.ts`, `server/app/routers/market_auctions.py`, `GET /api/v1/market-auctions`.
 
 ---
 
@@ -64,9 +74,9 @@ analysis mirror `views/orders`를 private에 강제하지 않는다.
 
 한 화면 구성 (위→아래):
 
-1. **조회조건** — 항상 펼침
-2. **요약** 3지표
-3. **경매조회 결과** compact list
+1. **조회조건** — 조회일자 + 상세조건(품종·시장·청과·산지 chip)
+2. **전체 경매 / 내 경매** 모드
+3. **경매조회 결과** 표형 리스트 (table 내부 가로스크롤)
 4. **더보기** (있을 때만)
 
 제목: `경매결과 {total_count}건` (천단위 콤마). 예: `경매결과 1,135건`
@@ -126,16 +136,18 @@ From–To **없음**. 단일 **조회일자**.
 
 | 조회일자 | 서버 source |
 |----------|-------------|
-| 오늘 KST | `katRealTime2/trades2` |
-| 과거 | `katSale` 원본 READ |
+| 오늘 KST | `katRealTime2/trades2` **건별** |
+| 과거 | `katRealTime2/trades2` **건별** (정산 합산 미사용) |
+| 미래 | reject |
 
-`source_type`은 서버 로그/디버그용. **모바일 기본 UI 비노출.**
+`katSale`은 본 화면 source에서 **제외**. `source_type`은 서버 로그/디버그용. **모바일 기본 UI 비노출.**
 
 ---
 
 ## 5. 요약 · 계산
 
-요약은 **필터 전체** 기준 (현재 페이지가 아님).
+요약은 **필터 전체** 기준 (현재 페이지가 아님).  
+현재 UI는 요약 카드 대신 **표형 리스트** 중심 (요약 카드 비노출 가능).
 
 | 지표 | 단위 |
 |------|------|
@@ -143,23 +155,15 @@ From–To **없음**. 단일 **조회일자**.
 | 총 경매중량 | kg |
 | 총 경매금액 | 원 |
 
-**오늘 (realtime):**
+**오늘·과거 공통 (realtime 건별):**
 
 ```
 box    = qty
 weight = qty × unit_qty
-amount = qty × scsbd_prc    # 원본 totprc 없음. 계산값.
+amount = qty × scsbd_prc
 ```
 
-**과거 (katSale):** 원본 계약 우선.
-
-```
-weight = unit_tot_qty       # kg
-box    = unit_tot_qty / unit_qty   # 정수일 때만
-amount = totprc
-```
-
-박스 비정수는 해당 행 박스 생략 · 중량·금액만 (OPEN-BOX-QTY). 반올림 추정 금지.
+공개 DTO에 **등급·크기 필드 없음**. 추정·보정 금지.
 
 ---
 
@@ -299,24 +303,37 @@ Server memory cache. DB 적재 없음.
 
 ## 10. 과거일 데이터
 
-화면 계약에 산지·경매금액이 있으므로 **katSale 원본 READ (B)**.  
-`market_price_settlement` (A)는 산지·totprc 없음 → 이 화면 1차 SSOT 아님. DDL 없음.
+**SSOT = `katRealTime2` 건별.** 과거 katSale 합산은 SUPERSEDED.  
+`market_price_settlement` 로컬 테이블도 본 화면 SSOT 아님. DDL 없음.
+
+### 산지 facet 규칙 (CURRENT)
+
+- 산지 필터가 걸린 동안: 자기 결과로 산지 chip 목록을 **재구성하지 않음** (칩 소실 방지)
+- 산지 `전체` 복귀: 넓은 결과로 chip 목록 **복원**
+- chip 후보의 1차 소스는 조회 결과(페이지·더보기 병합). 전수 facet API 없음
+
+### 규격 필터 UI
+
+**미구현 / CAN-DEFER.** 별도 승인 전 완료로 쓰지 않음.
 
 ---
 
 ## 11. OPEN / 확정 구분
 
-**확정:** 5탭 `경매`, `OrderView` + `?tab=auction`, 조회일자 단일, 필터 5필드(품목 숨김), compact list, 더보기 50, 사용자 source 비구분, 등급·과수 1차 제외, API `GET /api/v1/market-auctions`, 당일 계산식, 과거 katSale, cache 60초, 상세화면 없음.
+**확정·배포:** 5탭 `경매`, `OrderView` + `AuctionTabPanel`, 조회일자 단일, 필터(품종·시장·청과·산지 chip), 표형 리스트 + table 내부 가로스크롤, 더보기 50, 사용자 source 비구분, **등급·크기 미표시**, API `GET /api/v1/market-auctions`, **오늘·과거 모두 realtime 건별**, cache 60초, 상세화면 없음. **OPS RUNTIME_SHA `0617796`.**
 
-| ID | OPEN |
+| ID | OPEN / CAN-DEFER |
 |----|------|
 | OPEN-TODAY-AUTH | `X-User-Id` 필수 여부 |
 | OPEN-TODAY-ORIGIN-MATCH | 산지 필터 = 코드 vs 시/군 문자 |
 | OPEN-CORP-ID | `corporation_cd` 없는 소스 시 명칭 키 |
-| OPEN-BOX-QTY | 정산 행 박스 비정수 표시 |
+| OPEN-SPEC-FILTER | 규격(7.5/15kg) 필터 UI — **미구현** |
+| OPEN-FACET-FULL | 산지 chip 전수 facet (현재는 결과 기반) |
 | OPEN-TAB-LABEL | 360px 5탭 라벨 말줄임 |
 | OPEN-TTL-TUNE | 60초 실사용 후 조정 |
 | OPEN-MARKET-ANALYSIS | 이후 시장분석 확장 위치 |
+
+`OPEN-BOX-QTY`(정산 비정수 박스)는 과거 katSale SUPERSEDED로 **해당 없음**.
 
 ---
 
@@ -326,5 +343,7 @@ Server memory cache. DB 적재 없음.
 - 경매 상세 화면 (1차)
 - 출하 경락매칭
 - PC 시세, settlement DDL
-- 당일 등급·과수 보정
-- 자동 polling, push/deploy
+- 등급·과수 추정/보정
+- 자동 polling
+- 규격 필터 UI (승인 전)
+- Stage 8 FINAL PASS 변경
