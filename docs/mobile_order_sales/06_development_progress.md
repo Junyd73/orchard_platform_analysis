@@ -11,23 +11,43 @@
 | 구분 | 의미 |
 |------|------|
 | **CURRENT IMPLEMENTATION** | repo·코드에서 확인된 사실 |
-| **IMPLEMENTED IN GIT** | repo `main`에 merge된 구현 (DEC-035 A~C) |
+| **IMPLEMENTED IN GIT** | repo `main`에 merge된 구현 |
 | **REHEARSAL PASS** | copy DB migration/E2E 검증 (D1/D2) |
-| **OPS APPLIED** | PC·Lightsail 운영 DB DDL + code/deploy **적용 완료** |
-| **OPERATIONAL PASS** | 실제 운영환경 PC/Mobile HARVEST N:M **실사용 확인** |
+| **OPS APPLIED** | PC·Lightsail 운영 DB DDL + code/deploy **적용 완료** (실제 확인 시에만) |
+| **OPERATIONAL PASS** | 실제 운영환경 PC/Mobile **실사용 확인** (실제 확인 시에만) |
 | **OPS PENDING** | *(과거)* 운영 미적용 — **DEC-035는 2026-08-31 종료** |
-| **APPROVED NEXT DESIGN** | DEC-036/037 등 **설계 승인** · **미구현** |
+| **APPROVED NEXT DESIGN** | *(섹션 앵커 유지)* 과거에는 설계 승인·미구현 표기. **DEC-036/037 git 구현은 CURRENT Stage 7** |
 | **HISTORICAL SNAPSHOT** | 과거 당시 merge·테스트·배포 기록 |
 
 **표기 원칙:**
 
-- **Core/API** · **git main** · **ops 배포** · **ops DDL**을 `완료·운영` 한 단어로 **뭉개지 않음**
-- `git main 반영` = repo 사실 · `ops 미배포` = 문서·SHA 기준 확인 범위 · `ops 상태 미확인` = 외부 미확인
-- ops 상태는 **실제 배포/DB 확인이 있을 때만** 확정. 이번 문서 수정 시 ops SSH/DB **미확인**
-- 2026-08-31 **DEC-035 OPERATIONAL PASS** · PC·Lightsail **OPS APPLIED**
+- **코드 구현** · **git main 반영** · **ops 배포** · **ops DDL** · **실사용 PASS**를 한 단어로 **뭉개지 않음**
+- `git main 반영` = repo 사실 · `ops 미배포` = 문서·SHA 기준 확인 범위 · `ops 상태 미확인` = 이번 조사에서 외부 미확인
+- ops 상태는 **실제 배포/DB 확인이 있을 때만** 확정. 추측으로 `OPS APPLIED` **금지**
+- 2026-08-31 **DEC-035 OPERATIONAL PASS** · PC·Lightsail **OPS APPLIED** *(당시 확인 SHA `4daae03`)*
 - 2026-08-28 **DEC-035 IMPLEMENTED IN GIT** · D1/D2 **REHEARSAL PASS** *(과거)*
 
-**조사 기준:** git `main` @ `6e9ae87` (2026-08-31) · Lightsail ops code **`4daae03`** (DEC-035 **배포 완료**) · ops backend 기록 SHA `b48ca8b` (Stage5, **과거 이력**)
+**조사 기준 (2026-09-20):**
+
+| 구분 | SHA / 상태 |
+|------|------------|
+| private local `main` (HEAD) | **`63abc6e`** (`63abc6e76869108ec8fd390744afcead70e030c5`) `style: refine juice stock registration action` |
+| `origin/main` | **동일 `63abc6e`** |
+| analysis mirror `main` | **`64c48b5`** (`64c48b5461059f97629ac89c19d497203aee7a51`) `chore(mirror): sync from private 63abc6e` (2026-09-08). **private 내용과 동일 스냅샷** · mirror wrapper 1커밋이 위에 있음. **뒤처짐 아님** |
+| 기존 06 조사 기준 `6e9ae87` | **stale** (2026-08-31 DEC-035 당시) |
+| 이번 OPS SSH/DB | **미확인** (시크릿 경로 점검 미실행). 마지막 **문서 확정** Lightsail code SHA = **`4daae03`** (2026-08-31, DEC-035만). 그 이후 auction/juice/sales UX **현재 배포 여부 미확인** |
+| 워킹트리 (미커밋, 본 문서와 무관) | `AuctionMatchSheet.vue` dirty · `server/tests/_full_out.txt` untracked · stash `pre-ops-dec037-unrelated` — **미수정** |
+
+---
+
+## CHANGELOG — 개발진행 문서 최신화 (2026-09-20)
+
+| 항목 | 내용 |
+|------|------|
+| 조사 기준 | private/`origin/main` **`63abc6e`** · analysis **`64c48b5`** (sync from `63abc6e`) · 구기준 `6e9ae87` **stale** |
+| Stage 7 | DEC-036/037 **git IMPLEMENTED** (출하→IN_TRANSIT→후보→매칭/차이→finalize→COMPLETED→reopen). **ops 배포/DDL/실사용 미확인** |
+| 배즙 확장 | 주문 leaf · 재고 포장규격 · initial API · 목록 표기 · 재고등록 UX (`27d8dd2`…`63abc6e`) · **ops 미확인** |
+| 본 작업 | `06_development_progress.md` CURRENT만 갱신. 코드/DDL/deploy/push **없음** |
 
 ---
 
@@ -51,7 +71,7 @@
 
 ---
 
-## CHANGELOG — DEC-035 구현·rehearsal (2026-08-28) *(과거 이력 — 상단 CHANGELOG가 CURRENT)*
+## CHANGELOG — DEC-035 구현·rehearsal (2026-08-28) *(과거 이력 — DEC-035 운영 기록은 바로 위 2026-08-31 CHANGELOG)*
 
 ## CHANGELOG — 설계 재정합 (2026-08-27~28) *(과거)*
 
@@ -102,47 +122,79 @@
 |-------|------|----------|----------|-----------|
 | 0 | 주문·판매·재고 설계 / PC 기준 | — | — | HISTORICAL (2026-08-17) |
 | 1 | 모바일 진입·메뉴·라우팅 | **구현** | **반영** | ops 반영 (과거 기록) |
-| 2 | 주문 조회·등록·수정·취소 | **구현** | **반영** | ops 반영 (과거 기록) |
-| 3 (=H) | 수확기록 · **HARVEST N:M** (DEC-035) | **구현** | **반영** (`4daae03` 계열) | consumption DDL **OPS APPLIED** · **OPERATIONAL PASS** |
-| 4 (=P) | 생산/변환 PACK·PROCESS | **구현** | **반영** | core 반영 · ops **미확인** |
+| 2 | 주문 조회·등록·수정·취소 · **배즙 주문 leaf** | **구현** | **반영** (`27d8dd2`·`44c85e4`) | 주문 기본 ops 반영(과거) · **배즙 주문 ops 미확인** |
+| 3 (=H) | 수확기록 · **HARVEST N:M** (DEC-035) | **구현** | **반영** (`4daae03` 계열) | consumption DDL **OPS APPLIED** · **OPERATIONAL PASS** (2026-08-31) |
+| 4 (=P) | 생산/변환 PACK·PROCESS (배즙 leaf `FR010201`/`FR010202`) | **구현** | **반영** | core 반영 · ops **미확인** |
 | 5A (=3A) | 재고배정 HOLD/RELEASE/allocation | **구현** | **반영** (`OrderAllocationService`) | **ops allocation DDL 별도 게이트** · ops 적용 **미확인** |
-| 5B | fruit-stock 조회·이력 | **구현** | **반영** | ops **미확인** |
-| 5C (=S) | OrderShip — 판매+OUT (**경매 출하 아님**) | **구현** | **반영** | Stage6 UX ops **`fd963e0` 계열** · trace DDL ops **미확인** |
-| 6 | ShipConfirm UX · Order→Ship Step1~3 | **구현** | **반영** | ops **`fd963e0` 계열** (과거 기록) |
-| 7* | 경매 출하→청과→판매확정→정산 | — | — | **APPROVED NEXT** ([아래](#approved-next-design)) |
-| 8* | 통합 회귀 · 단계적 migration · 배포 | — | — | **예정** |
+| 5B | fruit-stock 조회·이력 · **배즙 신규재고/목록 규격** | **구현** | **반영** (`09147d9`·`3d7a21a`·`63abc6e`) | ops **미확인** |
+| 5C (=S) | OrderShip — 판매+OUT (**경매 출하 아님**) | **구현** | **반영** | Stage6 UX ops **`fd963e0` 계열**(과거) · trace DDL ops **미확인** |
+| 6 | ShipConfirm UX · Order→Ship Step1~3 · 판매목록·상세·수금 | **구현** | **반영** (판매 UX `e4a3ffe` 등) | 출고 UX ops **`fd963e0` 계열**(과거) · 6A~7B/S4A **미배포 기록 유지** · 이후 판매 UX **ops 미확인** |
+| 7* | 경매 출하→청과매칭→판매확정→정정 (DEC-036/037) | **구현** | **반영** | **ops 배포/DDL/실사용 미확인** — [아래 분해](#stage-7-경매-흐름--coreapimobileops) |
+| 8* | 통합 회귀 · 단계적 migration · 배포 | — | — | **예정** (다음 게이트) |
 
-\*Stage 7·8은 **기존 게이트 번호 유지**. Stage 7 **TARGET 의미만** 갱신. 신규 Stage 번호 **부여 없음**.
+\*Stage 7·8은 **기존 게이트 번호 유지**. 신규 Stage 번호 **부여 없음**. Stage 7은 **더 이상 APPROVED NEXT/미구현이 아님** (`main` 코드 기준).
 
-**HARVEST N:M (DEC-035):** **OPERATIONAL PASS** — PC·Lightsail **OPS APPLIED** · Mobile/PC **실사용 PASS**.
+**HARVEST N:M (DEC-035):** **OPERATIONAL PASS** — PC·Lightsail **OPS APPLIED** · Mobile/PC **실사용 PASS** *(2026-08-31 확인)*.
+
+### Stage 7 경매 흐름 — Core/API/Mobile/ops
+
+| 흐름 | Core | API | Mobile | git main | ops |
+|------|------|-----|--------|----------|-----|
+| 경매보내기 | `AuctionShipService.create` · 즉시 `AUCTION_SHIP` OUT (`28044dc`) | `POST …/auction-shipments` (`af5d817`) | `AuctionShipConfirmSheet` (`eadbbb0`) | **반영** | **미확인** |
+| IN_TRANSIT | `status=IN_TRANSIT` · available = in−out−reserved | `GET` list `status` | 출하중 목록·필터 (`04b8a5c`) | **반영** | **미확인** |
+| 후보조회 | `AuctionCandidateService` · 정산 우선·realtime fallback (`f806d07`) | `GET …/auction-candidates` | `AuctionMatchSheet` (`9cccee1`) | **반영** | **미확인** |
+| 매칭/수량차이 | spec별 `diff_qty` · discrepancy 필수 (`7649fa9`·`38f5e1f`) | finalize body `source_key`만 | 비교표·차이처리 | **반영** | **미확인** |
+| finalize | `AuctionFinalizeService` · `sales_source=AUCTION` · 추가 OUT 없음 | `POST …/finalize` (`ddc79a5`) | 최종확인 | **반영** | **미확인** |
+| COMPLETED | shipment `COMPLETED` + `sales_no` | list `COMPLETED` | COMPLETED 액션/필터 | **반영** | **미확인** |
+| reopen/correction | `AuctionCorrectionService.reopen` (`eb3f639`) | `POST …/reopen` (`3f7ea8d`) | `AuctionReopenConfirmSheet` (`9f7ae4e`) | **반영** | **미확인** |
+
+**F-4** 반품/수금 reverse · **DEC-016** `t_sales_delivery` · **실사용 PASS** → **OPEN / 미구현 / 미확인** (닫지 않음).
+
+### 최근 추가 기능 — 배즙 주문/재고 확장
+
+`main` @ `63abc6e` (2026-09-08). **코드 구현 · git main 반영. ops 배포/실사용 미확인.**
+
+| 항목 | 사실 | 증거 |
+|------|------|------|
+| 주문 판매품목 배/배즙 | 주문 라인 `판매품목` 배·배즙 | `27d8dd2` · `OrderNewView` · `LABEL_PRODUCT_KIND` |
+| FR010201/202 leaf item | 신규 주문은 일반배즙 `FR010202` / 도라지배즙 `FR010201`. `FR010200` 레거시 제외 | `ordersConstants.ts` · `OrderNewView.spec.ts` |
+| 실제재고 기반 포장규격 | fruit-stock 판매가능 규격만 옵션. 유효 key 유지·1건 자동·2건+ 재선택 (`44c85e4`) | `orderJuiceModel.ts` · `QT01` grade |
+| 신규 배즙재고 initial API | `POST /farms/{farm_cd}/fruit-stock/initial` | `09147d9` · `stock_adjust.py` · `createInitialStock` |
+| master + IN + log 단일 TX | `StockAdjustService.create_initial_stock` · `BEGIN IMMEDIATE` · master INSERT + IN delta | `core/stock_adjust_service.py` · `test_stock_adjust_service.py` |
+| 배즙 재고 목록 `품목명 · 포장규격` | `juiceLineSummaryText` · weight/size 미노출 | `3d7a21a` · `StockView.cardTitle` |
+| 배즙 탭 재고등록 UX | 배즙 탭만 `+ 재고 등록` · 필터바와 동일 줄 (`63abc6e`) | `StockView.vue` · `stockInitial.spec.ts` |
 
 ---
 
 ## git main 반영 · ops 상태 (현재 확인 기준)
 
-git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS APPLIED** · **OPERATIONAL PASS**. 아래 Stage6 등은 **별도 ops 미배포** 항목 유지.
+git `main` @ **`63abc6e`**. analysis mirror **`64c48b5`** = sync from private `63abc6e`. DEC-035 HARVEST N:M — 마지막 **확인된** Lightsail **`4daae03`** **OPS APPLIED** · **OPERATIONAL PASS** (2026-08-31). **현재** ops code SHA · backend · mobile/static dist · auction/juice DDL = **이번 조사 미확인**.
 
 | 항목 | Core/API | git main | ops (문서 기준) |
 |------|----------|----------|-----------------|
-| **DEC-035 HARVEST N:M** | **IMPLEMENTED** | **반영** (`4daae03` 계열) | consumption DDL **APPLIED** · code **`4daae03`** · **OPERATIONAL PASS** |
+| **DEC-035 HARVEST N:M** | **IMPLEMENTED** | **반영** (`4daae03` 계열) | consumption DDL **APPLIED** · code **`4daae03`** (2026-08-31) · **OPERATIONAL PASS** |
+| **DEC-036/037 경매** | **IMPLEMENTED** | **반영** (`3ec2032`…`38f5e1f` 등) | **미확인** (배포·DDL·실사용) |
+| **배즙 주문/재고 확장** | **IMPLEMENTED** | **반영** (`27d8dd2`…`63abc6e`) | **미확인** |
 | Stage4 선입금·수금 Core·배분 | **구현** | **반영** | ops 반영 (과거 기록 · `fb413a3`/`b48ca8b` 계열) |
-| Stage5 판매목록 | **구현** | **반영** | ops **`b48ca8b`** (과거 기록) |
-| Stage6-0 수금상태 조회 계약 | **구현** | **반영** | **미배포** |
-| Stage6A 판매상세 GET + Mobile | **구현** | **반영** (`e46b9e5` 계열) | **미배포** |
-| Stage6B payments GET | **구현** | **반영** (`96d690f` 계열) | **미배포** |
-| Stage6C payments POST | **구현** | **반영** (`885144e` 계열) | **미배포** |
+| Stage5 판매목록 | **구현** | **반영** | ops **`b48ca8b`** (과거 기록). 이후 판매목록 UX (`3cfc8d0`·`e4a3ffe`) **ops 미확인** |
+| Stage6-0 수금상태 조회 계약 | **구현** | **반영** | **미배포** (과거 기록 · 이후 재확인 **미확인**) |
+| Stage6A 판매상세 GET + Mobile | **구현** | **반영** (`e46b9e5` 계열 · 이후 UX `2909eb5`) | **미배포** (과거 기록) |
+| Stage6B payments GET | **구현** | **반영** (`96d690f` 계열 · 이후 UX `5b914c1`) | **미배포** (과거 기록) |
+| Stage6C payments POST | **구현** | **반영** (`885144e` 계열) | **미배포** (과거 기록) |
 | Stage7A PC 출고확정 판매 보호 | **구현** | **반영** (`82dba73` 계열) | **미배포** |
 | Stage7B-1/2/7B PC 수금 | **구현** | **반영** | **미배포** |
 | S4A | DIRECT 판매 class Core/API | **구현** | **반영** (`bb8c872`) | **미배포** |
 | DEC-030~034 | Core validation / PC guards | **IMPLEMENTED** | **반영** | ops **미확인** |
+| 5A allocation DDL | **구현** | **반영** | **별도 게이트** · ops **미확인** |
+| auction ship/match DDL | **구현** (로컬/테스트 helper) | **반영** | 운영 자동 ALTER 금지 · ops 적용 **미확인** |
 
-**게이트:** cross-review · ops SHA/DDL 회귀범위 확인 · **배포는 별도 대표 승인** (문서 정합과 분리).
+**게이트:** 전체 기능 체크리스트 · 미완료/미배포 추출 · Stage 8 통합회귀. **배포는 별도 대표 승인** (문서 정합과 분리).
 
 ---
 
 ## APPROVED NEXT DESIGN
 
-설계 상세는 01~05·07·09 참조. **체크 완료 표기 금지.**
+> **앵커 유지.** 본 절 이름은 HISTORY 링크 호환을 위해 남긴다. **DEC-036/037은 더 이상 미구현 다음 설계가 아니다.** git `main` **IMPLEMENTED**. **ops 배포 / ops DDL / 실사용 PASS = 미확인.** 설계 상세는 01~05·07·09 참조. **체크 완료(실사용) 표기 금지.**
 
 ### A. HARVEST N:M — DEC-035 — **OPERATIONAL PASS**
 
@@ -156,7 +208,7 @@ git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS AP
 
 ### B. 경매 출하 — DEC-036
 
-**상태:** **APPROVED LOGICAL** · **APPROVED PHYSICAL** · **Stage A IMPLEMENTED** (2026-09-02).
+**상태:** **IMPLEMENTED IN GIT** (Stage A Core `3ec2032` · API `af5d817` · Mobile `eadbbb0` · 즉시 OUT `28044dc`). **ops 미확인.**
 
 **CURRENT:** 상품재고 다중선택 · 경매 넘기기 · `IN_TRANSIT` · 즉시 `out_qty` + `AUCTION_SHIP` log · available = in−out−reserved · Core 취소 `CANCELLED` · match 이력 있으면 취소 금지.
 
@@ -166,12 +218,16 @@ git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS AP
 
 ### C. 청과 확인/매칭
 
+**상태:** **IMPLEMENTED IN GIT** (후보 Core/API `f806d07` · Mobile `9cccee1` · 수량비교 `38f5e1f`). **ops 미확인.**
+
 **CURRENT (Stage B API + Stage E Mobile):** `GET /api/v1/farms/{farm_cd}/auction-shipments/{shipment_id}/auction-candidates?trade_dt=YYYY-MM-DD`.
 정산 API 원본 우선 → 유효 후보 0이면 realtime fallback. 기본 조회일 `ship_dt+1`. 사용자 최종 선택 · REALTIME 등급 · N행 유지. 0건은 empty UX.
 
-**OPEN:** 없음 (Stage E 재사용).
+**OPEN:** 없음 (Stage E 재사용). 정책 OPEN은 F-4 · DEC-016 유지.
 
 ### D. 경매 판매확정 — DEC-037
+
+**상태:** **IMPLEMENTED IN GIT** — Stage C Core `7649fa9` · Stage D REST `ddc79a5` · Stage E Mobile `9cccee1` · Stage F-1 `eb3f639` · F-2 `3f7ea8d` · F-3 `9f7ae4e`. cardinality `2fc49c9`. **ops 미확인. 실사용 PASS 아님.**
 
 **CURRENT (Stage C Core):** 경락 원본 snapshot · spec별 `diff_qty = matched − farm_shipped` · discrepancy 필수(차이 시) · RETURN만 역FIFO IN · `sales_source=AUCTION` · `sales_dt=trade_dt` · `stock_seq=NULL` · gross 금액 · 추가 OUT/SALE log 없음 · `COMPLETED`. 클라이언트 qty/price/amount 미신뢰.
 
@@ -193,65 +249,52 @@ git `main` @ `6e9ae87`. DEC-035 HARVEST N:M — Lightsail **`4daae03`** **OPS AP
 
 ## 다음 개발 게이트
 
-**후속 개발순서 후보 / 대표 승인 필요** — 신규 Stage 번호 **부여 없음**.
+**후속 개발순서 — 대표 승인 필요.** 신규 Stage 번호 **부여 없음**. DEC-036/037 **구현 순서를 미래 계획으로 두지 않음** (이미 git `main` 반영).
 
-### 문서 게이트
+1. **개발진행 문서 최신화** — 본 작업 (06 CURRENT @ `63abc6e`)
+2. **전체 기능 체크리스트 작성**
+3. **미완료/미배포 항목 추출** (ops SHA/DDL 재확인 포함 · 6A~7B · S4A · allocation · auction/juice)
+4. **Stage 8 통합회귀** — PC/PWA 정합 · **승인된 migration만** 단계 적용 · 사전점검 · rollback · 단계별 회귀 · 최종 배포 승인. allocation/harvest/auction **일괄 적용 표현 금지**
+5. **PC 후속** — 생산확정 HARVEST N:M 화면 UI 보완 등 (blocker 아님)
 
-01~05·07·09·06 정합 → 전체 교차검토 → 대표 승인 → commit/merge
-(**이번 작업에서 commit/merge 실행 없음**)
+**Stage 8:** 통합 회귀 · 승인된 migration · 배포. **현재 예정.**
 
-### 기존 미배포 기능 게이트
-
-git main 반영 · ops 미배포: 6A~7B · S4A 등 — ops SHA · 필요 DDL · 회귀범위 확인 후 **배포 별도 결정**.
-
-### 신규 구현 순서 후보
-
-1. ~~DEC-035 …~~ · ~~DEC-036 물리설계~~ — **APPROVED PHYSICAL (2026-08-31)**
-2. DEC-036 구현 1단계 — 로컬/테스트 DDL + Core 출하 생성 TX
-3. 경매 출하 API/Mobile
-4. 시장/법인 + 청과결과 read/매칭
-5. OPEN-AUCTION-MATCH-CARDINALITY 실데이터 검증
-6. OPEN-QTY-DIFF 정책
-7. DEC-037 경매 판매확정
-8. 통합 회귀 / **승인된** migration / 운영 배포
-
-**Stage 7 (TARGET 의미):** 경매 출하 → 출하중 → 청과 확인/매칭 → 판매확정 → 정산.
-설명형 sub-gate(출하/가용 · 청과/매칭 · 판매확정/정산)로만 분리 — **`7a/7b/7c` 식별자 생성 없음**.
-
-**Stage 8:** 통합 회귀 · PC/PWA 정합 · **승인된 migration만** 단계 적용 · 사전점검 · 의존성 · rollback · 단계별 회귀 · 최종 배포 승인. allocation/harvest/auction **일괄 적용 표현 금지**.
-
-**새 경매 TARGET 흐름:**
+**경매 구현된 흐름 (git, ops 미확인):**
 
 ```
-상품재고 → 경매 넘기기 → 출하중 → 청과 확인/매칭 → 판매확정 → 정산
+상품재고 → 경매 넘기기 → 출하중(IN_TRANSIT) → 청과 후보조회/매칭 → 수량차이 → finalize → COMPLETED
+ → (조건 충족 시) reopen/correction → 재매칭
 ```
 
 ---
 
 ## 구현 전 정책 BLOCKER
 
-정책을 **실제로 닫지 않음**. 개발순서상 **필요 시점**만 표시.
+정책을 **코드 근거 없이 닫지 않음**. `완료`와 `CAN-DEFER`를 섞지 않음.
 
-| 항목 | 분류 | 필요한 시점 |
-|------|------|-------------|
+| 항목 | 분류 | 비고 |
+|------|------|------|
 | 수확 consumption DDL (design) | **CLOSED** | DEC-035-A (`eea8511`) |
 | 생산확정 `prod_confirm_id` (design) | **CLOSED** | DEC-035-B |
-| **OPS consumption DDL apply** | **PENDING** | PC·Lightsail maintenance |
+| **OPS consumption DDL apply** | **OPS APPLIED** | PC·Lightsail 2026-08-31 (당시 SHA `4daae03`) |
 | OPEN-DONE | **CAN-DEFER** | N:M 1차 — **유지 OPEN** |
-| 경매 출하 최소 DDL | **CLOSED** | `t_auction_ship_master`/`detail` — **2026-08-31** |
+| 경매 출하 최소 DDL (design) | **CLOSED** | `t_auction_ship_master`/`detail` — **2026-08-31** |
+| 경매 출하/match **ops DDL 적용** | **미확인** | 로컬/테스트 helper만. 운영 자동 ALTER 금지 |
 | OPEN-SHIP-STATE (v1 `IN_TRANSIT`) | **CLOSED** | 생성 상태 |
-| OPEN-SHIP-STATE (후속) | **OPEN** | 완료/취소/차이 종료 |
-| 가용 집계 방식 | **CLOSED** | §03/05/09 공식 |
+| OPEN-SHIP-STATE (`COMPLETED`/`CANCELLED`) | **CLOSED (Core)** | DEC-037 Stage C/D. **ops 미확인** |
+| 가용 집계 방식 | **CLOSED** | §03/05/09 공식 · 출하 즉시 OUT |
 | stock cardinality | **CLOSED** | Mobile spec → FIFO → line |
 | 시장/법인 MVP SSOT | **CLOSED** | map + snapshot |
-| 시장/법인 REST path | **OPEN** | 모바일 UX |
-| OPEN-AUCTION-MATCH-CARDINALITY | **CLOSED (Core)** | 매칭 write 확정 전 |
-| OPEN-QTY-DIFF | **CLOSED (Core 처리유형)** | 경매 판매확정 전 |
-| 차이 시 confirm 정책 | **CLOSED (Core)** | DEC-037 구현 전 |
-| DRAFT 필수 여부 | **CAN-DEFER** | 구체 API 설계까지 |
-| DEC-016 | **CAN-DEFER** | 경매 confirm MVP와 분리 가능 |
-| 출하 취소/정정 | **CAN-DEFER** | 출하 v1 이후 |
+| 시장/법인 REST path | **IMPLEMENTED IN GIT** | `auction_lookups` · **ops 미확인** |
+| OPEN-AUCTION-MATCH-CARDINALITY | **CLOSED (Core)** | `2fc49c9` 전역 source uniqueness |
+| OPEN-QTY-DIFF | **CLOSED (Core 처리유형)** | 회계·감모 후속은 미닫음 |
+| 차이 시 confirm 정책 | **CLOSED (Core)** | discrepancy 필수 · finalize |
+| 출하 취소 / reopen 정정 | **IMPLEMENTED IN GIT** | cancel + F-1~F-3. **ops 미확인** |
+| F-4 반품/수금 reverse | **OPEN** | 유지 |
+| DRAFT 필수 여부 | **CAN-DEFER** | 유지 |
+| DEC-016 | **OPEN** | 경매 확정 시 `t_sales_delivery` — 유지 |
 | DEC-015 / DEC-020 저장 | **CAN-DEFER** | 경매와 직교 |
+| PC 생산확정 HARVEST N:M UI | **CAN-DEFER** | blocker 아님 · PC 후속 |
 
 ---
 

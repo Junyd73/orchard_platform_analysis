@@ -663,7 +663,7 @@ class AuctionCompleteApiTest(unittest.TestCase):
         self.assertIn(SALES_SOURCE_AUCTION, sources)
         self.assertEqual(sources[SALES_SOURCE_AUCTION]["sales_no"], sales_no)
         self.assertEqual(sources[SALES_SOURCE_AUCTION]["tot_sales_amt"], 180000)
-        self.assertEqual(sources[SALES_SOURCE_AUCTION]["rep_weight"], 0.0)
+        self.assertEqual(sources[SALES_SOURCE_AUCTION]["rep_weight"], WEIGHT)
         self.assertEqual(sources["ORDER"]["tot_sales_amt"], 50000)
         self.assertEqual(sources["DIRECT"]["tot_sales_amt"], 30000)
         detail = SalesQueryService(self.conn).get_sale_detail(FARM, sales_no)
