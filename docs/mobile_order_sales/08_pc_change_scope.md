@@ -1,9 +1,28 @@
 # 08. PC 변경 범위
 
+## CURRENT 운영상태 (2026-09-20)
+
+| 항목 | 내용 |
+|------|------|
+| 상태 | **DEFERRED / NOT IN CURRENT OPS SCOPE** |
+| 운영 주체 | Mobile/PWA + Server. **현재 PC 프로그램 미사용** |
+| 코드 | 기존 PC 구현 **삭제하지 않고 보존**. 신규 PC 수정 **중단** |
+| 아래 본문 | 기존 구현·과거 변경기록 **HISTORY 보존**. 재개 시 이 scope를 **그대로 실행하지 말 것** |
+
+PC 프로그램은 폐기하지 않는다. 현재 사용하지 않으므로 후속 개발을 보류하며, 향후 사용 필요 시 당시 최신 Core·DB·업무정책을 기준으로 재조사 후 별도 승인 절차로 개발을 재개한다.
+
+PC 후속 개발 보류는 Mobile/PWA 및 Server 운영·개발의 blocker가 아니다.
+
+재개 전: private main/Core/DB READ ONLY 재조사 → PC 코드/실행파일 vs 최신 규칙 차이 → 보완범위 재설계 → PC 회귀 → 대표 승인. 재검증 전 기존 PC 실행파일을 최신 Mobile/Server와 동등한 운영클라이언트로 간주하지 않는다.
+
 주문/판매 P0 + **재고/생산은 StockPage 유지·확장** (전면 교체 금지).  
 생산/재고 SSOT: [09_production_inventory_flow.md](./09_production_inventory_flow.md) · PC: `ui/pages/stock_page.py`.
 
-## 재고/생산 (PC 현재 — 폐기 금지)
+아래 P0·A절·재고/생산 표는 **HISTORY**. 신규 PC 수정 중단. 재개 시 최신 Core/DB/DEC로 재조사.
+
+---
+
+## HISTORY — 재고/생산 (PC 구현 보존 · 현재 OPS 범위 아님)
 
 | 기능 | StockPage | 비고 |
 |------|-----------|------|
@@ -17,7 +36,7 @@
 
 ---
 
-## P0 반드시 수정 (단계 승인 후)
+## HISTORY — P0 반드시 수정 (당시 기록 보존 · 현재 실행 목록 아님)
 
 기능 기준으로 재정리. 상세 표는 아래 A절.
 

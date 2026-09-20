@@ -44,6 +44,7 @@ import {
 } from '@/views/sales/salesConstants'
 import PackProdPanel from '@/views/production/PackProdPanel.vue'
 import StockView from '@/views/stock/StockView.vue'
+import AuctionTabPanel from '@/views/orders/AuctionTabPanel.vue'
 import {
   CODE_PARENT_STATUS,
   LABEL_FAB_ORDER,
@@ -71,6 +72,7 @@ import {
   ORDER_SALES_SEGMENT_OPTIONS,
   ORDER_STATUS_FILTER_FALLBACK,
   STATUS_FILTER_ALL,
+  TAB_AUCTION,
   TAB_ORDER,
   TAB_PACK_PROD,
   TAB_SALES,
@@ -134,6 +136,7 @@ const isPackProdTab = computed(() => segment.value === TAB_PACK_PROD)
 const isStockTab = computed(() => segment.value === TAB_STOCK)
 const isOrderTab = computed(() => segment.value === TAB_ORDER)
 const isSalesTab = computed(() => segment.value === TAB_SALES)
+const isAuctionTab = computed(() => segment.value === TAB_AUCTION)
 const showFab = computed(() => isOrderTab.value || isSalesTab.value)
 const fabLabel = computed(() => (isOrderTab.value ? LABEL_FAB_ORDER : LABEL_FAB_SALES))
 const statusSelectOptions = computed(() => [
@@ -426,7 +429,13 @@ function isOrdersListPath(path: string): boolean {
 
 function applyTabQuery(tab: unknown) {
   const v = String(tab || '')
-  if (v === TAB_STOCK || v === TAB_SALES || v === TAB_ORDER || v === TAB_PACK_PROD) {
+  if (
+    v === TAB_STOCK ||
+    v === TAB_SALES ||
+    v === TAB_ORDER ||
+    v === TAB_PACK_PROD ||
+    v === TAB_AUCTION
+  ) {
     segment.value = v
   }
 }
@@ -680,6 +689,7 @@ onMounted(() => {
           </OdsButton>
         </div>
       </template>
+      <AuctionTabPanel v-else-if="isAuctionTab" :key="`auction-${farmCd}`" :farm-cd="farmCd" />
     </main>
     <!-- eslint-disable vue/attribute-hyphenation -->
     <OdsFab v-if="showFab" :label="fabLabel" :ariaLabel="fabLabel" @click="onFab">
@@ -716,20 +726,29 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  padding: 0 var(--ods-space-4);
+  padding: 0 2px;
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  font: var(--ods-font-body-2);
+  font: var(--ods-font-caption);
+  font-weight: 600;
   color: var(--ods-color-text-secondary);
   white-space: nowrap;
   cursor: pointer;
   margin-bottom: -1px;
+  letter-spacing: -0.02em;
 }
 .tab-bar__btn--on {
   color: var(--ods-color-primary);
   border-bottom-color: var(--ods-color-primary);
   font-weight: 700;
+}
+@media (min-width: 400px) {
+  .tab-bar__btn {
+    padding: 0 var(--ods-space-4);
+    font: var(--ods-font-body-2);
+    letter-spacing: normal;
+  }
 }
 .order-list {
   --order-col-qty: 2.75rem;

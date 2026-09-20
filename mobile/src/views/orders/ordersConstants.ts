@@ -1,20 +1,30 @@
 /** 판매관리 (단계 2: 주문. 포장/생산·재고·판매 Shell). */
 
+/** 판매관리 (단계 2: 주문. 포장/생산·재고·판매·경매 Shell). */
+
+import {
+  LABEL_AUCTION_TAB,
+  TAB_AUCTION,
+} from '@/views/orders/auctionLookupFormat'
+
+export { LABEL_AUCTION_TAB, TAB_AUCTION }
+
 export const TAB_PACK_PROD = 'pack_prod'
 export const TAB_STOCK = 'stock'
 export const TAB_ORDER = 'order'
 export const TAB_SALES = 'sales'
 
-/** 상단 4탭 — 업무영역 분류(강제 workflow 아님). 초기 선택은 TAB_ORDER. */
+/** 상단 5탭 — 업무영역 분류(강제 workflow 아님). 초기 선택은 TAB_ORDER. */
 export const ORDER_SALES_SEGMENT_OPTIONS = [
   { value: TAB_PACK_PROD, label: '포장/생산' },
   { value: TAB_STOCK, label: '재고' },
   { value: TAB_ORDER, label: '주문' },
   { value: TAB_SALES, label: '판매' },
+  { value: TAB_AUCTION, label: LABEL_AUCTION_TAB },
 ] as const
 
 export const LABEL_PAGE_TITLE = '판매관리'
-export const LABEL_SEGMENT_ARIA = '포장·생산, 재고, 주문, 판매'
+export const LABEL_SEGMENT_ARIA = '포장·생산, 재고, 주문, 판매, 경매'
 export const LABEL_FAB_ORDER = '신규 주문'
 export const LABEL_FAB_SALES = '직접 판매'
 export const LABEL_SHIP = '출고'

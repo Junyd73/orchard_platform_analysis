@@ -49,6 +49,8 @@ Lightsail 조회만. INSERT/UPDATE/DELETE 없음.
 
 `OPS-UNVERIFIED`를 미완료로 치지 않음. 코드 있는 항목은 **OPS-VERIFIED** 또는 **IMPLEMENTED / OPS-UNVERIFIED**.
 
+**CURRENT (2026-09-20):** 위 숫자 요약은 ③ 재분류 스냅샷(행 삭제 없음). G 영역 PC 전용 후속은 상태열만 **DEFERRED — PC NOT IN USE**. **G01 PASS · G08 IMPLEMENTED · G09 OPS-VERIFIED 유지** (Mobile/Core PASS 불변). Stage 8 **FINAL PASS** 유지.
+
 ## 판정 규칙
 
 | 상태 | 의미 |
@@ -59,7 +61,8 @@ Lightsail 조회만. INSERT/UPDATE/DELETE 없음.
 | **IMPLEMENTED / OPS-UNVERIFIED** | git 구현. **PC 바이너리/실기기 반영은 미확인** (Lightsail과 별개) |
 | **IMPLEMENTATION-INCOMPLETE** | 코드 없음/일부만. 이번 목록 **0건** (미착수는 OPEN·DEFERRED) |
 | **OPEN** | 07 정책 미닫음 |
-| **DEFERRED** | 후순위 (3B, PC UX, 문서) |
+| **DEFERRED** | 후순위 (3B, 문서) |
+| **DEFERRED — PC NOT IN USE** | 2026-09-20 대표 결정. PC 미사용 · 코드 보존 · 현재 OPS 범위 제외. Mobile/Server **blocker 아님** |
 | **NOT-APPLICABLE** | 계약상 금지 |
 
 ---
@@ -190,17 +193,19 @@ Lightsail 조회만. INSERT/UPDATE/DELETE 없음.
 
 ## G. PC 정합
 
+**CURRENT (2026-09-20):** G 행 **삭제 없음**. PC 프로그램은 폐기하지 않는다. 현재 사용하지 않으므로 후속 개발을 보류하며, 향후 사용 필요 시 당시 최신 Core·DB·업무정책을 기준으로 재조사 후 별도 승인 절차로 개발을 재개한다. PC 후속 개발 보류는 Mobile/PWA 및 Server 운영·개발의 blocker가 아니다.
+
 | ID | 영역 | 기능 | Core/API | Mobile | PC | DB/DDL | OPS | 테스트/검증 | 상태 | 비고 |
 |----|------|------|----------|--------|----|--------|-----|-------------|------|------|
-| G01 | PC | HARVEST N:M 위임 | ProductionService | Mobile SSOT | `save_production_log` | consumption **존재** | E1 + 재확인 | client tests | **PASS** | |
-| G02 | PC | HARVEST N:M 화면 UI 보완 | — | — | 06 별도 단계 | — | — | CAN-DEFER | **DEFERRED** | |
-| G03 | PC | protected CONFIRMED | `is_shipment_confirmed_sale_locked` | — | `sales_page` | — | **PC 바이너리 미확인** | 7A tests · DEC-031 | **IMPLEMENTED / OPS-UNVERIFIED** | Lightsail≠PC exe |
-| G04 | PC | 수금 append-only | 동일 Core | Mobile은 E08 | 7B-2 UI | cash | **PC 미확인** | 7B tests | **IMPLEMENTED / OPS-UNVERIFIED** | |
-| G05 | PC | SalesPaymentService 공용화 | 동일 클래스 | POST payments | sales_page 호출 | — | **PC 미확인** | 08 A13 | **IMPLEMENTED / OPS-UNVERIFIED** | |
-| G06 | PC | legacy AUCTION_RT | — | 비SSOT | `save_realtime_auction_draft` | DRAFT | 레거시 | DEC-010 SUPERSEDED | **IMPLEMENTED** | 정리 여부는 정책 |
-| G07 | PC | 경매 출하/매칭 UI | REST 있음 | Mobile SSOT | **없음** | — | — | | **DEFERRED** | |
-| G08 | PC | 출고 confirm 미위임 | FastAPI | `/orders/ship` | 비위임 | — | — | 5C | **IMPLEMENTED** | 의도적 |
-| G09 | PC | 배즙 PROCESS leaf | ProductionService | PackProd | `juice_kind_combo` | leaf item | SHA `63abc6e` (API) | stock_page | **OPS-VERIFIED** | PC 콤보=동일 커밋 |
+| G01 | PC | HARVEST N:M 위임 | ProductionService | Mobile SSOT | `save_production_log` | consumption **존재** | E1 + 재확인 | client tests | **PASS** | Core 위임 · Mobile/Core 불변 |
+| G02 | PC | HARVEST N:M 화면 UI 보완 | — | — | 06 별도 단계 | — | — | CAN-DEFER | **DEFERRED — PC NOT IN USE** | PC 재사용 시 재검토 |
+| G03 | PC | protected CONFIRMED | `is_shipment_confirmed_sale_locked` | — | `sales_page` | — | **PC 바이너리 미확인** | 7A tests · DEC-031 | **DEFERRED — PC NOT IN USE** | 코드 보존 · exe≠현재 운영 |
+| G04 | PC | 수금 append-only | 동일 Core | Mobile은 E08 | 7B-2 UI | cash | **PC 미확인** | 7B tests | **DEFERRED — PC NOT IN USE** | Mobile 수금 SSOT 유지 |
+| G05 | PC | SalesPaymentService 공용화 | 동일 클래스 | POST payments | sales_page 호출 | — | **PC 미확인** | 08 A13 | **DEFERRED — PC NOT IN USE** | |
+| G06 | PC | legacy AUCTION_RT | — | 비SSOT | `save_realtime_auction_draft` | DRAFT | 레거시 | DEC-010 SUPERSEDED | **DEFERRED — PC NOT IN USE** | 삭제 금지 · 정리 여부는 재개 시 |
+| G07 | PC | 경매 출하/매칭 UI | REST 있음 | Mobile SSOT | **없음** | — | — | | **DEFERRED — PC NOT IN USE** | Mobile SSOT |
+| G08 | PC | 출고 confirm 미위임 | FastAPI | `/orders/ship` | 비위임 | — | — | 5C | **IMPLEMENTED** | 의도적 · Mobile/Core 불변 |
+| G09 | PC | 배즙 PROCESS leaf | ProductionService | PackProd | `juice_kind_combo` | leaf item | SHA `63abc6e` (API) | stock_page | **OPS-VERIFIED** | API+juice · Mobile/Core 불변 |
 
 ---
 
@@ -243,5 +248,5 @@ Lightsail 조회만. INSERT/UPDATE/DELETE 없음.
 ## Stage 8 실행 시 주의
 
 - **DDL 일괄 적용은 남은 일이 아님** (필요 테이블/컬럼 OPS 존재).
-- 남은 핵심은 **기능 스모크 · backup/rollback · PC 후속 · 정책 OPEN · 01~09 문구**.
+- 남은 핵심은 **기능 스모크 · backup/rollback · 정책 OPEN · 01~09 문구**. **PC 후속은 Stage 8 remaining/blocker 아님** (`DEFERRED — PC NOT IN USE`).
 - 상세: [11](./11_stage8_remaining_work.md).

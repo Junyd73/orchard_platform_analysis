@@ -37,6 +37,35 @@
 | Stage 8 | **FINAL PASS** · 기능회귀 PASS · 배포 추적성 PASS / DEPLOY-VERIFIED |
 | 워킹트리 (미커밋, 본 문서와 무관) | `AuctionMatchSheet.vue` dirty · `server/tests/_full_out.txt` untracked · stash `pre-ops-dec037-unrelated` — **미수정** |
 
+### PC 프로그램 운영 결정 — DEFERRED
+
+**대표 확정 (2026-09-20).** 현재 운영 주체는 Mobile/PWA + Server. PC 프로그램은 **현재 사용하지 않음**.
+
+PC 프로그램은 폐기하지 않는다. 현재 사용하지 않으므로 후속 개발을 보류하며, 향후 사용 필요 시 당시 최신 Core·DB·업무정책을 기준으로 재조사 후 별도 승인 절차로 개발을 재개한다.
+
+PC 후속 개발 보류는 Mobile/PWA 및 Server 운영·개발의 blocker가 아니다.
+
+- Stage 8 **FINAL PASS** 이후 **모바일 운영 계속**
+- PC 전용 신규개발/UX 보완 **즉시 중단** · 현재 운영 지원 대상 **제외**
+- 기존 PC 코드 **삭제 금지 · 보존**
+- PC 후속은 Mobile 운영 **blocker 아님**. 재개 시 **별도 개발 게이트**
+- 재검증 전 기존 PC 실행파일을 최신 Mobile/Server와 동등한 운영클라이언트로 **간주하지 않음**
+
+재사용 전 필수: (1) 당시 private main/Core/DB 계약 READ ONLY 재조사 (2) PC 코드/실행파일 vs 최신 업무규칙 차이 (3) 보완범위 재설계 (4) PC 회귀테스트 (5) 대표 승인 후 배포/사용.
+
+기존 「PC HARVEST N:M UI 후속」: **DEFERRED — PC 재사용 시 재검토**.
+
+---
+
+## CHANGELOG — PC 프로그램 DEFERRED (2026-09-20)
+
+| 항목 | 내용 |
+|------|------|
+| Stage 8 | **FINAL PASS 유지**. Mobile 운영 상태 변경 없음 |
+| PC | **DEFERRED / NOT IN CURRENT OPS SCOPE**. 코드 보존 · 신규 개발 중단 |
+| 후속 | HARVEST N:M PC UI 등 = **DEFERRED — PC 재사용 시 재검토**. 재개 시 별도 게이트 |
+| 본 작업 | 문서만. 코드/DDL/deploy/push 없음 |
+
 ---
 
 ## CHANGELOG — Stage 8 FINAL PASS (2026-09-20)
@@ -119,7 +148,7 @@
 
 **RAW (Lightsail):** RAW production E2E **미수행** (**CAN-DEFER**). PC RAW rehearsal **PASS** · 운영 RAW **조회 정상**.
 
-**후속 (blocker 아님):** PC 생산확정 HARVEST N:M **화면 UI 보완** — 모바일 마무리 후 별도 PC 단계.
+**후속:** PC 생산확정 HARVEST N:M **화면 UI 보완** — **DEFERRED — PC 재사용 시 재검토** (Mobile blocker 아님).
 
 *(과거)* 운영 activation 절차·금지 표현은 E1/E2 완료 **이전** 기록 — [CHANGELOG](#changelog--dec-035-구현rehearsal운영-2026-08-28--2026-08-31) 참고.
 
@@ -213,7 +242,7 @@ git `main` @ **`63abc6e`**. analysis mirror **`64c48b5`** = sync from private `6
 
 **OPEN:** **OPEN-DONE** only
 
-**후속 (blocker 아님):** PC 생산확정 HARVEST N:M **화면 UI 보완** — 별도 PC 단계
+**후속:** PC 생산확정 HARVEST N:M **화면 UI 보완** — **DEFERRED — PC 재사용 시 재검토**
 
 ### B. 경매 출하 — DEC-036
 
@@ -264,7 +293,7 @@ git `main` @ **`63abc6e`**. analysis mirror **`64c48b5`** = sync from private `6
 2. **전체 기능 체크리스트 작성**
 3. **미완료/미배포 항목 추출** (ops SHA/DDL 재확인 포함 · 6A~7B · S4A · allocation · auction/juice)
 4. **Stage 8 통합회귀** — PC/PWA 정합 · **승인된 migration만** 단계 적용 · 사전점검 · rollback · 단계별 회귀 · 최종 배포 승인. allocation/harvest/auction **일괄 적용 표현 금지**
-5. **PC 후속** — 생산확정 HARVEST N:M 화면 UI 보완 등 (blocker 아님)
+5. **PC 후속** — **DEFERRED — PC 재사용 시 재검토** (HARVEST N:M UI 등). Mobile/Server **blocker 아님**. 재개 시 별도 게이트.
 
 **Stage 8:** 통합 회귀 · 승인된 migration · 배포. **현재 예정.**
 
@@ -303,7 +332,7 @@ git `main` @ **`63abc6e`**. analysis mirror **`64c48b5`** = sync from private `6
 | DRAFT 필수 여부 | **CAN-DEFER** | 유지 |
 | DEC-016 | **OPEN** | 경매 확정 시 `t_sales_delivery` — 유지 |
 | DEC-015 / DEC-020 저장 | **CAN-DEFER** | 경매와 직교 |
-| PC 생산확정 HARVEST N:M UI | **CAN-DEFER** | blocker 아님 · PC 후속 |
+| PC 생산확정 HARVEST N:M UI | **DEFERRED — PC 재사용 시 재검토** | 현재 PC 미사용 · Mobile blocker 아님 |
 
 ---
 

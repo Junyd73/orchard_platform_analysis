@@ -16,7 +16,7 @@
 - OpenAPI: auction (candidates/cancel/finalize/reopen) · `fruit-stock/initial` · allocations · sales/payments
 - juice **신규 DDL 없음**
 
-미수행: OPS 화면 클릭 스모크 · PC exe 버전. ④ 통합회귀(2026-09-20)는 아래 R01~R06.
+미수행: OPS 화면 클릭 스모크. PC exe는 **현재 운영 범위 아님** (`DEFERRED — PC NOT IN USE`). ④ 통합회귀(2026-09-20)는 아래 R01~R06.
 
 ## Remaining 표
 
@@ -40,17 +40,24 @@
 | R16 | DOC_ALIGNMENT | 01/03 경매 미적용 | git+OPS 테이블 | DDL 존재 | 01/03 층 분리 | 문서 게이트 | **MEDIUM** | **CAN-DEFER** |
 | R17 | DOC_ALIGNMENT | 04 경매 화면 없음 | Auction*Sheet | dist 동 배포창 | 04 CURRENT 화면 | 문서 게이트 | **LOW** | **CAN-DEFER** |
 | R18 | DOC_ALIGNMENT | 02 vs 06 alloc · 08 DEC-028 DDL | — | **alloc·pre_pay OPS 존재** | 08 stale · 06 미확인 해소 반영 | 문서 게이트 | **MEDIUM** | **CAN-DEFER** |
-| R19 | PC_FOLLOWUP | HARVEST N:M PC 화면 보완 | Core 위임됨 | consumption DDL 있음 | UX polish만 | G01 PASS | **LOW** | **CAN-DEFER** |
-| R20 | PC_FOLLOWUP | PC CONFIRMED read-only 운영 PC | git 구현 (7A) | **PC exe 미확인** | 농장 PC 프로그램 SHA/동작 확인 | PC 배포 경로 | **MEDIUM** | **CAN-DEFER** |
-| R21 | PC_FOLLOWUP | PC 수금 append-only 운영 PC | git 구현 (7B) | **PC exe 미확인** | 동상. Mobile 수금은 R01 | Mobile 수금 SSOT | **MEDIUM** | **CAN-DEFER** |
-| R22 | PC_FOLLOWUP | PC SalesPaymentService 공용화 확인 | sales_page 호출 코드 | **PC 미확인** | 페이지 SQL 복제 여부 확인 | R21 | **LOW** | **CAN-DEFER** |
-| R23 | PC_FOLLOWUP | legacy AUCTION_RT 정리 | 경로 **존재** | 레거시 | 유지 vs 안내 분리 · 삭제 금지(정책) | R07/R08 | **LOW** | **CAN-DEFER** |
-| R24 | PC_FOLLOWUP | PC 경매 UI | 없음 · Mobile SSOT | — | 필요 시에만 | Mobile 스모크 | **LOW** | **CAN-DEFER** |
-| R25 | PC_FOLLOWUP | 3B 모바일 배정 UI | API만 | — | DEC-021 후순위 | A12 API | **LOW** | **CAN-DEFER** |
+| R19 | PC_FOLLOWUP | HARVEST N:M PC 화면 보완 | Core 위임됨 | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 | PC 재사용 게이트 | **LOW** | **CAN-DEFER** |
+| R20 | PC_FOLLOWUP | PC CONFIRMED read-only 운영 PC | git 구현 (7A) | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 | PC 재사용 게이트 | **MEDIUM** | **CAN-DEFER** |
+| R21 | PC_FOLLOWUP | PC 수금 append-only 운영 PC | git 구현 (7B) | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 | PC 재사용 게이트 | **MEDIUM** | **CAN-DEFER** |
+| R22 | PC_FOLLOWUP | PC SalesPaymentService 공용화 확인 | sales_page 호출 코드 | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 | PC 재사용 게이트 | **LOW** | **CAN-DEFER** |
+| R23 | PC_FOLLOWUP | legacy AUCTION_RT 정리 | 경로 **존재** | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 · 삭제 금지 | PC 재사용 게이트 | **LOW** | **CAN-DEFER** |
+| R24 | PC_FOLLOWUP | PC 경매 UI | 없음 · Mobile SSOT | **DEFERRED — PC NOT IN USE**. Stage 8 remaining/blocker **제외** | 현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류 | PC 재사용 게이트 | **LOW** | **CAN-DEFER** |
+| R25 | PC_FOLLOWUP | 3B 모바일 배정 UI | API만 | — | DEC-021 후순위. **PC 보류 결정에 포함하지 않음** (모바일 독립) | A12 API | **LOW** | **CAN-DEFER** |
+| R26 | USER_FEATURE | 경매조회 | **DESIGN APPROVED** · [12](./12_today_auction_design.md) | — | 판매관리 5탭 `경매` · `/orders?tab=auction` · `GET /api/v1/market-auctions`. 우선순위 **P1**. **Stage 8 blocker 아님** | 대표 최종 승인 (2026-09-20) | **MEDIUM** | **NOT-STAGE8** |
 
 **IMPLEMENTATION_INCOMPLETE (코딩 게이트):** 없음. F-4/DEC-016/3B는 정책·후순위.
 
 중복 없음. 완료 기능(주문 CRUD, HARVEST N:M DDL, auction 테이블, juice initial 라우트 등)은 표에 넣지 않음.
+
+**PC (2026-09-20):** R19~R24는 **CAN-DEFER 유지**. 사유=현재 PC 미사용 · 대표 결정으로 재사용 시점까지 개발 보류. **Stage 8 remaining/blocker에서 제외.** PC 프로그램은 폐기하지 않는다. 현재 사용하지 않으므로 후속 개발을 보류하며, 향후 사용 필요 시 당시 최신 Core·DB·업무정책을 기준으로 재조사 후 별도 승인 절차로 개발을 재개한다. PC 후속 개발 보류는 Mobile/PWA 및 Server 운영·개발의 blocker가 아니다.
+
+**R25**는 3B 모바일 배정 UI(DEC-021). PC 기능이 아니며 이번 PC 보류에 **포함하지 않음**. 기존 독립 CAN-DEFER 유지.
+
+**R26** 경매조회: 분류 `USER_FEATURE` · 우선순위 **P1** · 상태 **DESIGN APPROVED**. Stage 8 remaining/blocker **아님**. Stage 8 **FINAL PASS 불변**. R25·PC DEFERRED 미변경.
 
 ## ④ 통합회귀 (2026-09-20)
 
@@ -75,7 +82,7 @@ Mobile vitest 599 중 2 FAIL 모두 `AiAnalysisPanel.spec.ts`(관찰 AI). Stage8
 
 R06 close (2026-09-20): runtime deploy SHA **`8db4b997fd4e2108fe8eb88a8d1ddc00d90d7244`**. `GET /build-info.json` `{app:orchard-mobile, source_sha:8db4b99…, build_mode:staging}`. OPS backend git SHA 동일. `backups/deploy.log` append-only. dist.bak **`/var/www/orchard/mobile/dist.bak_20260920100733`**. GET smoke: orders/fruit-stock/sales/auction-shipments 200. 화면: 홈·주문·재고(상품/배즙)·경매출하 UI·판매 조회. 업무 write 없음. DDL 없음. docs-only commit은 재배포하지 않음.
 
-Stage 8 **기능 통합회귀: PASS** (R01~R05). **배포 추적성: PASS / DEPLOY-VERIFIED** (R06). **Stage 8 FINAL PASS.**
+Stage 8 **기능 통합회귀: PASS** (R01~R05). **배포 추적성: PASS / DEPLOY-VERIFIED** (R06). **Stage 8 FINAL PASS.** PC DEFERRED·R26 DESIGN APPROVED는 FINAL PASS·Mobile 운영을 바꾸지 않음.
 
 ## 실행순서
 
@@ -86,9 +93,12 @@ Stage 8 **기능 통합회귀: PASS** (R01~R05). **배포 추적성: PASS / DEPL
 | 3 | 문서 정합 (01~09) | **Stage8 스모크 blocker 아님** (R14–R18 CAN-DEFER). 테스터 혼선만 MEDIUM |
 | 4 | Stage8 통합회귀 | **blocker: R05 backup.** 그다음 R01–R04 |
 | 5 | 운영 smoke | R01–R04. 정산 API 장애 시 R02만 부분 HOLD |
-| 6 | PC 후속 | R19–R25. Mobile 수금이 되면 R21은 비blocker |
+| 6 | PC 후속 R19–R24 | **Stage 8 remaining/blocker 아님.** `DEFERRED — PC NOT IN USE`. 재사용 시 별도 게이트 |
+| 7 | 3B 모바일 배정 UI (R25) | PC와 무관. DEC-021 후순위 CAN-DEFER 유지 |
+| 8 | 경매조회 (R26) | **Stage 8 blocker 아님.** DESIGN APPROVED. 구현은 별도 게이트 |
 
 ```
 preflight(완료) → backup 확인(R05) → 통합회귀 스모크(R01–R04)
- → (병렬 가능) 문서 정합(R14–R18) · PC(R19–R25) · 정책(R07–R13)
+ → (병렬 가능) 문서 정합(R14–R18) · 정책(R07–R13) · R25 3B(모바일, PC 아님) · R26 DESIGN APPROVED
+ → PC R19–R24는 Stage 8 remaining/blocker 제외 (재사용 시 별도 게이트)
 ```
