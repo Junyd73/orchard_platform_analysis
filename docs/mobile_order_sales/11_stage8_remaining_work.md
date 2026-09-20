@@ -27,7 +27,7 @@
 | R03 | OPS_DEPLOY_OR_VERIFY | 배즙 주문·initial 스모크 | 동상 · DDL 없음 | **PASS** · leaf initial/중복차단/FR010200 거부 + 주문·생산 unittest. OPS write 없음 | 운영 클릭 스모크는 별도 | 배즙 재고/QT01 | **MEDIUM** | **REQUIRED** |
 | R04 | OPS_DEPLOY_OR_VERIFY | 재고 available 정합 | in−out−reserved | **PASS** · stock/ship unittest. copy 스냅샷 FR010201/202 각 available 50. OPS 클릭 교차 없음 | 운영 수치 스모크는 별도 | R01/R02 데이터 | **HIGH** | **REQUIRED** |
 | R05 | OPS_DEPLOY_OR_VERIFY | backup / rollback | deploy 스크립트 존재 | **PASS** · `backups/orchard_20260920.db` 6094848 · 로컬 copy+restore rehearsal integrity/schema/count 일치. 운영 DB rollback 없음 | 운영 복원 금지 유지 | SSH | **HIGH** | **REQUIRED** |
-| R06 | OPS_DEPLOY_OR_VERIFY | mobile dist SHA 마커 | 63abc6e 빌드 추정 | **DIST-UNVERIFIED** · clean `63abc6e` staging≠OPS index.js/css/html. lazy chunk SHA 일치. 마커·deploy manifest 없음. 재배포 안 함 | 후속(미구현): SHA marker · `/version` · deploy log에 backend/frontend SHA | — | **LOW** | **CAN-DEFER** |
+| R06 | OPS_DEPLOY_OR_VERIFY | mobile dist SHA 마커 | `build-info.json` · deploy.log | **PASS / DEPLOY-VERIFIED** · runtime `8db4b99` · `/build-info.json` source_sha 일치 · dist.bak_20260920100733 | 종료. docs-only 재배포 없음 | — | **LOW** | **REQUIRED** |
 | R07 | POLICY_OPEN | F-4 반품/수금 reverse | **미구현** (reopen은 reject) | — | 정책 결정 전 코딩 금지 | 대표 결정 | **MEDIUM** | **CAN-DEFER** |
 | R08 | POLICY_OPEN | DEC-016 경매 `t_sales_delivery` | finalize에 INSERT **없음** | — | 생성 여부 결정 | 대표 결정 | **LOW** | **CAN-DEFER** |
 | R09 | POLICY_OPEN | OPEN-DONE | DONE≠잔량만 확정 | — | 최종 의미 필요 시에만 | 대표 결정 | **LOW** | **CAN-DEFER** |
@@ -63,7 +63,7 @@
 | ④ R03 HARVEST→생산 | (표 ID 없음) | PASS |
 | ④ R04 경매 | R02 | PASS |
 | ④ R05 backup/rollback | R05 | PASS |
-| ④ R06 dist | R06 | DIST-UNVERIFIED |
+| ④ R06 dist | R06 | PASS / DEPLOY-VERIFIED |
 
 Preflight: OPS backend `63abc6e` · api active · integrity ok · 대상 테이블/컬럼 존재. 운영 mutation/DDL/deploy/push 없음.
 
@@ -73,11 +73,9 @@ Server: order/alloc/ship/stock/sales 470 OK. ④R04 재실행(2026-09-20): `rep_
 
 Mobile vitest 599 중 2 FAIL 모두 `AiAnalysisPanel.spec.ts`(관찰 AI). Stage8 무관. vue-tsc + `build:staging` OK.
 
-R06 (2026-09-20 재조사, 운영 수정 0): worktree detached `63abc6e` · `npm ci` · Node v24.18.0 · vite 8.1.5 · `npm run build:staging` · `.env.staging` `VITE_API_BASE_URL=/api/v1`. 동일 worktree 2회 빌드 hash 동일(결정적). OPS dist mtime **2026-09-08 13:01:24 UTC** (=22:01 KST, `63abc6e` 21:58 KST +~2.5분) · `dist.bak_20260908130125`. `deploy_ops.ps1`는 dist 전체 scp+mv, index rewrite 없음. lazy/route chunk 파일명·sha256=OPS 일치. **index.html / index-*.js / index-*.css 파일명·sha256 불일치** (js/css 바이트 크기는 각각 543424 / 297723로 동일). SHA를 유일하게 특정 불가 → **DIST-UNVERIFIED**. 가장 가까운 창: 2026-09-08 저녁 juice 계열(`09147d9`~`63abc6e`). backend HEAD=`63abc6e`와 byte-identical frontend는 미증명. 대표 승인 전 재배포 금지.
+R06 close (2026-09-20): runtime deploy SHA **`8db4b997fd4e2108fe8eb88a8d1ddc00d90d7244`**. `GET /build-info.json` `{app:orchard-mobile, source_sha:8db4b99…, build_mode:staging}`. OPS backend git SHA 동일. `backups/deploy.log` append-only. dist.bak **`/var/www/orchard/mobile/dist.bak_20260920100733`**. GET smoke: orders/fruit-stock/sales/auction-shipments 200. 화면: 홈·주문·재고(상품/배즙)·경매출하 UI·판매 조회. 업무 write 없음. DDL 없음. docs-only commit은 재배포하지 않음.
 
-후속 제안(미구현): build 시 source SHA marker · `/version` 또는 static manifest · deploy log에 backend/frontend SHA 함께 기록.
-
-Stage 8 **기능 통합회귀: PASS** (R01~R05). **배포 추적성: DIST-UNVERIFIED** (R06). Stage 8 **최종 종료: PENDING** (R06 해결 전). R06 임의 PASS 금지.
+Stage 8 **기능 통합회귀: PASS** (R01~R05). **배포 추적성: PASS / DEPLOY-VERIFIED** (R06). **Stage 8 FINAL PASS.**
 
 ## 실행순서
 

@@ -27,16 +27,25 @@
 - 2026-08-31 **DEC-035 OPERATIONAL PASS** · PC·Lightsail **OPS APPLIED** *(당시 확인 SHA `4daae03`)*
 - 2026-08-28 **DEC-035 IMPLEMENTED IN GIT** · D1/D2 **REHEARSAL PASS** *(과거)*
 
-**조사 기준 (2026-09-20):**
+**조사 기준 (2026-09-20 Stage 8 FINAL):**
 
 | 구분 | SHA / 상태 |
 |------|------------|
-| private local `main` (HEAD) | **`63abc6e`** (`63abc6e76869108ec8fd390744afcead70e030c5`) `style: refine juice stock registration action` |
-| `origin/main` | **동일 `63abc6e`** |
-| analysis mirror `main` | **`64c48b5`** (`64c48b5461059f97629ac89c19d497203aee7a51`) `chore(mirror): sync from private 63abc6e` (2026-09-08). **private 내용과 동일 스냅샷** · mirror wrapper 1커밋이 위에 있음. **뒤처짐 아님** |
-| 기존 06 조사 기준 `6e9ae87` | **stale** (2026-08-31 DEC-035 당시) |
-| 이번 OPS SSH/DB | **미확인** (시크릿 경로 점검 미실행). 마지막 **문서 확정** Lightsail code SHA = **`4daae03`** (2026-08-31, DEC-035만). 그 이후 auction/juice/sales UX **현재 배포 여부 미확인** |
+| private `origin/main` | **`8db4b99`** (`8db4b997fd4e2108fe8eb88a8d1ddc00d90d7244`) provenance 구현. 이후 docs-only close는 runtime과 구분 |
+| OPS runtime (backend+frontend) | **동일 `8db4b99`**. SSOT=`/build-info.json` |
+| analysis mirror `main` | push 후 GHA sync (런타임 SHA와 역할 분리) |
+| Stage 8 | **FINAL PASS** · 기능회귀 PASS · 배포 추적성 PASS / DEPLOY-VERIFIED |
 | 워킹트리 (미커밋, 본 문서와 무관) | `AuctionMatchSheet.vue` dirty · `server/tests/_full_out.txt` untracked · stash `pre-ops-dec037-unrelated` — **미수정** |
+
+---
+
+## CHANGELOG — Stage 8 FINAL PASS (2026-09-20)
+
+| 항목 | 내용 |
+|------|------|
+| Stage 8 | **FINAL PASS**. R01~R05 기능회귀 PASS. R06 `build-info.json` + OPS deploy **DEPLOY-VERIFIED** (`8db4b99`) |
+| 런타임 | backend git SHA = frontend `source_sha` = `8db4b997fd4e2108fe8eb88a8d1ddc00d90d7244` |
+| 본 작업 | 06 CURRENT Stage 8 상태만 최소 갱신. 01~05/07~09 대규모 정리 없음 |
 
 ---
 
